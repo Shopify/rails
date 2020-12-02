@@ -207,9 +207,9 @@ module ActiveSupport
 
         private
           def ascendant_of?(base, other)
-            base != other && other.ascend do |ascendant|
-              break true if base == ascendant
-            end
+            base = base.to_s
+            base = "#{base}/" unless base[-1] == "/"
+            other.to_s.start_with?(base)
           end
       end
   end
