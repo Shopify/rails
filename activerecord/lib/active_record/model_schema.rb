@@ -207,14 +207,6 @@ module ActiveRecord
         @table_name
       end
 
-      def database_name
-        @database_name
-      end
-
-      def database_name=(value)
-        @database_name = value
-      end
-
       # Sets the table name explicitly. Example:
       #
       #   class Project < ActiveRecord::Base
@@ -558,11 +550,7 @@ module ActiveRecord
             raise ActiveRecord::TableNotSpecified, "#{self} has no table configured. Set one with #{self}.table_name="
           end
 
-          unless database_name
-            raise ActiveRecord::TableNotSpecified, "#{self} has no database configured. Set one with #{self}.database_name="
-          end
-
-          columns_hash = connection.schema_cache.columns_hash(table_name, database_name)
+          columns_hash = connection.schema_cache.columns_hash(table_name)
           columns_hash = columns_hash.except(*ignored_columns) unless ignored_columns.empty?
           @columns_hash = columns_hash.freeze
           @columns_hash.each do |name, column|

@@ -27,10 +27,6 @@ module ActiveRecord
         "#{table_name_prefix}#{internal_metadata_table_name}#{table_name_suffix}"
       end
 
-      def database_name
-        "myapp_master"
-      end
-
       def []=(key, value)
         return unless enabled?
 
@@ -47,8 +43,8 @@ module ActiveRecord
       def create_table
         return unless enabled?
 
-        unless connection.table_exists?(table_name, database_name)
-          connection.create_table(table_name, database_name: database_name, id: false) do |t|
+        unless connection.table_exists?(table_name)
+          connection.create_table(table_name, id: false) do |t|
             t.string :key, **connection.internal_string_options_for_primary_key
             t.string :value
             t.timestamps

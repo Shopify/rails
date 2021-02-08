@@ -62,7 +62,7 @@ module ActiveRecord
 
         attr_reader :charset, :collation
 
-        def initialize(conn, name, db_name, charset: nil, collation: nil, **)
+        def initialize(conn, name, charset: nil, collation: nil, **)
           super
           @charset = charset
           @collation = collation

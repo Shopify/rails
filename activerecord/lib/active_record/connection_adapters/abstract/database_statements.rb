@@ -60,7 +60,6 @@ module ActiveRecord
 
       # Returns an ActiveRecord::Result instance.
       def select_all(arel, name = nil, binds = [], preparable: nil)
-        require 'byebug'; byebug
         arel = arel_from_relation(arel)
         sql, binds, preparable = to_sql_and_binds(arel, binds, preparable)
 

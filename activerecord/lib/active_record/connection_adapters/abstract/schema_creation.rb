@@ -40,10 +40,9 @@ module ActiveRecord
         end
 
         def visit_TableDefinition(o)
-          require 'byebug'; byebug
           create_sql = +"CREATE#{table_modifier_in_create(o)} TABLE "
           create_sql << "IF NOT EXISTS " if o.if_not_exists
-          create_sql << "#{quote_table_name(o.name, o.database_name)} "
+          create_sql << "#{quote_table_name(o.name)} "
 
           statements = o.columns.map { |c| accept c }
           statements << accept(o.primary_keys) if o.primary_keys

@@ -793,8 +793,8 @@ module ActiveRecord
           execute("SET #{encoding} #{sql_mode_assignment} #{variable_assignments}", "SCHEMA")
         end
 
-        def column_definitions(table_name, database_name) # :nodoc:
-          execute_and_free("SHOW FULL FIELDS FROM #{quote_table_name(table_name, database_name)}", "SCHEMA") do |result|
+        def column_definitions(table_name) # :nodoc:
+          execute_and_free("SHOW FULL FIELDS FROM #{quote_table_name(table_name)}", "SCHEMA") do |result|
             each_hash(result)
           end
         end
