@@ -154,8 +154,8 @@ module ActiveRecord
             MySQL::SchemaCreation.new(self)
           end
 
-          def create_table_definition(name, **options)
-            MySQL::TableDefinition.new(self, name, **options)
+          def create_table_definition(name, db_name, **options)
+            MySQL::TableDefinition.new(self, name, db_name, **options)
           end
 
           def new_column_from_field(table_name, field)

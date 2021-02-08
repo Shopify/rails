@@ -56,8 +56,8 @@ module ActiveRecord
       #
       #   table_exists?(:developers)
       #
-      def table_exists?(table_name)
-        query_values(data_source_sql(table_name, type: "BASE TABLE"), "SCHEMA").any? if table_name.present?
+      def table_exists?(table_name, db_name)
+        query_values(data_source_sql(table_name, db_name, type: "BASE TABLE"), "SCHEMA").any? if table_name.present?
       rescue NotImplementedError
         tables.include?(table_name.to_s)
       end
@@ -111,9 +111,9 @@ module ActiveRecord
       end
 
       # Returns an array of +Column+ objects for the table specified by +table_name+.
-      def columns(table_name)
+      def columns(table_name, database_name)
         table_name = table_name.to_s
-        column_definitions(table_name).map do |field|
+        column_definitions(table_name, database_name).map do |field|
           new_column_from_field(table_name, field)
         end
       end
@@ -293,8 +293,9 @@ module ActiveRecord
       #     SELECT * FROM orders INNER JOIN line_items ON order_id=orders.id
       #
       # See also TableDefinition#column for details on how to create columns.
-      def create_table(table_name, id: :primary_key, primary_key: nil, force: nil, **options)
-        td = create_table_definition(table_name, **extract_table_options!(options))
+      def create_table(table_name, id: :primary_key, primary_key: nil, force: nil, database_name: nil, **options)
+        database_name = database_name || @config.fetch(:database)
+        td = create_table_definition(table_name, database_name, **extract_table_options!(options))
 
         if id && !td.as
           pk = primary_key || Base.get_primary_key(table_name.to_s.singularize)
@@ -1440,8 +1441,8 @@ module ActiveRecord
           SchemaCreation.new(self)
         end
 
-        def create_table_definition(name, **options)
-          TableDefinition.new(self, name, **options)
+        def create_table_definition(name, database_name, **options)
+          TableDefinition.new(self, name, database_name, **options)
         end
 
         def create_alter_table(name)

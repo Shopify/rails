@@ -419,7 +419,7 @@ module ActiveRecord
       #     scope :published_and_commented, -> { published.and(arel_table[:comments_count].gt(0)) }
       #   end
       def arel_table # :nodoc:
-        @arel_table ||= Arel::Table.new(table_name, klass: self)
+        @arel_table ||= Arel::Table.new("#{database_name}.#{table_name}", klass: self)
       end
 
       def arel_attribute(name, table = arel_table) # :nodoc:

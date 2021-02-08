@@ -22,9 +22,13 @@ module ActiveRecord
         "#{table_name_prefix}#{schema_migrations_table_name}#{table_name_suffix}"
       end
 
+      def database_name
+        "myapp_master"
+      end
+
       def create_table
-        unless connection.table_exists?(table_name)
-          connection.create_table(table_name, id: false) do |t|
+        unless connection.table_exists?(table_name, database_name)
+          connection.create_table(table_name, database_name: database_name, id: false) do |t|
             t.string :version, **connection.internal_string_options_for_primary_key
           end
         end

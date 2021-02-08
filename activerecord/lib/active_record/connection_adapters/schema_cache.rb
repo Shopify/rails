@@ -99,17 +99,19 @@ module ActiveRecord
       end
 
       # Get the columns for a table
-      def columns(table_name)
-        @columns.fetch(table_name) do
-          @columns[deep_deduplicate(table_name)] = deep_deduplicate(connection.columns(table_name))
+      def columns(table_name, database_name)
+        cache_key = "#{database_name}.#{table_name}"
+        @columns.fetch(cache_key) do
+          @columns[deep_deduplicate(cache_key)] = deep_deduplicate(connection.columns(table_name, database_name))
         end
       end
 
       # Get the columns for a table as a hash, key is the column name
       # value is the column object.
-      def columns_hash(table_name)
-        @columns_hash.fetch(table_name) do
-          @columns_hash[deep_deduplicate(table_name)] = columns(table_name).index_by(&:name).freeze
+      def columns_hash(table_name, database_name)
+        cache_key = "#{database_name}.#{table_name}"
+        @columns_hash.fetch(cache_key) do
+          @columns_hash[deep_deduplicate(cache_key)] = columns(table_name, database_name).index_by(&:name).freeze
         end
       end
 

@@ -750,6 +750,7 @@ module Arel # :nodoc: all
 
         def quote_table_name(name)
           return name if Arel::Nodes::SqlLiteral === name
+          require 'byebug'; byebug
           @connection.quote_table_name(name)
         end
 

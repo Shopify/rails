@@ -288,11 +288,12 @@ module ActiveRecord
     class TableDefinition
       include ColumnMethods
 
-      attr_reader :name, :temporary, :if_not_exists, :options, :as, :comment, :indexes, :foreign_keys, :check_constraints
+      attr_reader :name, :database_name, :temporary, :if_not_exists, :options, :as, :comment, :indexes, :foreign_keys, :check_constraints
 
       def initialize(
         conn,
         name,
+        database_name,
         temporary: false,
         if_not_exists: false,
         options: nil,
@@ -311,6 +312,7 @@ module ActiveRecord
         @options = options
         @as = as
         @name = name
+        @database_name = database_name
         @comment = comment
       end
 
