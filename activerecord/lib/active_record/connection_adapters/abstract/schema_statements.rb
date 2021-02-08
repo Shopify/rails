@@ -49,7 +49,25 @@ module ActiveRecord
 
       # Returns an array of table names defined in the database.
       def tables
-        query_values(data_source_sql(type: "BASE TABLE"), "SCHEMA")
+        res = query_values(data_source_sql(type: "BASE TABLE"), "SCHEMA")
+        res = res.select { |x| x.start_with?("vt_") }
+        # The wrangling below is necessary because vtgate returns very inconsistent
+        # results depending on what conditions the query has. See PR that tried to
+        # make Vitess "play nice" with this function:
+        # https://github.com/vitessio/vitess/issues/6894
+        # https://github.com/vitessio/vitess/pull/6932
+        #
+        # For now we hack around this, but we probably need to upstream this in Vitess
+        res = res.map do |x|
+          db_name, table_name = x.split(".")
+
+          db_name_parts = db_name.split("_")
+          db_name = db_name_parts[1..-2].join("_")
+
+          "#{db_name}.#{table_name}"
+        end.uniq
+
+        res
       end
 
       # Checks to see if the table +table_name+ exists on the database.

@@ -46,6 +46,10 @@ module ActiveRecord
   class TableNotSpecified < ActiveRecordError
   end
 
+  # Raised when a model makes a query but it has not specified an associated database.
+  class DatabaseNotSpecified < ActiveRecordError
+  end
+
   # Raised when Active Record cannot find database adapter specified in
   # +config/database.yml+ or programmatically.
   class AdapterNotFound < ActiveRecordError

@@ -18,10 +18,6 @@ module ActiveRecord
         "version"
       end
 
-      def table_name
-        "#{table_name_prefix}#{schema_migrations_table_name}#{table_name_suffix}"
-      end
-
       def create_table
         unless connection.table_exists?(table_name)
           connection.create_table(table_name, id: false) do |t|
@@ -45,6 +41,11 @@ module ActiveRecord
       def all_versions
         order(:version).pluck(:version)
       end
+
+      protected
+        def unqualified_table_name
+          "#{table_name_prefix}#{schema_migrations_table_name}#{table_name_suffix}"
+        end
     end
 
     def version

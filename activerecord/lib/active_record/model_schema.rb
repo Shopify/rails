@@ -203,8 +203,7 @@ module ActiveRecord
       #     self.table_name = "mice"
       #   end
       def table_name
-        reset_table_name unless defined?(@table_name)
-        @table_name
+        "#{database_name}.#{unqualified_table_name}"
       end
 
       # Sets the table name explicitly. Example:
@@ -214,17 +213,40 @@ module ActiveRecord
       #   end
       def table_name=(value)
         value = value && value.to_s
-
-        if defined?(@table_name)
-          return if value == @table_name
-          reset_column_information if connected?
+        db_name, tb_name = connection.send(:extract_schema_qualified_name, value)
+        if db_name
+          self.database_name = db_name
         end
+        set_unqualified_table_name(tb_name)
+      end
 
-        @table_name        = value
-        @quoted_table_name = nil
-        @arel_table        = nil
-        @sequence_name     = nil unless defined?(@explicit_sequence_name) && @explicit_sequence_name
-        @predicate_builder = nil
+      def database_name
+        if @database_name.nil?
+          # move to `def reset_database_name`?
+          @database_name = if abstract_class?
+            superclass == Base ? nil : superclass.database_name
+          elsif superclass.abstract_class?
+            superclass.database_name
+          end
+
+          # one last try to infer the database name
+          if @database_name.nil?
+            # alternatively we can get it from the connection with:
+            # @database_name = connection.query("select database()")[0]
+            @database_name = connection.pool.db_config.configuration_hash[:database]
+          end
+
+
+          if @database_name.nil?
+            raise ActiveRecord::DatabaseNotSpecified, "#{self} has no database configured on a connection that doesn't select a database. Set one with #{self}.database_name="
+          end
+        end
+        @database_name
+      end
+
+      def database_name=(value)
+        raise if value.empty?
+        @database_name = value
       end
 
       # Returns a quoted version of the table name, used to construct SQL statements.
@@ -235,9 +257,9 @@ module ActiveRecord
       # Computes the table name, (re)sets it internally, and returns it.
       def reset_table_name #:nodoc:
         self.table_name = if abstract_class?
-          superclass == Base ? nil : superclass.table_name
+          superclass == Base ? nil : superclass.unqualified_table_name
         elsif superclass.abstract_class?
-          superclass.table_name || compute_table_name
+          superclass.unqualified_table_name || compute_table_name
         else
           compute_table_name
         end
@@ -521,7 +543,25 @@ module ActiveRecord
           @load_schema_monitor = Monitor.new
         end
 
+        def unqualified_table_name
+          reset_table_name unless defined?(@unqualified_table_name)
+          @unqualified_table_name
+        end
+
       private
+        def set_unqualified_table_name(value)
+          if defined?(@unqualified_table_name)
+            return if value == @unqualified_table_name
+            reset_column_information if connected?
+          end
+
+          @unqualified_table_name = value
+          @quoted_table_name      = nil
+          @arel_table             = nil
+          @sequence_name          = nil unless defined?(@explicit_sequence_name) && @explicit_sequence_name
+          @predicate_builder      = nil
+        end
+
         def inherited(child_class)
           super
           child_class.initialize_load_schema_monitor
@@ -597,7 +637,7 @@ module ActiveRecord
           if base_class?
             # Nested classes are prefixed with singular parent table name.
             if module_parent < Base && !module_parent.abstract_class?
-              contained = module_parent.table_name
+              contained = module_parent.unqualified_table_name
               contained = contained.singularize if module_parent.pluralize_table_names
               contained += "_"
             end
@@ -605,7 +645,7 @@ module ActiveRecord
             "#{full_table_name_prefix}#{contained}#{undecorated_table_name(name)}#{full_table_name_suffix}"
           else
             # STI subclasses always use their superclass' table.
-            base_class.table_name
+            base_class.unqualified_table_name
           end
         end
 

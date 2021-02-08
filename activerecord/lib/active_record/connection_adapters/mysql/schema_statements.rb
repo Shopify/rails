@@ -203,8 +203,12 @@ module ActiveRecord
           def data_source_sql(name = nil, type: nil)
             scope = quoted_scope(name, type: type)
 
-            sql = +"SELECT table_name FROM (SELECT * FROM information_schema.tables "
-            sql << " WHERE table_schema = #{scope[:schema]}) _subquery"
+            sql = +"SELECT CONCAT(table_schema, '.', table_name) FROM (SELECT * FROM information_schema.tables "
+            if scope[:schema] == "database()"
+              sql << ") _subquery"
+            else
+              sql << " WHERE table_schema = #{scope[:schema]}) _subquery"
+            end
             if scope[:type] || scope[:name]
               conditions = []
               conditions << "_subquery.table_type = #{scope[:type]}" if scope[:type]

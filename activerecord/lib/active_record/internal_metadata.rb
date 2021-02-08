@@ -23,10 +23,6 @@ module ActiveRecord
         "key"
       end
 
-      def table_name
-        "#{table_name_prefix}#{internal_metadata_table_name}#{table_name_suffix}"
-      end
-
       def []=(key, value)
         return unless enabled?
 
@@ -57,6 +53,11 @@ module ActiveRecord
 
         connection.drop_table table_name, if_exists: true
       end
+
+      protected
+        def unqualified_table_name
+          "#{table_name_prefix}#{internal_metadata_table_name}#{table_name_suffix}"
+        end
     end
   end
 end
