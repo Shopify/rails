@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+Warning[:deprecated] = true
+
 $:.unshift File.expand_path("lib", __dir__)
 
 require "active_support/core_ext/kernel/reporting"

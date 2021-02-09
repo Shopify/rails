@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+Warning[:deprecated] = true
+
 ORIG_ARGV = ARGV.dup
 
 require "bundler/setup"

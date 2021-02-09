@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+Warning[:deprecated] = true
+
 $:.unshift File.expand_path("lib", __dir__)
 
 ENV["TMPDIR"] = File.expand_path("tmp", __dir__)

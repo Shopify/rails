@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+Warning[:deprecated] = true
+
 ENV["RAILS_ENV"] ||= "test"
 
 require "stringio"

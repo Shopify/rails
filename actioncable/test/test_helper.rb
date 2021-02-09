@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+Warning[:deprecated] = true
+
 require "action_cable"
 require "active_support/testing/autorun"
 require "active_support/testing/method_call_assertions"

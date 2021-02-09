@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+Warning[:deprecated] = true
+
 require "active_model"
 
 # Show backtraces for deprecated behavior for quicker cleanup.
