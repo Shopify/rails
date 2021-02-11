@@ -292,8 +292,9 @@ HEADER
       end
 
       def ignored?(table_name)
+        _schema, name = @connection.send(:extract_schema_qualified_name, table_name)
         [ActiveRecord::Base.schema_migrations_table_name, ActiveRecord::Base.internal_metadata_table_name, ignore_tables].flatten.any? do |ignored|
-          ignored === remove_prefix_and_suffix(table_name)
+          ignored === remove_prefix_and_suffix(name)
         end
       end
   end
