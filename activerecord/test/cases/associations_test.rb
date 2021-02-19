@@ -30,7 +30,8 @@ require "models/price_estimate"
 
 class AssociationsTest < ActiveRecord::TestCase
   fixtures :accounts, :companies, :developers, :projects, :developers_projects,
-           :computers, :people, :readers, :authors, :author_addresses, :author_favorites
+           :computers, :people, :readers, :authors, :author_addresses, :author_favorites,
+           :comments, :posts
 
   def test_eager_loading_should_not_change_count_of_children
     liquid = Liquid.create(name: "salty")
@@ -410,6 +411,32 @@ class PreloaderTest < ActiveRecord::TestCase
 
       book.author
       post.author
+    end
+  end
+
+  def test_preload_through_array
+    comments = SpecialComment.all.to_a
+    
+    assert_queries(2) do
+      preloader = ActiveRecord::Associations::Preloader.new(records: comments, associations: [:author, :post])
+      preloader.call
+    end
+
+    assert_queries(0) do
+      comments.each(&:author)
+    end
+  end
+
+  def test_preload_through_association
+    comments = SpecialComment.all.load
+    
+    assert_queries(2) do
+      preloader = ActiveRecord::Associations::Preloader.new(records: comments, associations: [:author, :post])
+      preloader.call
+    end
+
+    assert_queries(0) do
+      comments.each(&:author)
     end
   end
 
