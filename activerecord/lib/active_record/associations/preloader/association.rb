@@ -25,6 +25,10 @@ module ActiveRecord
           @already_loaded = owners.all? { |o| o.association(reflection.name).loaded? }
         end
 
+        def source_loader
+          self
+        end
+
         def already_loaded?
           @already_loaded
         end

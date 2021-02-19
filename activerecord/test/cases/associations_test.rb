@@ -416,7 +416,7 @@ class PreloaderTest < ActiveRecord::TestCase
 
   def test_preload_through_array
     comments = SpecialComment.all.to_a
-    
+
     assert_queries(2) do
       preloader = ActiveRecord::Associations::Preloader.new(records: comments, associations: [:author, :post])
       preloader.call
@@ -429,7 +429,7 @@ class PreloaderTest < ActiveRecord::TestCase
 
   def test_preload_through_association
     comments = SpecialComment.all.load
-    
+
     assert_queries(2) do
       preloader = ActiveRecord::Associations::Preloader.new(records: comments, associations: [:author, :post])
       preloader.call

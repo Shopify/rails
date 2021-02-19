@@ -8,10 +8,22 @@ module ActiveRecord
           @preloaded_records ||= source_preloaders.flat_map(&:preloaded_records)
         end
 
+        def initialize(klass, owners, reflection, preload_scope, associate_by_default = true)
+          super
+          @source_loader = Association.new(through_reflection.klass, owners, through_reflection, through_scope, associate_by_default)
+        end
+
+        def source_loader
+          @source_loader
+        end
+
         def records_by_owner
           return @records_by_owner if defined?(@records_by_owner)
+
+          @source_loader.run
+
           source_records_by_owner = source_preloaders.map(&:records_by_owner).reduce(:merge)
-          through_records_by_owner = through_preloaders.map(&:records_by_owner).reduce(:merge)
+          through_records_by_owner = @source_loader.records_by_owner
 
           @records_by_owner = owners.each_with_object({}) do |owner, result|
             through_records = through_records_by_owner[owner] || []

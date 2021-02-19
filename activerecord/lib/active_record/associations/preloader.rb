@@ -172,7 +172,7 @@ module ActiveRecord
         end
 
         def group_and_load_similar(loaders)
-          loaders.grep_v(ThroughAssociation).group_by(&:grouping_key).each do |(_, _, association_key_name), similar_loaders|
+          loaders.map(&:source_loader).group_by(&:grouping_key).each do |(_, _, association_key_name), similar_loaders|
             next if similar_loaders.all? { |l| l.already_loaded? }
 
             scope = similar_loaders.first.scope
