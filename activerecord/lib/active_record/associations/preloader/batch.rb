@@ -9,15 +9,21 @@ module ActiveRecord
         end
 
         def call
-          return if @preloaders.empty?
-
           branches = @preloaders.flat_map(&:branches)
           until branches.empty?
-            loaders = branches.flat_map(&:loaders)
-            group_and_load_similar(loaders)
-            loaders.each(&:run)
+            loaders = branches.flat_map(&:runnable_loaders)
 
-            branches = branches.flat_map(&:children)
+            already_loaded = loaders.select { |l| !l.run? && l.already_loaded? }
+            if already_loaded.any?
+              already_loaded.each(&:run)
+            else
+              group_and_load_similar(loaders)
+              loaders.each(&:run)
+            end
+
+            finished, in_progress = branches.partition(&:done?)
+
+            branches = in_progress + finished.flat_map(&:children)
           end
         end
 
