@@ -377,21 +377,29 @@ module ActiveRecord
 
       def dump_schema(db_config, format = ActiveRecord::Base.schema_format) # :nodoc:
         require "active_record/schema_dumper"
-        filename = dump_filename(db_config.name, format)
         connection = ActiveRecord::Base.connection
 
+        schemas = connection.tables.map do |t|
+          schema, _table = connection.send(:extract_schema_qualified_name, t)
+          schema
+        end.uniq
+
         FileUtils.mkdir_p(db_dir)
-        case format
-        when :ruby
-          File.open(filename, "w:utf-8") do |file|
-            ActiveRecord::SchemaDumper.dump(ActiveRecord::Base.connection, file)
-          end
-        when :sql
-          structure_dump(db_config, filename)
-          if connection.schema_migration.table_exists?
-            File.open(filename, "a") do |f|
-              f.puts connection.dump_schema_information
-              f.print "\n"
+
+        schemas.each do |schema|
+          filename = dump_filename(schema, format)
+          case format
+          when :ruby
+            File.open(filename, "w:utf-8") do |file|
+              ActiveRecord::SchemaDumper.dump(ActiveRecord::Base.connection, file, schema: schema)
+            end
+          when :sql
+            structure_dump(db_config, filename)
+            if connection.schema_migration.table_exists?
+              File.open(filename, "a") do |f|
+                f.puts connection.dump_schema_information
+                f.print "\n"
+              end
             end
           end
         end

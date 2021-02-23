@@ -30,8 +30,8 @@ module ActiveRecord
     cattr_accessor :chk_ignore_pattern, default: /^chk_rails_[0-9a-f]{10}$/
 
     class << self
-      def dump(connection = ActiveRecord::Base.connection, stream = STDOUT, config = ActiveRecord::Base)
-        connection.create_schema_dumper(generate_options(config)).dump(stream)
+      def dump(connection = ActiveRecord::Base.connection, stream = STDOUT, config = ActiveRecord::Base, schema: nil)
+        connection.create_schema_dumper(generate_options(config)).dump(stream, schema)
         stream
       end
 
@@ -44,10 +44,10 @@ module ActiveRecord
         end
     end
 
-    def dump(stream)
+    def dump(stream, schema = nil)
       header(stream)
       extensions(stream)
-      tables(stream)
+      tables(stream, schema)
       trailer(stream)
       stream
     end
@@ -99,11 +99,14 @@ HEADER
       def extensions(stream)
       end
 
-      def tables(stream)
+      def tables(stream, schema = nil)
         sorted_tables = @connection.tables.sort
 
         sorted_tables.each do |table_name|
-          table(table_name, stream) unless ignored?(table_name)
+          next if ignored?(table_name)
+          sc_name, _tb_name = @connection.send(:extract_schema_qualified_name, table_name)
+          next if schema && sc_name != schema
+          table(table_name, stream)
         end
 
         # dump foreign keys at the end to make sure all dependent tables exist.
