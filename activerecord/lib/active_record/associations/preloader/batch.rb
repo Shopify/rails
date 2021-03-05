@@ -13,13 +13,9 @@ module ActiveRecord
           until branches.empty?
             loaders = branches.flat_map(&:runnable_loaders)
 
-            already_loaded = loaders.select { |l| !l.run? && l.already_loaded? }
-            if already_loaded.any?
-              already_loaded.each(&:run)
-            else
-              group_and_load_similar(loaders)
-              loaders.each(&:run)
-            end
+            already_loaded = loaders.select(&:already_loaded?).each(&:run)
+            group_and_load_similar(loaders)
+            loaders.each(&:run)
 
             finished, in_progress = branches.partition(&:done?)
 
