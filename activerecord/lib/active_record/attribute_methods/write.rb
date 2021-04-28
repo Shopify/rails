@@ -12,13 +12,15 @@ module ActiveRecord
       module ClassMethods # :nodoc:
         private
           def define_method_attribute=(name, owner:)
-            ActiveModel::AttributeMethods::AttrNames.define_attribute_accessor_method(
-              owner, name, writer: true,
-            ) do |temp_method_name, attr_name_expr|
-              owner <<
-                "def #{temp_method_name}(value)" <<
-                "  _write_attribute(#{attr_name_expr}, value)" <<
-                "end"
+            owner.batch_method("#{name}=") do |batch|
+              ActiveModel::AttributeMethods::AttrNames.define_attribute_accessor_method(
+                owner, name, writer: true,
+              ) do |temp_method_name, attr_name_expr|
+                batch <<
+                  "def #{temp_method_name}(value)" <<
+                  "  _write_attribute(#{attr_name_expr}, value)" <<
+                  "end"
+              end
             end
           end
       end
