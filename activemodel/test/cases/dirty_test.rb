@@ -5,6 +5,7 @@ require "cases/helper"
 class DirtyTest < ActiveModel::TestCase
   class DirtyModel
     include ActiveModel::Dirty
+    p [:dirty_model]
     define_attribute_methods :name, :color, :size, :status
 
     def initialize

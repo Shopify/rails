@@ -44,12 +44,12 @@ module ActiveModel
 
       private
         def define_method_attribute=(name, owner:)
-          owner.batch_method("#{name}=") do |batch|
-            ActiveModel::AttributeMethods::AttrNames.define_attribute_accessor_method(
-              owner, name, writer: true,
-            ) do |temp_method_name, attr_name_expr|
+          ActiveModel::AttributeMethods::AttrNames.define_attribute_accessor_method(
+            owner, name, prefix: "_am_write_",
+          ) do |method_name, attr_name_expr|
+            owner.define_method("#{name}=", as: method_name) do |batch|
               batch <<
-                "def #{temp_method_name}(value)" <<
+                "def #{method_name}(value)" <<
                 "  _write_attribute(#{attr_name_expr}, value)" <<
                 "end"
             end

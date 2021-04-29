@@ -8,12 +8,14 @@ module ActiveRecord
       module ClassMethods # :nodoc:
         private
           def define_method_attribute(name, owner:)
-            owner.batch_method(name) do |batch|
-              ActiveModel::AttributeMethods::AttrNames.define_attribute_accessor_method(
-                owner, name
-              ) do |temp_method_name, attr_name_expr|
+            ActiveModel::AttributeMethods::AttrNames.define_attribute_accessor_method(
+              owner,
+              name,
+              prefix: "_ar_read_",
+            ) do |method_name, attr_name_expr|
+              owner.define_method(name, as: method_name) do |batch|
                 batch <<
-                  "def #{temp_method_name}" <<
+                  "def #{method_name}" <<
                   "  _read_attribute(#{attr_name_expr}) { |n| missing_attribute(n, caller) }" <<
                   "end"
               end

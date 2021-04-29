@@ -212,7 +212,12 @@ module ActiveModel
           attribute_method_matchers.each do |matcher|
             matcher_new = matcher.method_name(new_name).to_s
             matcher_old = matcher.method_name(old_name).to_s
-            define_proxy_call(owner, matcher_new, matcher_old, matcher.parameters)
+            prefix = if NAME_COMPILABLE_REGEXP.match?(old_name)
+              "_alias_#{old_name}_"
+            else
+              "_alias_#{old_name.to_s.unpack1("h*")}"
+            end
+            define_proxy_call(owner, matcher_new, matcher_old, matcher.parameters, prefix: prefix)
           end
         end
       end
@@ -252,7 +257,7 @@ module ActiveModel
       #     end
       #   end
       def define_attribute_methods(*attr_names)
-        CachedCodeGenerator.batch(generated_attribute_methods, __FILE__, __LINE__) do |owner|
+        CodeGenerator.batch(generated_attribute_methods, __FILE__, __LINE__) do |owner|
           attr_names.flatten.each { |attr_name| define_attribute_method(attr_name, _owner: owner) }
         end
       end
@@ -287,7 +292,7 @@ module ActiveModel
       #   person.name        # => "Bob"
       #   person.name_short? # => true
       def define_attribute_method(attr_name, _owner: generated_attribute_methods)
-        CachedCodeGenerator.batch(_owner, __FILE__, __LINE__) do |owner|
+        CodeGenerator.batch(_owner, __FILE__, __LINE__) do |owner|
           attribute_method_matchers.each do |matcher|
             method_name = matcher.method_name(attr_name)
 
@@ -297,7 +302,7 @@ module ActiveModel
               if respond_to?(generate_method, true)
                 send(generate_method, attr_name.to_s, owner: owner)
               else
-                define_proxy_call(owner, method_name, matcher.target, matcher.parameters, attr_name.to_s)
+                define_proxy_call(owner, method_name, matcher.target, matcher.parameters, attr_name.to_s, prefix: "")
               end
             end
           end
@@ -337,6 +342,8 @@ module ActiveModel
 
       private
         class CodeGenerator
+          METHOD_CACHE = Module.new
+
           class << self
             def batch(owner, path, line)
               if owner.is_a?(CodeGenerator)
@@ -354,44 +361,32 @@ module ActiveModel
             @owner = owner
             @path = path
             @line = line
-            @sources = ["# frozen_string_literal: true\n"]
+            @sources = []
+            @methods = {}
           end
 
-          def batch_method(_method_name)
-            yield self
-          end
-
-          def <<(source_line)
-            @sources << source_line
-          end
-
-          def execute
-            @owner.module_eval(@sources.join(";"), @path, @line - 1)
-          end
-        end
-        private_constant :CodeGenerator
-
-        class CachedCodeGenerator < CodeGenerator
-          METHOD_CACHE = Module.new
-
-          def initialize(*)
-            super
-            @methods = Set.new
-          end
-
-          def batch_method(method_name)
-            name = method_name.to_sym
-            if @methods.add?(name) && !METHOD_CACHE.method_defined?(name)
-              yield self
+          def define_method(name, as:)
+            name = name.to_sym
+            as = as.to_sym
+            @methods.fetch(name) do
+              unless METHOD_CACHE.method_defined?(as)
+                yield @sources
+              end
+              @methods[name] = as
             end
           end
 
           def execute
-            METHOD_CACHE.module_eval(@sources.join(";"), @path, @line - 1)
-            @methods.each { |m| @owner.define_method(m, METHOD_CACHE.instance_method(m)) }
+            unless @sources.empty?
+              METHOD_CACHE.module_eval("# frozen_string_literal: true\n" + @sources.join(";"), @path, @line - 1)
+            end
+
+            @methods.each do |method, as|
+              @owner.define_method(method, METHOD_CACHE.instance_method(as))
+            end
           end
         end
-        private_constant :CachedCodeGenerator
+        private_constant :CodeGenerator
 
         def generated_attribute_methods
           @generated_attribute_methods ||= Module.new.tap { |mod| include mod }
@@ -423,13 +418,14 @@ module ActiveModel
         # Define a method `name` in `mod` that dispatches to `send`
         # using the given `extra` args. This falls back on `define_method`
         # and `send` if the given names cannot be compiled.
-        def define_proxy_call(code_generator, name, target, parameters, *call_args)
-          code_generator.batch_method(name) do |batch|
-            mangled_name = name
-            unless NAME_COMPILABLE_REGEXP.match?(name)
-              mangled_name = "__temp__#{name.unpack1("h*")}"
-            end
+        def define_proxy_call(code_generator, name, target, parameters, *call_args, prefix:)
+          mangled_name = name
+          unless NAME_COMPILABLE_REGEXP.match?(name)
+            mangled_name = "__temp__#{name.unpack1("h*")}"
+          end
+          mangled_name = "#{prefix}#{mangled_name}"
 
+          code_generator.define_method(name, as: mangled_name) do |batch|
             call_args.map!(&:inspect)
             call_args << parameters if parameters
 
@@ -440,20 +436,12 @@ module ActiveModel
               "send(#{call_args.join(", ")})"
             end
 
+            modifier = parameters == FORWARD_PARAMETERS ? "ruby2_keywords " : ""
+
             batch <<
-              "def #{mangled_name}(#{parameters || ''})" <<
+              "#{modifier}def #{mangled_name}(#{parameters || ''})" <<
               body <<
               "end"
-
-            if parameters == FORWARD_PARAMETERS
-              batch << "ruby2_keywords(:'#{mangled_name}')"
-            end
-
-            if mangled_name != name
-              batch <<
-                "alias_method(:'#{name}', :'#{mangled_name}')" <<
-                "remove_method(:'#{mangled_name}')"
-            end
           end
         end
 
@@ -552,10 +540,6 @@ module ActiveModel
 
         # We want to generate the methods via module_eval rather than
         # define_method, because define_method is slower on dispatch.
-        # Evaluating many similar methods may use more memory as the instruction
-        # sequences are duplicated and cached (in MRI).  define_method may
-        # be slower on dispatch, but if you're careful about the closure
-        # created, then define_method will consume much less memory.
         #
         # But sometimes the database might return columns with
         # characters that are not allowed in normal method names (like
@@ -568,19 +552,15 @@ module ActiveModel
         # to allocate an object on each call to the attribute method.
         # Making it frozen means that it doesn't get duped when used to
         # key the @attributes in read_attribute.
-        def self.define_attribute_accessor_method(owner, attr_name, writer: false)
-          method_name = "#{attr_name}#{'=' if writer}"
+        def self.define_attribute_accessor_method(owner, attr_name, prefix:)
           if attr_name.ascii_only? && DEF_SAFE_NAME.match?(attr_name)
-            yield method_name, "'#{attr_name}'"
+            yield "#{prefix}#{attr_name}", "'#{attr_name}'"
           else
             safe_name = attr_name.unpack1("h*")
             const_name = "ATTR_#{safe_name}"
             const_set(const_name, attr_name) unless const_defined?(const_name)
-            temp_method_name = "__temp__#{safe_name}#{'=' if writer}"
             attr_name_expr = "::ActiveModel::AttributeMethods::AttrNames::#{const_name}"
-            yield temp_method_name, attr_name_expr
-            owner << "alias_method :'#{method_name}', :'#{temp_method_name}'"
-            owner << "undef_method :'#{temp_method_name}'"
+            yield "#{prefix}#{safe_name}", attr_name_expr
           end
         end
       end
