@@ -372,7 +372,9 @@ module ActiveModel
               name = name.to_sym
               as = as.to_sym
               @methods.fetch(name) do
-                yield @sources
+                unless @cache.method_defined?(as)
+                  yield @sources
+                end
                 @methods[name] = as
               end
             end
