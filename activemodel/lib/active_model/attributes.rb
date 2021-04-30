@@ -45,9 +45,9 @@ module ActiveModel
       private
         def define_method_attribute=(name, owner:)
           ActiveModel::AttributeMethods::AttrNames.define_attribute_accessor_method(
-            owner, name, prefix: "_am_write_",
+            owner, name
           ) do |method_name, attr_name_expr|
-            owner.define_method("#{name}=", as: method_name) do |batch|
+            owner.define_cached_method("#{name}=", as: method_name, namespace: :active_model) do |batch|
               batch <<
                 "def #{method_name}(value)" <<
                 "  _write_attribute(#{attr_name_expr}, value)" <<
