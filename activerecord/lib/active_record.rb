@@ -208,6 +208,9 @@ module ActiveRecord
     )
   end
 
+  singleton_class.attr_accessor :async_preloader
+  self.async_preloader = false
+
   # Set the +global_executor_concurrency+. This configuration value can only be used
   # with the global thread pool async query executor.
   def self.global_executor_concurrency=(global_executor_concurrency)

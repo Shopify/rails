@@ -112,7 +112,7 @@ module ActiveRecord
       end
 
       def call(async: false)
-        Batch.new([self], async: async).call
+        Batch.new([self], async: ActiveRecord.async_preloader).call
 
         loaders
       end
