@@ -367,10 +367,29 @@ class AppGeneratorTest < Rails::Generators::TestCase
     assert_file "Gemfile", /^# gem "image_processing"/
   end
 
-  def test_gem_for_active_storage_when_skip_active_storage_is_given
+  def test_when_skip_active_storage_is_given
     run_generator [destination_root, "--skip-active-storage"]
 
     assert_no_gem "image_processing"
+
+    assert_file "config/environments/development.rb" do |content|
+      assert_no_match(/config\.active_storage/, content)
+    end
+
+    assert_file "config/environments/production.rb" do |content|
+      assert_no_match(/config\.active_storage/, content)
+    end
+
+    assert_file "config/environments/test.rb" do |content|
+      assert_no_match(/config\.active_storage/, content)
+    end
+
+    assert_file "app/assets/config/manifest.js" do |content|
+      assert_no_match(%r{//= link activestorage\.js}, content)
+      assert_no_match(%r{//= link activestorage\.esm\.js}, content)
+    end
+
+    assert_no_file "#config/storage.yml"
   end
 
   def test_app_update_does_not_generate_active_storage_contents_when_skip_active_storage_is_given
@@ -394,7 +413,42 @@ class AppGeneratorTest < Rails::Generators::TestCase
         assert_no_match(/config\.active_storage/, content)
       end
 
+      assert_file "#{app_root}/app/assets/config/manifest.js" do |content|
+        assert_no_match(%r{//= link activestorage\.js}, content)
+        assert_no_match(%r{//= link activestorage\.esm\.js}, content)
+      end
+
       assert_no_file "#{app_root}/config/storage.yml"
+    end
+  end
+
+  def test_app_update_generate_active_storage_contents_on_the_sprockets_manifest
+    app_root = File.join(destination_root, "myapp")
+    run_generator [app_root, "--skip-active-storage"]
+
+    stub_rails_application(app_root) do
+      generator = Rails::Generators::AppGenerator.new ["rails"], { update: true }, { destination_root: app_root, shell: @shell }
+      generator.send(:app_const)
+      quietly { generator.update_config_files }
+
+      assert_file "#{app_root}/config/environments/development.rb" do |content|
+        assert_match(/config\.active_storage/, content)
+      end
+
+      assert_file "#{app_root}/config/environments/production.rb" do |content|
+        assert_match(/config\.active_storage/, content)
+      end
+
+      assert_file "#{app_root}/config/environments/test.rb" do |content|
+        assert_match(/config\.active_storage/, content)
+      end
+
+      assert_file "#{app_root}/app/assets/config/manifest.js" do |content|
+        assert_match(%r{^//= link activestorage\.js}, content)
+        assert_match(%r{^//= link activestorage\.esm\.js}, content)
+      end
+
+      assert_file "#{app_root}/config/storage.yml"
     end
   end
 
@@ -451,6 +505,33 @@ class AppGeneratorTest < Rails::Generators::TestCase
   def test_generator_skips_action_text_when_skip_active_storage_is_given
     run_generator [destination_root, "--skip-active-storage"]
     assert_file "#{application_path}/config/application.rb", /#\s+require\s+["']action_text\/engine["']/
+  end
+
+  def test_when_skip_aaction_text_is_given
+    run_generator [destination_root, "--skip-action-text"]
+
+    assert_file "app/assets/config/manifest.js" do |content|
+      assert_no_match(%r{//= link actiontext\.js}, content)
+      assert_no_match(%r{//= link trix\.js}, content)
+      assert_no_match(%r{//= link trix\.css}, content)
+    end
+  end
+
+  def test_app_update_generate_active_storage_contents_on_the_sprockets_manifest
+    app_root = File.join(destination_root, "myapp")
+    run_generator [app_root, "--skip-action-text"]
+
+    stub_rails_application(app_root) do
+      generator = Rails::Generators::AppGenerator.new ["rails"], { update: true }, { destination_root: app_root, shell: @shell }
+      generator.send(:app_const)
+      quietly { generator.update_config_files }
+
+      assert_file "#{app_root}/app/assets/config/manifest.js" do |content|
+        assert_match(%r{//= link actiontext\.js}, content)
+        assert_match(%r{//= link trix\.js}, content)
+        assert_match(%r{//= link trix\.css}, content)
+      end
+    end
   end
 
   def test_app_update_does_not_change_config_target_version

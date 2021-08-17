@@ -1,2 +1,11 @@
+<% unless skip_active_storage? -%>
+//= link activestorage.js
+//= link activestorage.esm.js
+<% end -%>
+<% unless skip_action_text? -%>
+//= link actiontext.js
+//= link trix.js
+//= link trix.css
+<% end -%>
 //= link_tree ../images
 //= link_directory ../stylesheets .css

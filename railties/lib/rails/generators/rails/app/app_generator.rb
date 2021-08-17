@@ -163,6 +163,21 @@ module Rails
 
       if options[:skip_sprockets] && !asset_manifest_exist
         remove_file "app/assets/config/manifest.js"
+      elsif !options[:skip_sprockets]
+        unless options[:skip_active_storage]
+          insert_into_file "app/assets/config/manifest.js", <<~CONFIG
+            //= link activestorage.js
+            //= link activestorage.esm.js
+          CONFIG
+        end
+
+        unless options[:skip_action_text]
+          insert_into_file "app/assets/config/manifest.js", <<~CONFIG
+            //= link actiontext.js
+            //= link trix.js
+            //= link trix.css
+          CONFIG
+        end
       end
 
       if options[:skip_sprockets] && !asset_app_stylesheet_exist
