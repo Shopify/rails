@@ -1,10 +1,14 @@
 # frozen_string_literal: true
 
+require "active_record/associations/set_through_association_source_target"
+
 module ActiveRecord
   module Associations
     # = Active Record Has One Association
     class HasOneAssociation < SingularAssociation # :nodoc:
       include ForeignAssociation
+      include SetThroughAssociationSourceTarget
+
 
       def handle_dependency
         case options[:dependent]
@@ -77,6 +81,7 @@ module ActiveRecord
           end
 
           self.target = record
+          set_through_association_source_target(record)
         end
 
         # The reason that the save param for replace is false, if for create (not just build),

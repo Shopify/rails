@@ -1,9 +1,13 @@
 # frozen_string_literal: true
 
+require "active_record/associations/set_through_association_source_target"
+
 module ActiveRecord
   module Associations
     # = Active Record Belongs To Association
     class BelongsToAssociation < SingularAssociation # :nodoc:
+      include SetThroughAssociationSourceTarget
+
       def handle_dependency
         return unless load_target
 
@@ -92,6 +96,8 @@ module ActiveRecord
           replace_keys(record, force: true)
 
           self.target = record
+          set_through_association_source_target(record)
+
         end
 
         def update_counters(by)
