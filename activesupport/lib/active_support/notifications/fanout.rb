@@ -63,7 +63,8 @@ module ActiveSupport
       end
 
       def finish(name, id, payload, listeners = listeners_for(name))
-        listeners.each { |s| s.finish(name, id, payload) }
+        listeners.map { |s| s.finish(name, id, payload) }.each(&:call)
+        
       end
 
       def publish(name, *args)
@@ -177,7 +178,7 @@ module ActiveSupport
           end
 
           def finish(name, id, payload)
-            @delegate.finish name, id, payload
+            -> { @delegate.finish name, id, payload }
           end
 
           def subscribed_to?(name)
@@ -202,7 +203,7 @@ module ActiveSupport
           def finish(name, id, payload)
             timestack = Thread.current[:_timestack]
             started = timestack.pop
-            @delegate.call(name, started, Time.now, id, payload)
+            -> { @delegate.call(name, started, Time.now, id, payload) }
           end
         end
 
@@ -219,7 +220,7 @@ module ActiveSupport
           def finish(name, id, payload)
             timestack = Thread.current[:_timestack_monotonic]
             started = timestack.pop
-            @delegate.call(name, started, Concurrent.monotonic_time, id, payload)
+            -> { @delegate.call(name, started, Concurrent.monotonic_time, id, payload) }
           end
         end
 
@@ -236,7 +237,7 @@ module ActiveSupport
             event = stack.pop
             event.payload = payload
             event.finish!
-            @delegate.call event
+            -> { @delegate.call event }
           end
 
           def publish_event(event)
