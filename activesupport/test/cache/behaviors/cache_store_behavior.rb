@@ -534,6 +534,31 @@ module CacheStoreBehavior
     end
   end
 
+  def test_expiry_with_increment_decrement
+    key = SecureRandom.alphanumeric
+    other_key = SecureRandom.alphanumeric
+
+    @cache.write(key, 5, expires_in: 2.seconds, raw: true)
+    @cache.write(other_key, 5, expires_in: 3.seconds, raw: true)
+    assert_equal 5, @cache.read(key, raw: true).to_i
+    assert_equal 5, @cache.read(other_key, raw: true).to_i
+
+    @cache.increment(key, 1)
+    @cache.decrement(other_key, 1)
+    assert_equal 6, @cache.read(key, raw: true).to_i
+    assert_equal 4, @cache.read(other_key, raw: true).to_i
+
+    sleep 1.8
+
+    assert_nil @cache.read(key, raw: true)
+    assert_equal 4, @cache.read(other_key, raw: true).to_i
+
+    sleep 1
+
+    assert_nil @cache.read(key, raw: true)
+    assert_nil @cache.read(other_key, raw: true)
+  end
+
   def test_race_condition_protection_skipped_if_not_defined
     key = SecureRandom.alphanumeric
     @cache.write(key, "bar")
