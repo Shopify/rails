@@ -76,6 +76,7 @@ module ActiveRecord
       #
       #   recorder.record(:method_name, [:arg1, :arg2])
       def record(*command, &block)
+        # require 'debug'; debugger
         if @reverting
           @commands << inverse_of(*command, &block)
         else

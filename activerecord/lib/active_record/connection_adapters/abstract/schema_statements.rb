@@ -8,6 +8,40 @@ module ActiveRecord
     module SchemaStatements
       include ActiveRecord::Migration::JoinTable
 
+      # This approach isn’t what I really want since I want the input in its form right before it’s turned into SQL
+      #   But for now let’s give it a shot.
+      #
+      def execute(sql, name = nil)
+        raise Greetings
+        Rails.logger.debug "Ok! Let’s execute some SQL from SchemaStatements! #{sql}"
+        # if Rails.config.db.pre_execution
+        #   Rails.config.db.pre_execution.call
+        # end
+        super
+      end
+
+      # This doesn’t work because it’s overridden by ActiveRecord::ConnectionAdapters::MySQL::DatabaseStatement#execute
+
+      # A bunch of objects:
+
+      # * ActiveRecord::ConnectionAdapters::SchemaStatements    <= mixed in to…
+      # * ActiveRecord::ConnectionAdapters::AbstractAdapter     <= this is the interface for ActiveRecord databases
+      # * ActiveRecord::ConnectionAdapters::AbstractMysqlAdapter  <= this inherits from ^^^ and also implements #execute
+      # * ActiveRecord::ConnectionAdapters::MySQL::SchemaStatements   <= this doesn’t implement #execute lol why
+      # * ActiveRecord::ConnectionAdapters::Mysql2Adapter   <= inherits from AbstractMysqlAdapter
+      # * MySQL::DatabaseStatements   <= defines #execute, mixed in to ^^^ and… redefines #execute for some reason
+      #         ^^^^ this is the #execute that is actually used
+
+      # We wish that there was a spot specific to the migration / schema change flow that was the seam for execution. Where could that be?
+
+
+      # maybe kinda interesting is the #check_if_write_query(sql)
+
+      # [] how to write a forwarding wrapper thing that takes the right args and calls super?
+
+
+      # Right now the dry_run_migration thing is called from within the safety check migration code which is in the custom rake task stuff. See MigrationSafetyChecker
+
       # Returns a hash of mappings from the abstract data types to the native
       # database types. See TableDefinition#column for details on the recognized
       # abstract data types.
@@ -316,13 +350,36 @@ module ActiveRecord
 
         yield td if block_given?
 
+
+        # create_table :writing_tools do |t|
+        #   t.string :name
+
+        #   t.timestamps
+        # end
+
+
         if force
           drop_table(table_name, force: force, if_exists: true)
         else
           schema_cache.clear_data_source_cache!(table_name.to_s)
         end
 
-        result = execute schema_creation.accept td
+
+        # this is the PREQUEL OBJECT
+        # schema_creation.accept(td)      <= this is the input to the JSON intermediary format transformer
+        #
+
+        generated_sql = schema_creation.accept td
+
+        # MAYBE THIS IS THE SPOT?!
+        # require 'debug'; debugger
+
+        # if Rails.config.cool_database_seamthing
+        #   # Is this even ok to return here? What would happen?
+        #   return unless Rails.config.cool_database_seamthing.maybe_a_safety_check_block.call(table_definition: td, sql: generated_sql)
+        # end
+
+        result = execute schema_creation.accept td  # => "CREATE TABLE `posts` (`id` bigint NOT NULL AUTO_INCREMENT PRIMARY KEY, `title` varchar(255), `body` text, `published` tinyint(1), `created_at` datetime(6) NOT NULL, `updated_at` datetime(6) NOT NULL) DEFAULT CHARSET=utf8mb4"
 
         unless supports_indexes_in_create?
           td.indexes.each do |column_name, index_options|
@@ -485,6 +542,10 @@ module ActiveRecord
       #
       # See also Table for details on all of the various column transformations.
       def change_table(table_name, **options)
+
+        # Do we have enough to generated the SQL?
+        #   Probably not?
+
         if supports_bulk_alter? && options[:bulk]
           recorder = ActiveRecord::Migration::CommandRecorder.new(self)
           yield update_table_definition(table_name, recorder)
@@ -516,6 +577,10 @@ module ActiveRecord
       # In that case, +options+ and the block will be used by #create_table.
       def drop_table(table_name, **options)
         schema_cache.clear_data_source_cache!(table_name.to_s)
+
+        # INSERT middleware seam here to work with a JSON version of whatever
+        # This one would take `quote_table_name(table_name)` as input
+
         execute "DROP TABLE#{' IF EXISTS' if options[:if_exists]} #{quote_table_name(table_name)}"
       end
 

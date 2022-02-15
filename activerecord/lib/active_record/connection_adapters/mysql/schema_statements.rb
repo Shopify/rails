@@ -78,6 +78,7 @@ module ActiveRecord
         end
 
         def create_table(table_name, options: default_row_format, **)
+          # require 'debug'; debugger
           super
         end
 

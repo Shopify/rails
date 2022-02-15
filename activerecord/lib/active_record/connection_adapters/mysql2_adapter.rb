@@ -29,6 +29,22 @@ module ActiveRecord
   end
 
   module ConnectionAdapters
+
+    # Not the right place for this; just a temporary sketch to prototype the idea
+    module QuerySeamIdea
+      def execute(sql, name = nil, async: false)
+        should_execute_query = true
+
+        if Rails.configuration.database_pre_sql_execution_thing
+          # Ideas for how to only call this if it’s for a migration
+          # Look at the call stack and check if it includes schema changing things?! like from a migration
+          should_execute_query = Rails.configuration.database_pre_sql_execution_thing.call(sql, name, async)
+        end
+
+        super if should_execute_query
+      end
+    end
+
     class Mysql2Adapter < AbstractMysqlAdapter
       ER_BAD_DB_ERROR        = 1049
       ER_ACCESS_DENIED_ERROR = 1045
@@ -37,7 +53,14 @@ module ActiveRecord
 
       ADAPTER_NAME = "Mysql2"
 
+
+      # execute already defined here for MySQL specifically
+
+      # This will redefine it again; why?
       include MySQL::DatabaseStatements
+
+      # Override #execute again – feels weird but 🤷‍♂️
+      include QuerySeamIdea
 
       class << self
         def new_client(config)

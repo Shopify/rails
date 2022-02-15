@@ -191,11 +191,15 @@ module ActiveRecord
         end
       end
 
+      # Why don’t these go into MySQL SchemaStatements module? – Edward
+
+
       #--
       # DATABASE STATEMENTS ======================================
       #++
 
       # Executes the SQL statement in the context of this connection.
+      # This is not actually used lol
       def execute(sql, name = nil, async: false)
         raw_execute(sql, name, async: async)
       end
@@ -635,6 +639,11 @@ module ActiveRecord
         end
 
         def raw_execute(sql, name, async: false)
+
+          # Is this where we need to work?
+          # This feels too general – how do we get here from a place that starts as an intent to change the schema?
+          # require 'debug'; debugger if sql =~ /table/i
+
           materialize_transactions
           mark_transaction_written_if_write(sql)
 
