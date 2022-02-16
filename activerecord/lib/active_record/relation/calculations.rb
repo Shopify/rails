@@ -314,15 +314,19 @@ module ActiveRecord
           query_builder = relation.arel
         end
 
-        result = skip_query_cache_if_necessary { @klass.connection.select_all(query_builder, "#{@klass.name} #{operation.capitalize}") }
-
-        if operation != "count"
-          type = column.try(:type_caster) ||
-            lookup_cast_type_from_join_dependencies(column_name.to_s) || Type.default_value
-          type = type.subtype if Enum::EnumType === type
+        query_result = skip_query_cache_if_necessary do
+          @klass.connection.select_all(query_builder, "#{@klass.name} #{operation.capitalize}", async: @async)
         end
 
-        type_cast_calculated_value(result.cast_values.first, operation, type)
+        query_result.then do |result|
+          if operation != "count"
+            type = column.try(:type_caster) ||
+              lookup_cast_type_from_join_dependencies(column_name.to_s) || Type.default_value
+            type = type.subtype if Enum::EnumType === type
+          end
+
+          type_cast_calculated_value(result.cast_values.first, operation, type)
+        end
       end
 
       def execute_grouped_calculation(operation, column_name, distinct) # :nodoc:

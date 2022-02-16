@@ -29,6 +29,7 @@ module ActiveRecord
       @table  = table
       @values = values
       @loaded = false
+      @async = false
       @predicate_builder = predicate_builder
       @delegate_to_klass = false
       @future_result = nil
@@ -641,6 +642,15 @@ module ActiveRecord
     #   Person.delete_by("published_at < ?", 2.weeks.ago)
     def delete_by(*args)
       where(*args).delete_all
+    end
+
+    def async
+      spawn.async!
+    end
+
+    def async! # :nodoc:
+      @async = true
+      self
     end
 
     # Schedule the query to be performed from a background thread pool.

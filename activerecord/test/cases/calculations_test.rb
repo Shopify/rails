@@ -1387,4 +1387,10 @@ class CalculationsTest < ActiveRecord::TestCase
       NeedQuoting.group(:name).count
     end
   end
+
+  test "async.count" do
+    promise = Account.all.async.count
+    assert promise.is_a?(ActiveRecord::Promise)
+    assert_equal Account.count, promise.value
+  end
 end

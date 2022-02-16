@@ -580,7 +580,12 @@ module ActiveRecord
             return future_result
           end
 
-          exec_query(sql, name, binds, prepare: prepare)
+          result = exec_query(sql, name, binds, prepare: prepare)
+          if async
+            AsyncFallbackResult.new(result)
+          else
+            result
+          end
         end
 
         def sql_for_insert(sql, pk, binds)

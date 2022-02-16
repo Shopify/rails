@@ -1,6 +1,76 @@
 # frozen_string_literal: true
 
 module ActiveRecord
+  class Promise < BasicObject
+    undef_method :==, :!, :!=
+
+    def initialize(future_result, block)
+      @future_result = future_result
+      @block = block
+    end
+
+    def pending?
+      @future_result.pending?
+    end
+
+    def value
+      result = @future_result.result
+      if @block
+        @block.call(result)
+      else
+        result
+      end
+    end
+
+    def then(&block)
+      Promise.new(@future_result, @block ? @block >> block : block)
+    end
+
+    [:class, :respond_to?, :is_a?].each do |method|
+      define_method(method, ::Object.instance_method(method))
+    end
+
+    def inspect # :nodoc:
+      "#<ActiveRecord::Promise status=#{status}>"
+    end
+
+    def pretty_print(q) # :nodoc:
+      q.text(inspect)
+    end
+
+    private
+      def status
+        if @future_result.pending?
+          :pending
+        elsif @future_result.canceled?
+          :canceled?
+        else
+          :complete
+        end
+      end
+  end
+
+  class AsyncFallbackResult # :nodoc:
+    attr_reader :result
+    delegate :empty?, :to_a, to: :result
+
+    def initialize(result)
+      @result = result
+    end
+
+    def pending?
+      false
+    end
+
+    def canceled?
+      false
+    end
+
+    def then(&block)
+      Promise.new(self, block)
+    end
+  end
+
   class FutureResult # :nodoc:
     class EventBuffer
       def initialize(future_result, instrumenter)
@@ -43,6 +113,10 @@ module ActiveRecord
       @result = nil
       @instrumenter = ActiveSupport::Notifications.instrumenter
       @event_buffer = nil
+    end
+
+    def then(&block)
+      Promise.new(self, block)
     end
 
     def schedule!(session)
@@ -95,11 +169,11 @@ module ActiveRecord
       @pending && (!@session || @session.active?)
     end
 
-    private
-      def canceled?
-        @session && !@session.active?
-      end
+    def canceled?
+      @session && !@session.active?
+    end
 
+    private
       def execute_or_wait
         if pending?
           start = Process.clock_gettime(Process::CLOCK_MONOTONIC, :float_millisecond)
