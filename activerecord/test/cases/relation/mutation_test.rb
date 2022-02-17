@@ -36,22 +36,6 @@ module ActiveRecord
       assert_equal [obj], relation.order_values
     end
 
-    test "extending!" do
-      mod, mod2 = Module.new, Module.new
-
-      assert relation.extending!(mod).equal?(relation)
-      assert_equal [mod], relation.extending_values
-      assert relation.is_a?(mod)
-
-      relation.extending!(mod2)
-      assert_equal [mod, mod2], relation.extending_values
-    end
-
-    test "extending! with empty args" do
-      relation.extending!
-      assert_equal [], relation.extending_values
-    end
-
     (Relation::SINGLE_VALUE_METHODS - [:lock, :reordering, :reverse_order, :create_with, :skip_query_cache, :strict_loading]).each do |method|
       test "##{method}!" do
         assert relation.public_send("#{method}!", :foo).equal?(relation)
@@ -114,10 +98,18 @@ module ActiveRecord
       assert_equal [:foo], relation.merge(-> { select(:foo) }).select_values
     end
 
-    test "none!" do
-      assert relation.none!.equal?(relation)
-      assert_equal [NullRelation], relation.extending_values
-      assert relation.is_a?(NullRelation)
+    test "none" do
+      rel = relation.none
+      assert_equal [NullRelation], rel.extending_values
+      assert rel.is_a?(NullRelation)
+    end
+
+    test "none does not bust constant cache" do
+      skip "RubyVM.stat is not defined" unless defined? RubyVM.stat
+
+      assert_no_difference "RubyVM.stat(:global_constant_state)" do
+        relation.none
+      end
     end
 
     test "distinct!" do

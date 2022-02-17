@@ -973,7 +973,7 @@ module ActiveRecord
     end
 
     def none! # :nodoc:
-      where!("1=0").extending!(NullRelation)
+      where!("1=0").extending(NullRelation)
     end
 
     # Sets readonly attributes for the returned relation. If value is
@@ -1131,20 +1131,20 @@ module ActiveRecord
     #   end
     def extending(*modules, &block)
       if modules.any? || block
-        spawn.extending!(*modules, &block)
+        modules << Module.new(&block) if block
+        modules.flatten!
+
+        extended_class = Class.new(self.class).include(*modules)
+        clone = extended_class.new(klass)
+        instance_variables.each do |var|
+          clone.instance_variable_set(var, instance_variable_get(var))
+        end
+        clone.send(:initialize_copy, self)
+        clone.extending_values += modules
+        clone
       else
         self
       end
-    end
-
-    def extending!(*modules, &block) # :nodoc:
-      modules << Module.new(&block) if block
-      modules.flatten!
-
-      self.extending_values += modules
-      extend(*extending_values) if extending_values.any?
-
-      self
     end
 
     # Specify optimizer hints to be used in the SELECT statement.
