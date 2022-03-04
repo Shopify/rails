@@ -73,7 +73,10 @@ module ActiveSupport
 
     def eager_load!
       if @_eagerloaded_constants
-        @_eagerloaded_constants.each { |const_name| const_get(const_name) }
+        @_eagerloaded_constants.each do |const_name|
+          const = const_get(const_name)
+          const.eager_load! if const.respond_to?(:eager_load!)
+        end
         @_eagerloaded_constants = nil
       end
     end
