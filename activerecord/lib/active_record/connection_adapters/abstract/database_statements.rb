@@ -582,7 +582,7 @@ module ActiveRecord
 
           result = exec_query(sql, name, binds, prepare: prepare)
           if async
-            AsyncFallbackResult.new(result)
+            FutureResult::Complete.new(result)
           else
             result
           end

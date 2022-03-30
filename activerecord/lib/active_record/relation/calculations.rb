@@ -191,7 +191,12 @@ module ActiveRecord
     #
     def pluck(*column_names)
       if loaded? && all_attributes?(column_names)
-        return records.pluck(*column_names)
+        result = records.pluck(*column_names)
+        if @async
+          return Promise::Complete.new(result)
+        else
+          return result
+        end
       end
 
       if has_include?(column_names.first)
@@ -204,12 +209,14 @@ module ActiveRecord
         relation.select_values = columns
         result = skip_query_cache_if_necessary do
           if where_clause.contradiction?
-            ActiveRecord::Result.empty
+            ActiveRecord::Result.empty(async: @async)
           else
-            klass.connection.select_all(relation.arel, "#{klass.name} Pluck")
+            klass.connection.select_all(relation.arel, "#{klass.name} Pluck", async: @async)
           end
         end
-        type_cast_pluck_values(result, columns)
+        result.then do |result|
+          type_cast_pluck_values(result, columns)
+        end
       end
     end
 
@@ -232,7 +239,7 @@ module ActiveRecord
         return records.pick(*column_names)
       end
 
-      limit(1).pluck(*column_names).first
+      limit(1).pluck(*column_names).then(&:first)
     end
 
     # Pluck all the ID's for the relation using the table's primary key
@@ -367,38 +374,39 @@ module ActiveRecord
         relation.group_values  = group_fields
         relation.select_values = select_values
 
-        calculated_data = skip_query_cache_if_necessary { @klass.connection.select_all(relation.arel, "#{@klass.name} #{operation.capitalize}") }
-
-        if association
-          key_ids     = calculated_data.collect { |row| row[group_aliases.first] }
-          key_records = association.klass.base_class.where(association.klass.base_class.primary_key => key_ids)
-          key_records = key_records.index_by(&:id)
-        end
-
-        key_types = group_columns.each_with_object({}) do |(aliaz, col_name), types|
-          types[aliaz] = type_for(col_name) do
-            calculated_data.column_types.fetch(aliaz, Type.default_value)
+        result = skip_query_cache_if_necessary { @klass.connection.select_all(relation.arel, "#{@klass.name} #{operation.capitalize}", async: @async) }
+        result.then do |calculated_data|
+          if association
+            key_ids     = calculated_data.collect { |row| row[group_aliases.first] }
+            key_records = association.klass.base_class.where(association.klass.base_class.primary_key => key_ids)
+            key_records = key_records.index_by(&:id)
           end
-        end
 
-        hash_rows = calculated_data.cast_values(key_types).map! do |row|
-          calculated_data.columns.each_with_object({}).with_index do |(col_name, hash), i|
-            hash[col_name] = row[i]
+          key_types = group_columns.each_with_object({}) do |(aliaz, col_name), types|
+            types[aliaz] = type_for(col_name) do
+              calculated_data.column_types.fetch(aliaz, Type.default_value)
+            end
           end
-        end
 
-        if operation != "count"
-          type = column.try(:type_caster) ||
-            lookup_cast_type_from_join_dependencies(column_name.to_s) || Type.default_value
-          type = type.subtype if Enum::EnumType === type
-        end
+          hash_rows = calculated_data.cast_values(key_types).map! do |row|
+            calculated_data.columns.each_with_object({}).with_index do |(col_name, hash), i|
+              hash[col_name] = row[i]
+            end
+          end
 
-        hash_rows.each_with_object({}) do |row, result|
-          key = group_aliases.map { |aliaz| row[aliaz] }
-          key = key.first if key.size == 1
-          key = key_records[key] if associated
+          if operation != "count"
+            type = column.try(:type_caster) ||
+              lookup_cast_type_from_join_dependencies(column_name.to_s) || Type.default_value
+            type = type.subtype if Enum::EnumType === type
+          end
 
-          result[key] = type_cast_calculated_value(row[column_alias], operation, type)
+          hash_rows.each_with_object({}) do |row, result|
+            key = group_aliases.map { |aliaz| row[aliaz] }
+            key = key.first if key.size == 1
+            key = key_records[key] if associated
+
+            result[key] = type_cast_calculated_value(row[column_alias], operation, type)
+          end
         end
       end
 
