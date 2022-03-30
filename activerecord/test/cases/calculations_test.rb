@@ -22,8 +22,11 @@ require "models/post"
 require "models/comment"
 require "models/rating"
 require "support/stubs/strong_parameters"
+require "support/async_helper"
 
 class CalculationsTest < ActiveRecord::TestCase
+  include AsyncHelper
+
   fixtures :companies, :accounts, :authors, :author_addresses, :topics, :speedometers, :minivans, :books, :posts, :comments
 
   def test_should_sum_field
@@ -1413,18 +1416,5 @@ class CalculationsTest < ActiveRecord::TestCase
     assert_nothing_raised do
       NeedQuoting.group(:name).count
     end
-  end
-
-  private
-
-  def assert_async_api(relation, code)
-    caller = caller_locations(1, 1).first
-    sync_result = relation.instance_eval(code, caller.path, caller.lineno)
-    async_result = relation.async.instance_eval(code, caller.path, caller.lineno)
-
-    message = "Expected async.#{code} to return an ActiveRecord::Promise, got: #{async_result.inspect}"
-    assert ActiveRecord::Promise === async_result, message
-
-    assert_equal sync_result, async_result.value
   end
 end

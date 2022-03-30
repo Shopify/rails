@@ -47,7 +47,9 @@ module ActiveRecord
     # Note that building your own SQL query string from user input may expose your application to
     # injection attacks (https://guides.rubyonrails.org/security.html#sql-injection).
     def find_by_sql(sql, binds = [], preparable: nil, &block)
-      _load_from_sql(_query_by_sql(sql, binds, preparable: preparable), &block)
+      _query_by_sql(sql, binds, preparable: preparable, async: @async).then do |result|
+        _load_from_sql(result, &block)
+      end
     end
 
     def _query_by_sql(sql, binds = [], preparable: nil, async: false) # :nodoc:

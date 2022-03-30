@@ -4,15 +4,17 @@ module ActiveRecord
   class Promise < BasicObject
     undef_method :==, :!, :!=
 
-    def initialize(future_result, block)
+    def initialize(future_result, block) # :nodoc:
       @future_result = future_result
       @block = block
     end
 
+    # TODO: doc
     def pending?
       @future_result.pending?
     end
 
+    # TODO: doc
     def value
       result = @future_result.result
       if @block
@@ -22,6 +24,7 @@ module ActiveRecord
       end
     end
 
+    # TODO: doc
     def then(&block)
       Promise.new(@future_result, @block ? @block >> block : block)
     end
