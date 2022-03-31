@@ -31,22 +31,22 @@ class CalculationsTest < ActiveRecord::TestCase
 
   def test_should_sum_field
     assert_equal 318, Account.sum(:credit_limit)
-    assert_async_api Account, "sum(:credit_limit)"
+    assert_async_equal 318, Account.sum(:credit_limit, async: true)
   end
 
   def test_should_sum_arel_attribute
     assert_equal 318, Account.sum(Account.arel_table[:credit_limit])
-    assert_async_api Account, "sum(Account.arel_table[:credit_limit])"
+    assert_async_equal 318, Account.sum(Account.arel_table[:credit_limit], async: true)
   end
 
   def test_should_average_field
     assert_equal 53.0, Account.average(:credit_limit)
-    assert_async_api Account, "average(:credit_limit)"
+    assert_async_equal 53.0, Account.average(:credit_limit, async: true)
   end
 
   def test_should_average_arel_attribute
     assert_equal 53.0, Account.average(Account.arel_table[:credit_limit])
-    assert_async_api Account, "average(Account.arel_table[:credit_limit])"
+    assert_async_equal 53.0, Account.average(Account.arel_table[:credit_limit], async: true)
   end
 
   def test_should_resolve_aliased_attributes
@@ -97,18 +97,18 @@ class CalculationsTest < ActiveRecord::TestCase
 
   def test_should_get_maximum_of_field
     assert_equal 60, Account.maximum(:credit_limit)
-    assert_async_api Account, "maximum(:credit_limit)"
+    assert_async_equal 60, Account.maximum(:credit_limit, async: true)
   end
 
   def test_should_get_maximum_of_arel_attribute
     assert_equal 60, Account.maximum(Account.arel_table[:credit_limit])
-    assert_async_api Account, "maximum(Account.arel_table[:credit_limit])"
+    assert_async_equal 60, Account.maximum(Account.arel_table[:credit_limit], async: true)
   end
 
   def test_should_get_maximum_of_field_with_include
     relation = Account.where("companies.name != 'Summit'").references(:companies).includes(:firm)
     assert_equal 55, relation.maximum(:credit_limit)
-    assert_async_api relation, "maximum(:credit_limit)"
+    assert_async_equal 55, relation.maximum(:credit_limit, async: true)
   end
 
   def test_should_get_maximum_of_arel_attribute_with_include
@@ -117,12 +117,12 @@ class CalculationsTest < ActiveRecord::TestCase
 
   def test_should_get_minimum_of_field
     assert_equal 50, Account.minimum(:credit_limit)
-    assert_async_api Account, "minimum(:credit_limit)"
+    assert_async_equal 50, Account.minimum(:credit_limit, async: true)
   end
 
   def test_should_get_minimum_of_arel_attribute
     assert_equal 50, Account.minimum(Account.arel_table[:credit_limit])
-    assert_async_api Account, "minimum(Account.arel_table[:credit_limit])"
+    assert_async_equal 50, Account.minimum(Account.arel_table[:credit_limit], async: true)
   end
 
   def test_should_group_by_field
@@ -130,7 +130,7 @@ class CalculationsTest < ActiveRecord::TestCase
     [1, 6, 2].each do |firm_id|
       assert_includes c.keys, firm_id, "Group #{c.inspect} does not contain firm_id #{firm_id}"
     end
-    assert_async_api Account.group(:firm_id), "sum(:credit_limit)"
+    assert_async_equal c, Account.group(:firm_id).sum(:credit_limit, async: true)
   end
 
   def test_should_group_by_arel_attribute
@@ -431,7 +431,7 @@ class CalculationsTest < ActiveRecord::TestCase
     assert_equal 105, c[6]
     assert_nil        c[2]
 
-    assert_async_api relation, "sum(:credit_limit)"
+    assert_async_equal c, relation.sum(:credit_limit, async: true)
   end
 
   def test_should_group_by_fields_with_table_alias
@@ -456,8 +456,8 @@ class CalculationsTest < ActiveRecord::TestCase
     assert_equal 6, Account.calculate(:count, "*")
     assert_equal 6, Account.calculate(:count, :all)
 
-    assert_async_api Account, "calculate(:count, '*')"
-    assert_async_api Account, "calculate(:count, :all)"
+    assert_async_equal 6, Account.calculate(:count, "*", async: true)
+    assert_async_equal 6, Account.calculate(:count, :all, async: true)
   end
 
   def test_should_calculate_grouped_with_invalid_field
@@ -759,19 +759,19 @@ class CalculationsTest < ActiveRecord::TestCase
 
   def test_pluck
     assert_equal [1, 2, 3, 4, 5], Topic.order(:id).pluck(:id)
-    assert_async_api Topic, "order(:id).pluck(:id)"
+    assert_async_equal [1, 2, 3, 4, 5], Topic.order(:id).pluck(:id, async: true)
   end
 
   def test_pluck_async_on_loaded_relation
-    relation = Topic.order(:id)
-    assert_async_api relation, "load.pluck(:id)"
+    relation = Topic.order(:id).load
+    assert_async_equal relation.pluck(:id), relation.pluck(:id, async: true)
   end
 
   def test_pluck_with_empty_in
     assert_queries(0) do
       assert_equal [], Topic.where(id: []).pluck(:id)
     end
-    assert_async_api Topic.where(id: []), "pluck(:id)"
+    assert_async_equal [], Topic.where(id: []).pluck(:id, async: true)
   end
 
   def test_pluck_without_column_names
@@ -1021,7 +1021,7 @@ class CalculationsTest < ActiveRecord::TestCase
     part.trinkets.create!
 
     assert_equal part.id, ShipPart.joins(:trinkets).sum(:id)
-    assert_async_api ShipPart.joins(:trinkets), "sum(:id)"
+    assert_async_equal part.id, ShipPart.joins(:trinkets).sum(:id, async: true)
   end
 
   def test_pluck_joined_with_polymorphic_relation
@@ -1029,7 +1029,7 @@ class CalculationsTest < ActiveRecord::TestCase
     part.trinkets.create!
 
     assert_equal [part.id], ShipPart.joins(:trinkets).pluck(:id)
-    assert_async_api ShipPart.joins(:trinkets), "pluck(:id)"
+    assert_async_equal [part.id], ShipPart.joins(:trinkets).pluck(:id, async: true)
   end
 
   def test_pluck_loaded_relation
@@ -1071,7 +1071,7 @@ class CalculationsTest < ActiveRecord::TestCase
       assert_nil Topic.where(id: 9999999999999999999).pick(:heading)
     end
 
-    assert_async_api Topic.order(:id), "pick(:heading)"
+    assert_async_equal "The First Topic", Topic.order(:id).pick(:heading, async: true)
   end
 
   def test_pick_two
@@ -1081,7 +1081,7 @@ class CalculationsTest < ActiveRecord::TestCase
       assert_nil Topic.where(id: 9999999999999999999).pick(:author_name, :author_email_address)
     end
 
-    assert_async_api Topic.order(:id), "pick(:author_name, :author_email_address)"
+    assert_async_equal ["David", "david@loudthinking.com"], Topic.order(:id).pick(:author_name, :author_email_address, async: true)
   end
 
   def test_pick_delegate_to_all

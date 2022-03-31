@@ -606,7 +606,7 @@ class FinderTest < ActiveRecord::TestCase
     assert_equal(1, topics.size)
     assert_equal(topics(:second).title, topics.first.title)
 
-    assert_async_api Topic, %{find_by_sql "SELECT * FROM topics WHERE author_name = 'Mary'"}
+    assert_async_equal topics,  Topic.find_by_sql("SELECT * FROM topics WHERE author_name = 'Mary'", async: true)
   end
 
   def test_find_with_prepared_select_statement
@@ -1327,7 +1327,7 @@ class FinderTest < ActiveRecord::TestCase
     assert_equal(1, Entrant.count_by_sql(["SELECT COUNT(*) FROM entrants WHERE id > ?", 2]))
     assert_equal(2, Entrant.count_by_sql(["SELECT COUNT(*) FROM entrants WHERE id > ?", 1]))
 
-    assert_async_api Entrant, "count_by_sql(['SELECT COUNT(*) FROM entrants WHERE id > ?', 1])"
+    assert_async_equal 2, Entrant.count_by_sql(["SELECT COUNT(*) FROM entrants WHERE id > ?", 1], async: true)
   end
 
   def test_find_by_one_attribute
