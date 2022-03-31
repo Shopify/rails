@@ -648,6 +648,10 @@ module ActiveRecord
       spawn.async!
     end
 
+    def async? # :nodoc:
+      @async
+    end
+
     def async! # :nodoc:
       @async = true
       self

@@ -52,26 +52,25 @@ module ActiveRecord
         end
       end
 
-    class Complete < self # :nodoc:
-      attr_reader :value
+      class Complete < self # :nodoc:
+        attr_reader :value
 
-      def initialize(value)
-        @value = value
-      end
-
-      def then
-        Complete.new(yield @value)
-      end
-
-      def pending?
-        false
-      end
-
-      private
-
-        def status
-          :complete
+        def initialize(value)
+          @value = value
         end
-    end
+
+        def then
+          Complete.new(yield @value)
+        end
+
+        def pending?
+          false
+        end
+
+        private
+          def status
+            :complete
+          end
+      end
   end
 end

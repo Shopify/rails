@@ -47,7 +47,7 @@ module ActiveRecord
     # Note that building your own SQL query string from user input may expose your application to
     # injection attacks (https://guides.rubyonrails.org/security.html#sql-injection).
     def find_by_sql(sql, binds = [], preparable: nil, &block)
-      _query_by_sql(sql, binds, preparable: preparable, async: @async).then do |result|
+      _query_by_sql(sql, binds, preparable: preparable, async: current_scope&.async?).then do |result|
         _load_from_sql(result, &block)
       end
     end
@@ -93,7 +93,7 @@ module ActiveRecord
     #
     # * +sql+ - An SQL statement which should return a count query from the database, see the example above.
     def count_by_sql(sql)
-      connection.select_value(sanitize_sql(sql), "#{name} Count").to_i
+      connection.select_value(sanitize_sql(sql), "#{name} Count", async: current_scope&.async?).then(&:to_i)
     end
   end
 end
