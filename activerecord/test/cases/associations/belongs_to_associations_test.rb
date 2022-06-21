@@ -183,6 +183,23 @@ class BelongsToAssociationsTest < ActiveRecord::TestCase
     ActiveRecord::Base.belongs_to_required_by_default = original_value
   end
 
+  def test_required_takes_precedence_when_both_required_and_optional_supplied
+    original_value = ActiveRecord::Base.belongs_to_required_by_default
+    ActiveRecord::Base.belongs_to_required_by_default = true
+
+    model = Class.new(ActiveRecord::Base) do
+      self.table_name = "accounts"
+      def self.name; "Temp"; end
+      belongs_to :company, optional: true, required: true
+    end
+
+    account = model.new
+    assert_not_predicate account, :valid?
+    assert_equal [{ error: :blank }], account.errors.details[:company]
+  ensure
+    ActiveRecord::Base.belongs_to_required_by_default = original_value
+  end
+
   def test_default
     david = developers(:david)
     jamis = developers(:jamis)
