@@ -43,9 +43,13 @@ module ActionView
       def capture(*args)
         value = nil
         buffer = with_output_buffer { value = yield(*args) }
-        if (string = buffer.presence || value) && string.is_a?(String)
-          ERB::Util.html_escape string
+        ret = case string = buffer.presence || value
+        when FastOutputBuffer, ActiveSupport::SafeBuffer
+          string.to_s
+        when String
+          CGI.escapeHTML(string)
         end
+        ret
       end
 
       # Calling <tt>content_for</tt> stores a block of markup in an identifier for later use.

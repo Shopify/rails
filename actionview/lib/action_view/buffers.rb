@@ -18,7 +18,7 @@ module ActionView
   #   sbuf << 5
   #   puts sbuf # => "hello\u0005"
   #
-  class OutputBuffer < ActiveSupport::SafeBuffer # :nodoc:
+  class OldOutputBuffer < ActiveSupport::SafeBuffer # :nodoc:
     def initialize(*)
       super
       encode!
@@ -36,7 +36,69 @@ module ActionView
     end
 
     alias :safe_append= :safe_concat
+
+    def _unsafe_buffer
+      self
+    end
   end
+
+  class FastOutputBuffer
+    def initialize(buffer = "")
+      @buffer = buffer.dup
+      @buffer.encode!
+    end
+
+    delegate :length, :inspect, :blank?, :force_encoding, :empty?, :ascii_only?, :html_safe, to: :@buffer
+    delegate_missing_to :@buffer # TODO: this is a shortcut
+
+    def to_s
+      @buffer.html_safe
+    end
+
+    def html_safe?
+      true
+    end
+
+    def ==(other)
+      @buffer == other
+    end
+
+    def eql?(other)
+      @buffer.eql?(other)
+    end
+
+    def to_str
+      @buffer.dup
+    end
+
+    def <<(value)
+      unless value.nil?
+        @buffer << if value.html_safe?
+          value.to_s
+        else
+          CGI.escapeHTML(value.to_s)
+        end
+      end
+      self
+    end
+    alias :append= :<<
+
+    def safe_concat(value)
+      @buffer << value
+    end
+    alias :safe_append= :safe_concat
+
+    def safe_expr_append=(val)
+      return self if val.nil?
+      @buffer << val.to_s
+    end
+
+    def _unsafe_buffer
+      @buffer
+    end
+  end
+
+  OutputBuffer = FastOutputBuffer
 
   class StreamingBuffer # :nodoc:
     def initialize(block)
@@ -61,6 +123,10 @@ module ActionView
     end
 
     def html_safe
+      self
+    end
+
+    def _unsafe_buffer
       self
     end
   end
