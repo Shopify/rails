@@ -123,7 +123,7 @@ module ActiveRecord::Associations::Builder # :nodoc:
       super
 
       if required
-        model.validates_presence_of reflection.name, message: :required
+        model.validates_presence_of reflection.name, message: :required, validate_on_change_only: ActiveRecord::Base.validate_on_change_only_by_default
       end
     end
 

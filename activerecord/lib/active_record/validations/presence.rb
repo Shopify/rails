@@ -3,12 +3,28 @@
 module ActiveRecord
   module Validations
     class PresenceValidator < ActiveModel::Validations::PresenceValidator # :nodoc:
+      def initialize(options)
+        @validate_on_change_only = options.delete(:validate_on_change_only)
+        super
+      end
+
       def validate_each(record, attribute, association_or_value)
+        return if @validate_on_change_only && association_defined_but_not_changed?(record, attribute)
+
         if record.class._reflect_on_association(attribute)
           association_or_value = Array.wrap(association_or_value).reject(&:marked_for_destruction?)
         end
+
         super
       end
+
+        private
+          def association_defined_but_not_changed?(record, attribute)
+            if record.class._reflect_on_association(attribute)
+              association = record.association(attribute)
+              association.target.present? && !association.target_changed?
+            end
+          end
     end
 
     module ClassMethods

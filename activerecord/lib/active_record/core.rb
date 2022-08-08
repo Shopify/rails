@@ -87,6 +87,8 @@ module ActiveRecord
 
       class_attribute :belongs_to_required_by_default, instance_accessor: false
 
+      class_attribute :validate_on_change_only_by_default, instance_accessor: false, default: true
+
       class_attribute :strict_loading_by_default, instance_accessor: false, default: false
 
       class_attribute :has_many_inversing, instance_accessor: false, default: false
