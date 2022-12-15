@@ -154,11 +154,11 @@ module ActiveRecord
       def rollback_records
         return unless records
 
-        ite = unique_records
-
+        ite = records.uniq(&:__id__)
         instances_to_run_callbacks_on = prepare_instances_to_run_callbacks_on(ite)
 
-        run_action_on_records(ite, instances_to_run_callbacks_on) do |record, should_run_callbacks|
+        while record = ite.shift
+          should_run_callbacks = record.__id__ == instances_to_run_callbacks_on[record].__id__
           record.rolledback!(force_restore_state: full_rollback?, should_run_callbacks: should_run_callbacks)
         end
       ensure
@@ -168,30 +168,19 @@ module ActiveRecord
       end
 
       def before_commit_records
-        return unless records
-
-        if @run_commit_callbacks
-          ite = unique_records
-
-          instances_to_run_callbacks_on = records.each_with_object({}) do |record, candidates|
-            candidates[record] = record
-          end
-
-          run_action_on_records(ite, instances_to_run_callbacks_on) do |record, should_run_callbacks|
-            record.before_committed! if should_run_callbacks
-          end
-        end
+        records.uniq.each(&:before_committed!) if records && @run_commit_callbacks
       end
 
       def commit_records
         return unless records
 
-        ite = unique_records
+        ite = records.uniq(&:__id__)
 
         if @run_commit_callbacks
           instances_to_run_callbacks_on = prepare_instances_to_run_callbacks_on(ite)
 
-          run_action_on_records(ite, instances_to_run_callbacks_on) do |record, should_run_callbacks|
+          while record = ite.shift
+            should_run_callbacks = record.__id__ == instances_to_run_callbacks_on[record].__id__
             record.committed!(should_run_callbacks: should_run_callbacks)
           end
         else
@@ -210,18 +199,6 @@ module ActiveRecord
       def open?; !closed?; end
 
       private
-        def unique_records
-          records.uniq(&:__id__)
-        end
-
-        def run_action_on_records(records, instances_to_run_callbacks_on)
-          while record = records.shift
-            should_run_callbacks = record.__id__ == instances_to_run_callbacks_on[record].__id__
-
-            yield record, should_run_callbacks
-          end
-        end
-
         def prepare_instances_to_run_callbacks_on(records)
           records.each_with_object({}) do |record, candidates|
             next unless record.trigger_transactional_callbacks?

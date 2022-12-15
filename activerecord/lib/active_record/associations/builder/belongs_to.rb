@@ -40,7 +40,7 @@ module ActiveRecord::Associations::Builder # :nodoc:
       klass._counter_cache_columns << cache_column if klass && klass.respond_to?(:_counter_cache_columns)
     end
 
-    def self.touch_record(o, changes, foreign_key, name, touch) # :nodoc:
+    def self.touch_record(o, changes, foreign_key, name, touch, touch_method) # :nodoc:
       old_foreign_id = changes[foreign_key] && changes[foreign_key].first
 
       if old_foreign_id
@@ -58,9 +58,9 @@ module ActiveRecord::Associations::Builder # :nodoc:
 
         if old_record
           if touch != true
-            old_record.touch_later(touch)
+            old_record.public_send(touch_method, touch)
           else
-            old_record.touch_later
+            old_record.public_send(touch_method)
           end
         end
       end
@@ -68,9 +68,9 @@ module ActiveRecord::Associations::Builder # :nodoc:
       record = o.public_send name
       if record && record.persisted?
         if touch != true
-          record.touch_later(touch)
+          record.public_send(touch_method, touch)
         else
-          record.touch_later
+          record.public_send(touch_method)
         end
       end
     end
@@ -81,7 +81,7 @@ module ActiveRecord::Associations::Builder # :nodoc:
       touch       = reflection.options[:touch]
 
       callback = lambda { |changes_method| lambda { |record|
-        BelongsTo.touch_record(record, record.send(changes_method), foreign_key, name, touch)
+        BelongsTo.touch_record(record, record.send(changes_method), foreign_key, name, touch, belongs_to_touch_method)
       }}
 
       if reflection.counter_cache_column
