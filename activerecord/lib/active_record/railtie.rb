@@ -184,6 +184,7 @@ To keep using the current cache store, you can turn off cache versioning entirel
 
                 # If the schema cache doesn't have the columns
                 # hash for the model cached, `define_attribute_methods` would trigger a query.
+                p [:define_attribute_methods, model.name, model.table_name, model.abstract_class]
                 if schema_cache && schema_cache.columns_hash?(model.table_name)
                   model.define_attribute_methods
                 end
