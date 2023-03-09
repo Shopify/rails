@@ -23,9 +23,12 @@ module ActiveRecord
         raise DestroyAssociationAsyncError, "owner record not destroyed"
       end
 
-      association_model.where(association_primary_key_column => association_ids).find_each do |r|
-        r.destroy
-      end
+      assoc_pk_cols = Array(association_primary_key_column)
+
+      association_ids
+        .map { |assoc_ids| association_model.where(assoc_pk_cols.zip(Array(assoc_ids)).to_h) }
+        .inject(&:or)
+        .find_each { |r| r.destroy }
     end
 
     private
