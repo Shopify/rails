@@ -134,8 +134,8 @@ class DestroyAssociationAsyncTest < ActiveRecord::TestCase
     book.tags << [tag, tag2]
     book.save!
 
-    job_1_args = ->(job_args) { job_args.first[:association_ids] == [[tag.id]] }
-    job_2_args = ->(job_args) { job_args.first[:association_ids] == [[tag2.id]] }
+    job_1_args = ->(job_args) { job_args.first[:association_ids] == [tag.id] }
+    job_2_args = ->(job_args) { job_args.first[:association_ids] == [tag2.id] }
 
     assert_enqueued_with(job: ActiveRecord::DestroyAssociationAsyncJob, args: job_1_args) do
       assert_enqueued_with(job: ActiveRecord::DestroyAssociationAsyncJob, args: job_2_args) do
