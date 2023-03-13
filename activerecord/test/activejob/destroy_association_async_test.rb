@@ -21,6 +21,7 @@ require "models/dl_keyed_has_many_through"
 require "models/sharded/blog_post_destroy_async"
 require "models/sharded/comment_destroy_async"
 require "models/sharded/tag"
+require "models/sharded/blog_post"
 require "models/sharded/blog_post_tag"
 require "models/sharded/blog"
 
@@ -63,8 +64,17 @@ class DestroyAssociationAsyncTest < ActiveRecord::TestCase
       blog_post.destroy
     end
 
-    assert_difference -> { Sharded::Tag.count }, -2 do
-      perform_enqueued_jobs only: ActiveRecord::DestroyAssociationAsyncJob
+    sql = capture_sql do
+      assert_difference -> { Sharded::Tag.count }, -2 do
+        perform_enqueued_jobs only: ActiveRecord::DestroyAssociationAsyncJob
+      end
+    end
+
+    delete_sqls = sql.select { |sql| sql.start_with?("DELETE") }
+    assert_equal 2, delete_sqls.count
+
+    delete_sqls.each do |sql|
+      assert_match(/#{Regexp.escape(Sharded::Tag.connection.quote_table_name("sharded_tags.blog_id"))} =/, sql)
     end
   ensure
     Sharded::Tag.delete_all
@@ -124,8 +134,8 @@ class DestroyAssociationAsyncTest < ActiveRecord::TestCase
     book.tags << [tag, tag2]
     book.save!
 
-    job_1_args = ->(job_args) { job_args.first[:association_ids] == [tag.id] }
-    job_2_args = ->(job_args) { job_args.first[:association_ids] == [tag2.id] }
+    job_1_args = ->(job_args) { job_args.first[:association_ids] == [[tag.id]] }
+    job_2_args = ->(job_args) { job_args.first[:association_ids] == [[tag2.id]] }
 
     assert_enqueued_with(job: ActiveRecord::DestroyAssociationAsyncJob, args: job_1_args) do
       assert_enqueued_with(job: ActiveRecord::DestroyAssociationAsyncJob, args: job_2_args) do
@@ -169,9 +179,15 @@ class DestroyAssociationAsyncTest < ActiveRecord::TestCase
       comment.destroy
     end
 
-    assert_difference -> { Sharded::BlogPostDestroyAsync.count }, -1 do
-      perform_enqueued_jobs only: ActiveRecord::DestroyAssociationAsyncJob
+    sql = capture_sql do
+      assert_difference -> { Sharded::BlogPostDestroyAsync.count }, -1 do
+        perform_enqueued_jobs only: ActiveRecord::DestroyAssociationAsyncJob
+      end
     end
+
+    delete_sqls = sql.select { |sql| sql.start_with?("DELETE") }
+    assert_equal 1, delete_sqls.count
+    assert_match(/#{Regexp.escape(Sharded::BlogPost.connection.quote_table_name("sharded_blog_posts.blog_id"))} =/, delete_sqls.first)
   ensure
     Sharded::BlogPostDestroyAsync.delete_all
     Sharded::CommentDestroyAsync.delete_all
@@ -283,8 +299,17 @@ class DestroyAssociationAsyncTest < ActiveRecord::TestCase
       blog_post.destroy
     end
 
-    assert_difference -> { Sharded::CommentDestroyAsync.count }, -2 do
-      perform_enqueued_jobs only: ActiveRecord::DestroyAssociationAsyncJob
+    sql = capture_sql do
+      assert_difference -> { Sharded::CommentDestroyAsync.count }, -2 do
+        perform_enqueued_jobs only: ActiveRecord::DestroyAssociationAsyncJob
+      end
+    end
+
+    delete_sqls = sql.select { |sql| sql.start_with?("DELETE") }
+    assert_equal 2, delete_sqls.count
+
+    delete_sqls.each do |sql|
+      assert_match(/#{Regexp.escape(Sharded::Tag.connection.quote_table_name("sharded_comments.blog_id"))} =/, sql)
     end
   ensure
     Sharded::CommentDestroyAsync.delete_all
@@ -401,8 +426,8 @@ class DestroyAssociationAsyncTest < ActiveRecord::TestCase
       raise ActiveRecord::Rollback
     end
     assert_no_enqueued_jobs only: ActiveRecord::DestroyAssociationAsyncJob
+  ensure
+    Tag.delete_all
+    BookDestroyAsync.delete_all
   end
-ensure
-  Tag.delete_all
-  BookDestroyAsync.delete_all
 end
