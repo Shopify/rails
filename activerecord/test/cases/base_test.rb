@@ -140,6 +140,7 @@ class BasicsTest < ActiveRecord::TestCase
     badchar   = {
       "SQLite3Adapter"    => '"',
       "Mysql2Adapter"     => "`",
+      "TrilogyAdapter"    => "`",
       "PostgreSQLAdapter" => '"',
       "OracleAdapter"     => '"',
     }.fetch(classname) {
@@ -1106,7 +1107,7 @@ class BasicsTest < ActiveRecord::TestCase
     assert_equal company, Company.find(company.id)
   end
 
-  if current_adapter?(:PostgreSQLAdapter, :Mysql2Adapter, :SQLite3Adapter)
+  if current_adapter?(:PostgreSQLAdapter, :Mysql2Adapter, :TrilogyAdapter, :SQLite3Adapter)
     def test_default_char_types
       default = Default.new
 

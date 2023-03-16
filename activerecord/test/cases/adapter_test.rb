@@ -125,7 +125,7 @@ module ActiveRecord
       assert_instance_of(ActiveRecord::Result, result)
     end
 
-    if current_adapter?(:Mysql2Adapter)
+    if current_adapter?(:Mysql2Adapter) || current_adapter?(:TrilogyAdapter)
       def test_charset
         assert_not_nil @connection.charset
         assert_not_equal "character_set_database", @connection.charset
@@ -693,7 +693,7 @@ module ActiveRecord
       unless current_adapter?(:SQLite3Adapter)
         test "#execute is retryable" do
           conn_id = case @connection.class::ADAPTER_NAME
-                    when "Mysql2"
+                    when "Mysql2", "Trilogy"
                       @connection.execute("SELECT CONNECTION_ID()").to_a[0][0]
                     when "PostgreSQL"
                       @connection.execute("SELECT pg_backend_pid()").to_a[0]["pg_backend_pid"]
@@ -710,7 +710,7 @@ module ActiveRecord
           case connection.class::ADAPTER_NAME
           when "PostgreSQL"
             connection.instance_variable_get(:@raw_connection).transaction_status == ::PG::PQTRANS_INTRANS
-          when "Mysql2"
+          when "Mysql2", "Trilogy"
             begin
               connection.instance_variable_get(:@raw_connection).query("SAVEPOINT transaction_test")
               connection.instance_variable_get(:@raw_connection).query("RELEASE SAVEPOINT transaction_test")
@@ -739,7 +739,7 @@ module ActiveRecord
             end
             connection.instance_variable_get(:@raw_connection).async_exec("set idle_in_transaction_session_timeout = '10ms'")
             sleep 0.05
-          when "Mysql2"
+          when "Mysql2", "Trilogy"
             connection.send(:internal_execute, "set @@wait_timeout=1")
             sleep 1.2
           else
@@ -750,7 +750,7 @@ module ActiveRecord
         def kill_connection_from_server(connection_id)
           conn = @connection.pool.checkout
           case conn.class::ADAPTER_NAME
-          when "Mysql2"
+          when "Mysql2", "Trilogy"
             conn.execute("KILL #{connection_id}")
           when "PostgreSQL"
             conn.execute("SELECT pg_cancel_backend(#{connection_id})")

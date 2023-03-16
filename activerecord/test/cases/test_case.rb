@@ -244,6 +244,13 @@ module ActiveRecord
     end
   end
 
+  class TrilogyTestCase < TestCase
+    def self.run(*args)
+      super if current_adapter?(:TrilogyAdapter)
+    end
+  end
+
+
   class SQLite3TestCase < TestCase
     def self.run(*args)
       super if current_adapter?(:SQLite3Adapter)
