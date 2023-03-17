@@ -90,6 +90,7 @@ module ActiveRecord
       end
 
       ER_BAD_DB_ERROR = 1049
+      ER_DBACCESS_DENIED_ERROR = 1044
       ER_ACCESS_DENIED_ERROR = 1045
 
       ADAPTER_NAME = "Trilogy"
@@ -124,7 +125,7 @@ module ActiveRecord
 
         def translate_connect_error(config, error)
           case error.error_code
-          when ER_BAD_DB_ERROR
+          when ER_DBACCESS_DENIED_ERROR, ER_BAD_DB_ERROR
             ActiveRecord::NoDatabaseError.db_error(config[:database])
           when ER_ACCESS_DENIED_ERROR
             ActiveRecord::DatabaseConnectionError.username_error(config[:username])
