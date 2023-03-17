@@ -312,6 +312,10 @@ module ActiveRecord
         def default_prepared_statements
           false
         end
+
+        def default_insert_value(column)
+          Arel.sql("DEFAULT") unless column.auto_increment?
+        end
     end
   end
 end
