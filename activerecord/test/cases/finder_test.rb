@@ -25,6 +25,7 @@ require "models/subscriber"
 require "models/non_primary_key"
 require "models/clothing_item"
 require "models/cpk"
+require "models/sharded"
 require "support/stubs/strong_parameters"
 require "support/async_helper"
 
@@ -33,7 +34,8 @@ class FinderTest < ActiveRecord::TestCase
 
   fixtures :companies, :topics, :entrants, :developers, :developers_projects,
     :posts, :comments, :accounts, :authors, :author_addresses, :customers,
-    :categories, :categorizations, :cars, :clothing_items, :cpk_books
+    :categories, :categorizations, :cars, :clothing_items, :cpk_books,
+    :sharded_comments, :sharded_blog_posts, :sharded_tags, :sharded_blogs
 
   def test_find_by_id_with_hash
     assert_nothing_raised do
@@ -200,6 +202,14 @@ class FinderTest < ActiveRecord::TestCase
     assert_equal false, Topic.exists?(Topic.new.id)
 
     assert_raise(NoMethodError) { Topic.exists?([1, 2]) }
+  end
+
+  def test_exists_with_composite_primary_key
+    book = cpk_books(:cpk_great_author_first_book)
+
+    assert_equal true, Cpk::Book.exists?(*book.id)
+    assert_equal false, Cpk::Book.exists?(1, -1)
+    assert_raise(NoMethodError) { Topic.exists?(1, 2) }
   end
 
   def test_exists_with_scope

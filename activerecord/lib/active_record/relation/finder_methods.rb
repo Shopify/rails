@@ -323,7 +323,15 @@ module ActiveRecord
     #   Person.exists?(false)
     #   Person.exists?
     #   Person.where(name: 'Spartacus', rating: 4).exists?
-    def exists?(conditions = :none)
+    def exists?(*conditions)
+      if conditions.length.zero?
+        conditions = :none
+      elsif conditions.length == 1
+        conditions = conditions.pop
+      else
+        conditions = primary_key.zip(conditions).to_h
+      end
+
       if Base === conditions
         raise ArgumentError, <<-MSG.squish
           You are passing an instance of ActiveRecord::Base to `exists?`.
