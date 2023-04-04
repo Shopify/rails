@@ -6,12 +6,30 @@ require "models/person"
 require "minitest/mock"
 
 class ExceptionsTest < ActiveSupport::TestCase
-  setup do
-    JobBuffer.clear
-    skip if adapter_skips_scheduling?(ActiveJob::Base.queue_adapter)
+  puts "ADAPTER SET TO #{ActiveJob::Base.queue_adapter}"
+  SKIPS_SCHEDULING = [
+    ActiveJob::QueueAdapters::InlineAdapter,
+    ActiveJob::QueueAdapters::AsyncAdapter,
+    ActiveJob::QueueAdapters::SneakersAdapter
+  ].include?(ActiveJob::Base.queue_adapter.class)
+  puts "ADAPTER SKIPS SCHEDULING #{SKIPS_SCHEDULING}"
+
+  def self.scheduling_test(...)
+    return if SKIPS_SCHEDULING
+    test(...)
   end
 
-  test "successfully retry job throwing exception against defaults" do
+  setup do
+    JobBuffer.clear
+    skip if SKIPS_SCHEDULING
+  end
+
+  scheduling_test "our custom test" do
+    puts "WE ARE RUNNING TESTS HERE"
+    assert 1
+  end
+
+  scheduling_test "successfully retry job throwing exception against defaults" do
     RetryJob.perform_later "DefaultsError", 5
 
     assert_equal [
@@ -22,14 +40,14 @@ class ExceptionsTest < ActiveSupport::TestCase
       "Successfully completed job" ], JobBuffer.values
   end
 
-  test "successfully retry job throwing exception against higher limit" do
+  scheduling_test "successfully retry job throwing exception against higher limit" do
     RetryJob.perform_later "ShortWaitTenAttemptsError", 9
     assert_equal 9, JobBuffer.values.count
   end
 
   test "keeps the same attempts counter for several exceptions listed in the same retry_on declaration" do
     exceptions_to_raise = %w(FirstRetryableErrorOfTwo FirstRetryableErrorOfTwo FirstRetryableErrorOfTwo
-                             SecondRetryableErrorOfTwo SecondRetryableErrorOfTwo)
+                            SecondRetryableErrorOfTwo SecondRetryableErrorOfTwo)
 
     assert_raises SecondRetryableErrorOfTwo do
       RetryJob.perform_later(exceptions_to_raise, 5)
@@ -45,7 +63,7 @@ class ExceptionsTest < ActiveSupport::TestCase
 
   test "keeps a separate attempts counter for each individual retry_on declaration" do
     exceptions_to_raise = %w(DefaultsError DefaultsError DefaultsError DefaultsError
-                             FirstRetryableErrorOfTwo FirstRetryableErrorOfTwo FirstRetryableErrorOfTwo)
+                            FirstRetryableErrorOfTwo FirstRetryableErrorOfTwo FirstRetryableErrorOfTwo)
 
     assert_nothing_raised do
       RetryJob.perform_later(exceptions_to_raise, 10)
@@ -331,13 +349,4 @@ class ExceptionsTest < ActiveSupport::TestCase
 
     assert_equal ["Raised DefaultsError for the 5th time"], JobBuffer.values
   end
-
-  private
-    def adapter_skips_scheduling?(queue_adapter)
-      [
-        ActiveJob::QueueAdapters::InlineAdapter,
-        ActiveJob::QueueAdapters::AsyncAdapter,
-        ActiveJob::QueueAdapters::SneakersAdapter
-      ].include?(queue_adapter.class)
-    end
 end
