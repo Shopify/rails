@@ -26,6 +26,7 @@ module ActiveSupport
         def deprecation_disallowed?(message)
           return false if explicitly_allowed?(message)
           return true if disallowed_warnings == :all
+          return self.gem_name == "Rails" if disallowed_warnings == :rails
           message && disallowed_warnings.any? do |rule|
             case rule
             when String, Symbol

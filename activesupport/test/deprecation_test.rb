@@ -589,6 +589,17 @@ class DeprecationTest < ActiveSupport::TestCase
     assert_deprecated(@deprecator) { @deprecator.warn }
   end
 
+  test "disallowed_warnings matches only deprecations with gem_name == Rails when set to :rails" do
+    @deprecator.disallowed_warnings = :rails
+
+    assert_disallowed(/fubar/, @deprecator) do
+      @deprecator.warn("using fubar is deprecated")
+    end
+
+    custom_deprecator = ActiveSupport::Deprecation.new("horizon", "MyGem::Custom")
+    assert_deprecated(custom_deprecator) { custom_deprecator.warn }
+  end
+
   test "disallowed_behavior callbacks" do
     assert_callbacks_called_with(deprecator: @deprecator, message: /fubar/) do |callbacks|
       @deprecator.disallowed_behavior = callbacks
