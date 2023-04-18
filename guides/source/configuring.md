@@ -2274,7 +2274,7 @@ In the default generated `config/environments` files, this is set to `:raise` fo
 
 #### `config.active_support.disallowed_deprecation_warnings`
 
-Configures deprecation warnings that the Application considers disallowed. This allows, for example, specific deprecations to be treated as hard failures.
+Configures deprecation warnings that the Application considers disallowed. This allows, for example, specific deprecations to be treated as hard failures. This setting can also be set to `:all` for all deprecations warnings, or `:rails` for only Rails deprecation warnings.
 
 #### `config.active_support.report_deprecations`
 
