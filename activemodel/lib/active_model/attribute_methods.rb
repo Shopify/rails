@@ -214,13 +214,12 @@ module ActiveModel
               mangled_name = "__temp__#{target_name.unpack1("h*")}"
             end
 
-            code_generator.define_cached_method(method_name, as: mangled_name, namespace: :alias_attribute) do |batch|
+            namespace = alias_attribute_code_generation_namespace_for(old_name)
+            code_generator.define_cached_method(method_name, as: mangled_name, namespace: namespace) do |batch|
               body = if CALL_COMPILABLE_REGEXP.match?(target_name)
-                "self.#{target_name}(#{parameters || ''})"
+                compilable_alias_attribute_method_body_for(old_name, pattern, parameters)
               else
-                call_args = [":'#{target_name}'"]
-                call_args << parameters if parameters
-                "send(#{call_args.join(", ")})"
+                dynamic_alias_attribute_method_body_for(old_name, pattern, parameters)
               end
 
               modifier = pattern.parameters == FORWARD_PARAMETERS ? "ruby2_keywords " : ""
@@ -232,6 +231,23 @@ module ActiveModel
             end
           end
         end
+      end
+
+      def alias_attribute_code_generation_namespace_for(_old_name)
+        :alias_attribute
+      end
+
+      def compilable_alias_attribute_method_body_for(old_name, pattern, parameters)
+        target_name = pattern.method_name(old_name).to_s
+        "self.#{target_name}(#{parameters || ''})"
+      end
+
+      def dynamic_alias_attribute_method_body_for(old_name, pattern, parameters)
+        target_name = pattern.method_name(old_name).to_s
+
+        call_args = [":'#{target_name}'"]
+        call_args << parameters if parameters
+        "send(#{call_args.join(", ")})"
       end
 
       # Is +new_name+ an alias?
