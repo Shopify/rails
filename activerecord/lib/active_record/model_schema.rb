@@ -422,6 +422,12 @@ module ActiveRecord
         @columns ||= columns_hash.values.freeze
       end
 
+      # First column in the columns list that is being populated by the database using a sequence.
+      def _auto_populated_column_names
+        return @_auto_populated_column_names if defined?(@_auto_populated_column_names)
+        @_auto_populated_column_names = columns.select(&:auto_incremented_by_db?).map(&:name)
+      end
+
       def attribute_types # :nodoc:
         load_schema
         @attribute_types ||= Hash.new(Type.default_value)

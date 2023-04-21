@@ -75,22 +75,24 @@ module ActiveRecord
         end
         alias :exec_update :exec_delete
 
-        def sql_for_insert(sql, pk, binds) # :nodoc:
+        def sql_for_insert(sql, pk, binds, returning_columns) # :nodoc:
           if pk.nil?
             # Extract the table from the insert sql. Yuck.
             table_ref = extract_table_ref_from_insert_sql(sql)
             pk = primary_key(table_ref) if table_ref
           end
 
-          if pk = suppress_composite_primary_key(pk)
-            sql = "#{sql} RETURNING #{quote_column_name(pk)}"
-          end
+          # Consider bubbling the default fallback up
+          returning = returning_columns.any? ? returning_columns : Array(pk)
+
+          returning_columns_statement = returning.map { |c| quote_column_name(c) }.join(", ")
+          sql = "#{sql} RETURNING #{returning_columns_statement}" if returning.any? # do we need any?
 
           super
         end
         private :sql_for_insert
 
-        def exec_insert(sql, name = nil, binds = [], pk = nil, sequence_name = nil) # :nodoc:
+        def exec_insert(sql, name = nil, binds = [], pk = nil, sequence_name = nil, returning_columns: []) # :nodoc:
           if use_insert_returning? || pk == false
             super
           else

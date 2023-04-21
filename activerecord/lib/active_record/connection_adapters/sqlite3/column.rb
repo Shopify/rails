@@ -12,6 +12,7 @@ module ActiveRecord
         def auto_increment?
           @auto_increment
         end
+        alias_method :auto_incremented_by_db?, :auto_increment?
 
         def init_with(coder)
           @auto_increment = coder["auto_increment"]

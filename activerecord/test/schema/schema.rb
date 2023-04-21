@@ -258,9 +258,8 @@ ActiveRecord::Schema.define do
     t.string :comment
   end
 
-  create_table :cpk_orders, primary_key: [:shop_id, :id], force: true do |t|
+  create_table :cpk_orders, force: true do |t|
     t.integer :shop_id
-    t.integer :id
     t.string :status
   end
 

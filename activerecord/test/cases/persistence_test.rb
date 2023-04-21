@@ -28,6 +28,20 @@ class PersistenceTest < ActiveRecord::TestCase
   fixtures :topics, :companies, :developers, :accounts, :minimalistics, :authors, :author_addresses,
     :posts, :minivans, :clothing_items, :cpk_books
 
+  def test_populates_non_primary_key_autoincremented_column
+    topic = TitlePrimaryKeyTopic.create!(title: "title pk topic")
+
+    assert_not_nil topic.attributes["id"]
+  end
+
+  def test_populates_non_primary_key_autoincremented_column_for_a_cpk_model
+    order = Cpk::Order.create(shop_id: 111_222)
+
+    _shop_id, order_id = order.id
+
+    assert_not_nil order_id
+  end
+
   def test_update_many
     topic_data = { 1 => { "content" => "1 updated" }, 2 => { "content" => "2 updated" } }
     updated = Topic.update(topic_data.keys, topic_data.values)
