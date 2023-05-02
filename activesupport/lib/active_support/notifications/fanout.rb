@@ -129,6 +129,12 @@ module ActiveSupport
 
         def finish(name, id, payload)
           stop_time = now
+
+          if stop_time == nil
+            method(:now).source_location
+            raise
+          end
+
           each do |listener|
             listener.call(name, @start_time, stop_time, id, payload)
           end
