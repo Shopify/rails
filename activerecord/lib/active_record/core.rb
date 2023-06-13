@@ -374,6 +374,11 @@ module ActiveRecord
 
           # initialize cache at class definition for thread safety
           subclass.initialize_find_by_cache
+
+          if ENV["SPECIALIZE_READER"]
+            specialize_reader(subclass)
+          end
+
           unless subclass.base_class?
             klass = self
             until klass.base_class?
@@ -388,6 +393,17 @@ module ActiveRecord
             @inspection_filter = nil
             @filter_attributes = nil
             @generated_association_methods = nil
+          end
+        end
+
+        begin
+          instance_method(:inherited).dup
+          def specialize_reader(subclass)
+            m = subclass.instance_method(:_read_attribute)
+            subclass.define_method(:_read_attribute, m.dup)
+          end
+        rescue TypeError
+          def specialize_reader(subclass)
           end
         end
 
