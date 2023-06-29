@@ -26,7 +26,10 @@ module ActiveRecord
           case value
           when Relation
             relation = value
-            relation = relation.merge(scope) if scope
+            if scope
+              reflection = associated_table.send(:reflection)
+              raise "Applying scope from `#{reflection.active_record}.#{reflection.macro} #{reflection.name.inspect}`"
+            end
             relation = relation.select(primary_key) if select_clause?
             relation = relation.where(primary_type => polymorphic_name) if polymorphic_clause?
             relation
