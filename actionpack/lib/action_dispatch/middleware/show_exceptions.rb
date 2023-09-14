@@ -29,6 +29,8 @@ module ActionDispatch
 
     def call(env)
       @app.call(env)
+    rescue SystemExit
+      raise
     rescue Exception => exception
       request = ActionDispatch::Request.new env
       backtrace_cleaner = request.get_header("action_dispatch.backtrace_cleaner")
@@ -36,7 +38,7 @@ module ActionDispatch
       if wrapper.show?(request)
         render_exception(request, wrapper)
       else
-        raise exception
+        raise
       end
     end
 
