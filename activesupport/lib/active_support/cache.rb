@@ -511,7 +511,12 @@ module ActiveSupport
               nil
             else
               payload[:hit] = true if payload
-              entry.value
+              begin
+                entry.value
+              rescue DeserializationError
+                payload[:hit] = false
+                nil
+              end
             end
           else
             payload[:hit] = false if payload
