@@ -319,6 +319,17 @@ module ActionController
         logger.info "Work complete"
         latch.count_down
       end
+
+      def read_original_thread
+        tc.assert_equal 123, @original_thread[:foo]
+
+        head :ok
+      end
+
+      def process_in_thread(original_thread)
+        @original_thread = original_thread
+        super
+      end
     end
 
     tests TestController
@@ -509,6 +520,13 @@ module ActionController
       get :isolated_state
       assert_equal "isolated_state".inspect, response.body
       assert_stream_closed
+    end
+
+    def test_process_in_thread
+      @controller.tc = self
+      Thread.current[:foo] = 123
+
+      get :read_original_thread
     end
 
     def test_live_stream_default_header

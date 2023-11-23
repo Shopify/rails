@@ -288,7 +288,7 @@ module ActionController
           ActiveSupport::IsolatedExecutionState.share_with(t1)
 
           begin
-            super(name)
+            process_in_thread(t1) { super(name) }
           rescue => e
             if @_response.committed?
               begin
@@ -354,6 +354,11 @@ module ActionController
       yield response.stream
     ensure
       response.stream.close
+    end
+
+    # Override this method to get a reference to the original thread from within the new thread.
+    def process_in_thread(original_thread)
+      yield
     end
 
     private
