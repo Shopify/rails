@@ -327,7 +327,7 @@ module ActiveRecord
       # this method must only be called while holding connection pool's mutex
       def expire
         if in_use?
-          if @owner != ActiveSupport::IsolatedExecutionState.context
+          if @owner != ActiveSupport::IsolatedExecutionState.context && @owner.alive?
             raise ActiveRecordError, "Cannot expire connection, " \
               "it is owned by a different thread: #{@owner}. " \
               "Current thread: #{ActiveSupport::IsolatedExecutionState.context}."

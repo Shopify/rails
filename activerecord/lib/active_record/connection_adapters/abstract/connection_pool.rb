@@ -45,6 +45,60 @@ module ActiveRecord
       end
     end
 
+    class LazyConnectionProxy < BasicObject # :nodoc:
+      def initialize(pool)
+        @pool = pool
+      end
+
+      def inspect
+        "#<ActiveRecord::ConnectionAdapters::LazyConnectionProxy:#{object_id}>"
+      end
+
+      define_method(:__class__, ::Kernel.instance_method(:class))
+
+      def clear_query_cache
+        @pool.query_cache&.clear
+      end
+
+      def query_cache
+        @pool.query_cache
+      end
+
+      def enable_query_cache!
+        @pool.enable_query_cache!
+      end
+
+      def disable_query_cache!
+        @pool.disable_query_cache!
+      end
+
+      private
+        define_method(:__callee__, ::Kernel.instance_method(:__callee__))
+
+        def respond_to_missing(name, include_private = false)
+          @pool.with_connection do |connection|
+            connection.respond_to?(name, include_private)
+          end || super
+        end
+
+        def method_missing(name, ...)
+          @pool.with_connection do |connection|
+            result = connection.public_send(name, ...)
+            # Protect from #tap and other methods returning self
+            if connection.equal?(result)
+              result = self
+            end
+            result
+          end
+        end
+
+        def reject_stateful_method!
+          ::Kernel.raise "Can't call `##{__callee__}` on a lazy connection"
+        end
+        public alias_method :raw_connection, :reject_stateful_method!
+        public alias_method :disable_lazy_transactions!, :reject_stateful_method!
+    end
+
     # = Active Record Connection Pool
     #
     # Connection pool base class for managing Active Record database
@@ -150,6 +204,7 @@ module ActiveRecord
         # Access and modification of <tt>@thread_cached_conns</tt> does not require
         # synchronization.
         @thread_cached_conns = Concurrent::Map.new(initial_capacity: @size)
+        @lazy_connection = LazyConnectionProxy.new(self)
 
         @connections         = []
         @automatic_reconnect = true
@@ -176,7 +231,14 @@ module ActiveRecord
       # #connection can be called any number of times; the connection is
       # held in a cache keyed by a thread.
       def connection
-        @thread_cached_conns[ActiveSupport::IsolatedExecutionState.context] ||= checkout
+        @thread_cached_conns[ActiveSupport::IsolatedExecutionState.context] ||= begin
+          if ActiveRecord.cache_connection_checkout
+            checkout
+          else
+            # raise "Checkout cache is disabled, and no connection is checked out yet for #{@db_config.name.inspect} (TODO: better error)"
+            return @lazy_connection # Trying
+          end
+        end
       end
 
       def pin_connection!(lock_thread) # :nodoc:
@@ -252,8 +314,9 @@ module ActiveRecord
       # connection will be properly returned to the pool by the code that checked
       # it out.
       def with_connection
-        unless conn = @thread_cached_conns[ActiveSupport::IsolatedExecutionState.context]
-          conn = connection
+        current_thread = ActiveSupport::IsolatedExecutionState.context
+        unless conn = @thread_cached_conns[current_thread]
+          conn = (@thread_cached_conns[current_thread] ||= checkout)
           fresh_connection = true
         end
         yield conn

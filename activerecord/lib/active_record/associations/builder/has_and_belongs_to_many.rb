@@ -42,8 +42,8 @@ module ActiveRecord::Associations::Builder # :nodoc:
           self.right_reflection = _reflect_on_association(rhs_name)
         end
 
-        def self.retrieve_connection
-          left_model.retrieve_connection
+        def self.retrieve_connection(&block)
+          left_model.retrieve_connection(&block)
         end
       }
 

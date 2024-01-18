@@ -531,7 +531,9 @@ module ActiveRecord
         @load_schema_monitor.synchronize do
           return if schema_loaded?
 
-          load_schema!
+          with_connection do
+            load_schema!
+          end
 
           @schema_loaded = true
         rescue

@@ -133,17 +133,17 @@ module ActiveRecord
           query_cache.enabled
         end
 
+        def query_cache
+          @thread_query_caches.compute_if_absent(ActiveSupport::IsolatedExecutionState.context) do
+            Store.new(@query_cache_max_size)
+          end
+        end
+
         private
           def prune_thread_cache
             dead_threads = @thread_query_caches.keys.reject(&:alive?)
             dead_threads.each do |dead_thread|
               @thread_query_caches.delete(dead_thread)
-            end
-          end
-
-          def query_cache
-            @thread_query_caches.compute_if_absent(ActiveSupport::IsolatedExecutionState.context) do
-              Store.new(@query_cache_max_size)
             end
           end
       end
