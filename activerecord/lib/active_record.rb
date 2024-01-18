@@ -300,6 +300,14 @@ module ActiveRecord
     @global_executor_concurrency ||= nil
   end
 
+  ##
+  # :singleton-method:
+  #
+  # Specifies whether checked out connections should be
+  # their relevant queries. Defaults to true.
+  singleton_class.attr_accessor :cache_connection_checkout
+  self.cache_connection_checkout = false
+
   singleton_class.attr_accessor :index_nested_attribute_errors
   self.index_nested_attribute_errors = false
 

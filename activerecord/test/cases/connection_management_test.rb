@@ -21,6 +21,10 @@ module ActiveRecord
       end
 
       def setup
+        # These tests are to ensure checkout caching is cleared. So we must
+        # enable it for them to make sense.
+        @cache_connection_checkout_was = ActiveRecord.cache_connection_checkout
+        ActiveRecord.cache_connection_checkout = true
         @env = {}
         @app = App.new
         @management = middleware(@app)
@@ -28,6 +32,10 @@ module ActiveRecord
         # make sure we have an active connection
         assert ActiveRecord::Base.connection
         assert ActiveRecord::Base.connection_handler.active_connections?(:all)
+      end
+
+      def teardown
+        ActiveRecord.cache_connection_checkout = @cache_connection_checkout_was
       end
 
       def test_app_delegation

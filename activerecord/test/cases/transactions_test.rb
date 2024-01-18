@@ -129,54 +129,57 @@ class TransactionTest < ActiveRecord::TestCase
     end
 
     def test_connection_removed_from_pool_when_begin_raises_after_successfully_beginning_a_transaction
-      connection = Topic.connection
-      # Disable lazy transactions so that we will begin a transaction before attempting to write.
-      connection.disable_lazy_transactions!
+      Topic.with_connection do |connection|
+        # Disable lazy transactions so that we will begin a transaction before attempting to write.
+        connection.disable_lazy_transactions!
 
-      # Update begin_db_transaction to successfully begin a transaction, then raise.
-      Topic.connection.class_eval do
-        alias :real_begin_db_transaction :begin_db_transaction
-        define_method(:begin_db_transaction) do |*_args|
-          raise "begin failed"
+        # Update begin_db_transaction to successfully begin a transaction, then raise.
+        Topic.connection.class_eval do
+          alias :real_begin_db_transaction :begin_db_transaction
+          define_method(:begin_db_transaction) do |*_args|
+            raise "begin failed"
+          end
         end
-      end
 
-      # Attempt to begin a transaction. This will raise, causing a rollback.
-      exception = assert_raises(RuntimeError) do
-        ActiveRecord::Base.transaction { }
+        # Attempt to begin a transaction. This will raise, causing a rollback.
+        exception = assert_raises(RuntimeError) do
+          ActiveRecord::Base.transaction { }
+        end
+        assert_equal "begin failed", exception.message
+        assert_not connection.active?
+        assert_not Topic.connection_pool.connections.include?(connection)
       end
-      assert_equal "begin failed", exception.message
-      assert_not connection.active?
-      assert_not Topic.connection_pool.connections.include?(connection)
     ensure
       ActiveRecord::Base.connection_handler.clear_all_connections!(:all)
     end
 
     def test_connection_removed_from_pool_when_thread_killed_in_begin_after_successfully_beginning_a_transaction
       queue = Queue.new
-      connection = nil
+      real_connection = nil
       thread = Thread.new do
-        connection = Topic.connection
+        Topic.with_connection do |connection|
+          real_connection = connection
 
-        # Disable lazy transactions so that we will begin a transaction before attempting to write.
-        connection.disable_lazy_transactions!
+          # Disable lazy transactions so that we will begin a transaction before attempting to write.
+          connection.disable_lazy_transactions!
 
-        # Update begin_db_transaction to block.
-        connection.class_eval do
-          alias :real_begin_db_transaction :begin_db_transaction
-          define_method(:begin_db_transaction) do |*_args|
-            queue.push nil
-            sleep
+          # Update begin_db_transaction to block.
+          connection.class_eval do
+            alias :real_begin_db_transaction :begin_db_transaction
+            define_method(:begin_db_transaction) do |*_args|
+              queue.push nil
+              sleep
+            end
           end
-        end
 
-        ActiveRecord::Base.transaction { }
+          ActiveRecord::Base.transaction { }
+        end
       end
       queue.pop
       thread.kill
       thread.join
-      assert_not connection.active?
-      assert_not Topic.connection_pool.connections.include?(connection)
+      assert_not real_connection.active?
+      assert_not Topic.connection_pool.connections.include?(real_connection)
     ensure
       ActiveRecord::Base.connection_handler.clear_all_connections!(:all)
     end
@@ -1379,38 +1382,40 @@ class TransactionTest < ActiveRecord::TestCase
   end
 
   def test_nested_transactions_after_disable_lazy_transactions
-    Topic.connection.disable_lazy_transactions!
+    Topic.with_connection do
+      Topic.connection.disable_lazy_transactions!
 
-    actual_queries = capture_sql(include_schema: true) do
-      # RealTransaction (begin..commit)
-      Topic.transaction(requires_new: true) do
-        # ResetParentTransaction (no queries)
+      actual_queries = capture_sql(include_schema: true) do
+        # RealTransaction (begin..commit)
         Topic.transaction(requires_new: true) do
-          Topic.delete_all
-          # SavepointTransaction (savepoint..release)
+          # ResetParentTransaction (no queries)
           Topic.transaction(requires_new: true) do
-            # ResetParentTransaction (no queries)
+            Topic.delete_all
+            # SavepointTransaction (savepoint..release)
             Topic.transaction(requires_new: true) do
-              # no-op
+              # ResetParentTransaction (no queries)
+              Topic.transaction(requires_new: true) do
+                # no-op
+              end
             end
           end
+          Topic.delete_all
         end
-        Topic.delete_all
       end
-    end
 
-    expected_queries = [
-      /BEGIN/i,
-      /DELETE/i,
-      /^SAVEPOINT/i,
-      /^RELEASE/i,
-      /DELETE/i,
-      /COMMIT/i,
-    ]
+      expected_queries = [
+        /BEGIN/i,
+        /DELETE/i,
+        /^SAVEPOINT/i,
+        /^RELEASE/i,
+        /DELETE/i,
+        /COMMIT/i,
+      ]
 
-    assert_equal expected_queries.size, actual_queries.size
-    expected_queries.zip(actual_queries) do |expected, actual|
-      assert_match expected, actual
+      assert_equal expected_queries.size, actual_queries.size
+      expected_queries.zip(actual_queries) do |expected, actual|
+        assert_match expected, actual
+      end
     end
   end
 
@@ -1447,10 +1452,12 @@ class TransactionTest < ActiveRecord::TestCase
   end
 
   def test_accessing_raw_connection_disables_lazy_transactions
-    Topic.connection.raw_connection
+    Topic.with_connection do |connection|
+      connection.raw_connection
 
-    assert_queries_match(/BEGIN|COMMIT/i, include_schema: true) do
-      Topic.transaction { }
+      assert_queries_match(/BEGIN|COMMIT/i, include_schema: true) do
+        Topic.transaction { }
+      end
     end
   end
 

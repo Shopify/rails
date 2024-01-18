@@ -133,12 +133,11 @@ module ActiveRecord
           query_cache.enabled
         end
 
-        private
-          def query_cache
-            @thread_query_caches.compute_if_absent(connection_cache_key(current_thread)) do
-              Store.new(@query_cache_max_size)
-            end
+        def query_cache
+          @thread_query_caches.compute_if_absent(connection_cache_key(current_thread)) do
+            Store.new(@query_cache_max_size)
           end
+        end
       end
 
       attr_accessor :query_cache

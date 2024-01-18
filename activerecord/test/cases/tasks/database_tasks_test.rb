@@ -1128,14 +1128,16 @@ module ActiveRecord
       # Use a memory db here to avoid having to rollback at the end
       setup do
         migrations_path = [MIGRATIONS_ROOT, folder_name].join("/")
-        file = ActiveRecord::Base.connection.raw_connection.filename
+        file = ActiveRecord::Base.with_connection { |c| c.raw_connection.filename }
         @conn = ActiveRecord::Base.establish_connection adapter: "sqlite3",
           database: ":memory:", migrations_paths: migrations_path
         source_db = SQLite3::Database.new file
-        dest_db = ActiveRecord::Base.connection.raw_connection
-        backup = SQLite3::Backup.new(dest_db, "main", source_db, "main")
-        backup.step(-1)
-        backup.finish
+        ActiveRecord::Base.with_connection do |connection|
+          dest_db = connection.raw_connection
+          backup = SQLite3::Backup.new(dest_db, "main", source_db, "main")
+          backup.step(-1)
+          backup.finish
+        end
       end
 
       teardown do

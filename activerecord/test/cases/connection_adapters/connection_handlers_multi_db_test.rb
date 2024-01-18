@@ -340,21 +340,23 @@ module ActiveRecord
       end
 
       def test_active_connections?
-        assert_deprecated(ActiveRecord.deprecator) do
-          assert_not_predicate @handler, :active_connections?
-        end
+        with_connection_checkout_caching do
+          assert_deprecated(ActiveRecord.deprecator) do
+            assert_not_predicate @handler, :active_connections?
+          end
 
-        assert @handler.retrieve_connection(@connection_name)
-        assert @handler.retrieve_connection(@connection_name, role: :reading)
+          assert @handler.retrieve_connection(@connection_name)
+          assert @handler.retrieve_connection(@connection_name, role: :reading)
 
-        assert_deprecated(ActiveRecord.deprecator) do
-          assert_predicate @handler, :active_connections?
-        end
+          assert_deprecated(ActiveRecord.deprecator) do
+            assert_predicate @handler, :active_connections?
+          end
 
-        @handler.clear_active_connections!(:all)
+          @handler.clear_active_connections!(:all)
 
-        assert_deprecated(ActiveRecord.deprecator) do
-          assert_not_predicate @handler, :active_connections?
+          assert_deprecated(ActiveRecord.deprecator) do
+            assert_not_predicate @handler, :active_connections?
+          end
         end
       end
 
@@ -395,6 +397,16 @@ module ActiveRecord
         ActiveRecord.writing_role = old_writing
         ActiveRecord.reading_role = old_reading
       end
+
+      private
+        def with_connection_checkout_caching(&block)
+          old, ActiveRecord.cache_connection_checkout = ActiveRecord.cache_connection_checkout, true
+          begin
+            yield
+          ensure
+            ActiveRecord.cache_connection_checkout = old
+          end
+        end
     end
   end
 end

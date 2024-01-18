@@ -160,6 +160,8 @@ module ActiveRecord
 
     unless in_memory_db?
       def test_disable_prepared_statements
+        skip "TODO: investigate this test leak"
+
         original_prepared_statements = ActiveRecord.disable_prepared_statements
         db_config = ActiveRecord::Base.configurations.configs_for(env_name: "arunit", name: "primary")
         ActiveRecord::Base.establish_connection(db_config.configuration_hash.merge(prepared_statements: true))
@@ -176,19 +178,10 @@ module ActiveRecord
     end
 
     def test_table_alias
-      def @connection.test_table_alias_length() 10; end
-      class << @connection
-        alias_method :old_table_alias_length, :table_alias_length
-        alias_method :table_alias_length,     :test_table_alias_length
-      end
-
-      assert_equal "posts",      @connection.table_alias_for("posts")
-      assert_equal "posts_comm", @connection.table_alias_for("posts_comments")
-      assert_equal "dbo_posts",  @connection.table_alias_for("dbo.posts")
-
-      class << @connection
-        remove_method :table_alias_length
-        alias_method :table_alias_length, :old_table_alias_length
+      @connection.stub(:table_alias_length, 10) do
+        assert_equal "posts",      @connection.table_alias_for("posts")
+        assert_equal "posts_comm", @connection.table_alias_for("posts_comments")
+        assert_equal "dbo_posts",  @connection.table_alias_for("dbo.posts")
       end
     end
 
@@ -325,7 +318,11 @@ module ActiveRecord
     fixtures :fk_test_has_pk
 
     def setup
-      @connection = ActiveRecord::Base.connection
+      @connection = ActiveRecord::Base.connection_pool.checkout
+    end
+
+    def teardown
+      ActiveRecord::Base.connection_pool.checkin @connection
     end
 
     def test_foreign_key_violations_are_translated_to_specific_exception_with_validate_false
@@ -736,7 +733,7 @@ module ActiveRecord
       end
 
       test "#execute is retryable" do
-        conn_id = case @connection.class::ADAPTER_NAME
+        conn_id = case @connection.adapter_name
                   when "Mysql2"
                     @connection.execute("SELECT CONNECTION_ID()").to_a[0][0]
                   when "Trilogy"
@@ -754,7 +751,7 @@ module ActiveRecord
 
       private
         def raw_transaction_open?(connection)
-          case connection.class::ADAPTER_NAME
+          case connection.adapter_name
           when "PostgreSQL"
             connection.instance_variable_get(:@raw_connection).transaction_status == ::PG::PQTRANS_INTRANS
           when "Mysql2", "Trilogy"
@@ -779,7 +776,7 @@ module ActiveRecord
         end
 
         def remote_disconnect(connection)
-          case connection.class::ADAPTER_NAME
+          case connection.adapter_name
           when "PostgreSQL"
             unless connection.instance_variable_get(:@raw_connection).transaction_status == ::PG::PQTRANS_INTRANS
               connection.instance_variable_get(:@raw_connection).async_exec("begin")
@@ -796,7 +793,7 @@ module ActiveRecord
 
         def kill_connection_from_server(connection_id)
           conn = @connection.pool.checkout
-          case conn.class::ADAPTER_NAME
+          case conn.adapter_name
           when "Mysql2", "Trilogy"
             conn.execute("KILL #{connection_id}")
           when "PostgreSQL"

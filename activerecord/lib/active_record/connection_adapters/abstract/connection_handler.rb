@@ -182,7 +182,10 @@ module ActiveRecord
           role = ActiveRecord::Base.current_role
         end
 
-        each_connection_pool(role).each(&:release_connection)
+        each_connection_pool(role).each do |pool|
+          pool.release_connection
+          pool.disable_query_cache!
+        end
       end
 
       # Clears the cache which maps classes.
@@ -222,7 +225,7 @@ module ActiveRecord
       # active or defined connection: if it is the latter, it will be
       # opened and set as the active connection for the class it was defined
       # for (not necessarily the current class).
-      def retrieve_connection(connection_name, role: ActiveRecord::Base.current_role, shard: ActiveRecord::Base.current_shard) # :nodoc:
+      def retrieve_connection(connection_name, role: ActiveRecord::Base.current_role, shard: ActiveRecord::Base.current_shard, &block) # :nodoc:
         pool = retrieve_connection_pool(connection_name, role: role, shard: shard)
 
         unless pool
@@ -237,7 +240,11 @@ module ActiveRecord
           raise ConnectionNotEstablished, message
         end
 
-        pool.connection
+        if block_given?
+          pool.with_connection(&block)
+        else
+          pool.connection
+        end
       end
 
       # Returns true if a connection that's accessible to this class has

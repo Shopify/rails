@@ -243,7 +243,7 @@ module ActiveRecord
     # Clears the query cache for all connections associated with the current thread.
     def clear_query_caches_for_current_thread
       connection_handler.each_connection_pool do |pool|
-        pool.connection.clear_query_cache if pool.active_connection?
+        pool.connection.clear_query_cache
       end
     end
 
@@ -252,6 +252,10 @@ module ActiveRecord
     # to any of the specific Active Records.
     def connection
       retrieve_connection
+    end
+
+    def with_connection(&block) # :nodoc:
+      retrieve_connection(&block)
     end
 
     attr_writer :connection_specification_name
@@ -283,8 +287,8 @@ module ActiveRecord
       connection_handler.retrieve_connection_pool(connection_specification_name, role: current_role, shard: current_shard) || raise(ConnectionNotEstablished)
     end
 
-    def retrieve_connection
-      connection_handler.retrieve_connection(connection_specification_name, role: current_role, shard: current_shard)
+    def retrieve_connection(&block)
+      connection_handler.retrieve_connection(connection_specification_name, role: current_role, shard: current_shard, &block)
     end
 
     # Returns +true+ if Active Record is connected.
