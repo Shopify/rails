@@ -54,6 +54,7 @@ module ActiveRecord
         "#<ActiveRecord::ConnectionAdapters::LazyConnectionProxy:#{object_id}>"
       end
 
+      define_method(:object_id, ::Kernel.instance_method(:object_id))
       define_method(:__class__, ::Kernel.instance_method(:class))
 
       def clear_query_cache
@@ -252,6 +253,10 @@ module ActiveRecord
             return @lazy_connection # Trying
           end
         end
+      end
+
+      def pin_connection # :nodoc:
+        @thread_cached_conns[connection_cache_key(current_thread)] ||= checkout
       end
 
       def connection_class # :nodoc:

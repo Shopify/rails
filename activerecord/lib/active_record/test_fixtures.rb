@@ -137,15 +137,6 @@ module ActiveRecord
 
       # Load fixtures once and begin transaction.
       if run_in_transaction?
-        # Transactional fixtures require the same connection is used
-        # for each database, and keep a transaction open. That is fundamentally
-        # at odds with not caching the connection checkout.
-        # FIXME: We need to find a way to not cache the checkout, but keep the
-        # fixtures transaction open while the test is running, and ensure the same
-        # connection is checked out every time. Quite tricky.
-        @_cache_connection_checkout_was = ActiveRecord.cache_connection_checkout
-        ActiveRecord.cache_connection_checkout = true
-
         if @@already_loaded_fixtures[self.class]
           @loaded_fixtures = @@already_loaded_fixtures[self.class]
         else
@@ -167,7 +158,8 @@ module ActiveRecord
 
           if connection_name
             begin
-              connection = ActiveRecord::Base.connection_handler.retrieve_connection(connection_name, shard: shard)
+              pool = ActiveRecord::Base.connection_handler.retrieve_connection_pool(connection_name, shard: shard)
+              connection = pool.pin_connection
               connection.connect! # eagerly validate the connection
             rescue ConnectionNotEstablished
               connection = nil
@@ -199,7 +191,6 @@ module ActiveRecord
     def teardown_fixtures
       # Rollback changes if a transaction is active.
       if run_in_transaction?
-        ActiveRecord.cache_connection_checkout = @_cache_connection_checkout_was
         ActiveSupport::Notifications.unsubscribe(@connection_subscriber) if @connection_subscriber
         @fixture_connections.each do |connection|
           connection.rollback_transaction if connection.transaction_open?
@@ -217,7 +208,7 @@ module ActiveRecord
     def enlist_fixture_connections
       setup_shared_connection_pool
 
-      ActiveRecord::Base.connection_handler.connection_pool_list(:writing).map(&:connection)
+      ActiveRecord::Base.connection_handler.connection_pool_list(:writing).map(&:pin_connection)
     end
 
     private

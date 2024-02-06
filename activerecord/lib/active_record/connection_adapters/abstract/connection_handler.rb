@@ -226,19 +226,7 @@ module ActiveRecord
       # opened and set as the active connection for the class it was defined
       # for (not necessarily the current class).
       def retrieve_connection(connection_name, role: ActiveRecord::Base.current_role, shard: ActiveRecord::Base.current_shard, &block) # :nodoc:
-        pool = retrieve_connection_pool(connection_name, role: role, shard: shard)
-
-        unless pool
-          if shard != ActiveRecord::Base.default_shard
-            message = "No connection pool for '#{connection_name}' found for the '#{shard}' shard."
-          elsif role != ActiveRecord::Base.default_role
-            message = "No connection pool for '#{connection_name}' found for the '#{role}' role."
-          else
-            message = "No connection pool for '#{connection_name}' found."
-          end
-
-          raise ConnectionNotEstablished, message
-        end
+        pool = retrieve_connection_pool(connection_name, role: role, shard: shard, strict: true)
 
         if block_given?
           pool.with_connection(&block)
@@ -263,9 +251,22 @@ module ActiveRecord
       # Retrieving the connection pool happens a lot, so we cache it in @connection_name_to_pool_manager.
       # This makes retrieving the connection pool O(1) once the process is warm.
       # When a connection is established or removed, we invalidate the cache.
-      def retrieve_connection_pool(connection_name, role: ActiveRecord::Base.current_role, shard: ActiveRecord::Base.current_shard)
-        pool_config = get_pool_manager(connection_name)&.get_pool_config(role, shard)
-        pool_config&.pool
+      def retrieve_connection_pool(connection_name, role: ActiveRecord::Base.current_role, shard: ActiveRecord::Base.current_shard, strict: false)
+        pool = get_pool_manager(connection_name)&.get_pool_config(role, shard)&.pool
+
+        if strict && !pool
+          if shard != ActiveRecord::Base.default_shard
+            message = "No connection pool for '#{connection_name}' found for the '#{shard}' shard."
+          elsif role != ActiveRecord::Base.default_role
+            message = "No connection pool for '#{connection_name}' found for the '#{role}' role."
+          else
+            message = "No connection pool for '#{connection_name}' found."
+          end
+
+          raise ConnectionNotEstablished, message
+        end
+
+        pool
       end
 
       private

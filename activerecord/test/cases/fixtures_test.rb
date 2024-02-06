@@ -1103,7 +1103,8 @@ class TransactionalFixturesOnConnectionNotification < ActiveRecord::TestCase
 
   private
     def fire_connection_notification(connection, shard: ActiveRecord::Base.default_shard)
-      assert_called_with(ActiveRecord::Base.connection_handler, :retrieve_connection, ["book"], returns: connection, shard: shard) do
+      pool = ActiveRecord::Base.connection_handler.retrieve_connection_pool("book")
+      assert_called_with(pool, :checkout, returns: connection) do
         message_bus = ActiveSupport::Notifications.instrumenter
         payload = {
           connection_name: "book",
