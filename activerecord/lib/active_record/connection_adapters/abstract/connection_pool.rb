@@ -230,7 +230,7 @@ module ActiveRecord
         @reaper.run
       end
 
-      def lock_thread=(lock_thread)
+      def lock_thread=(lock_thread) # :nodoc:
         if lock_thread
           @lock_thread = ActiveSupport::IsolatedExecutionState.context
         else
