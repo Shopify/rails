@@ -208,6 +208,7 @@ module ActiveRecord
         # synchronization.
         @thread_cached_conns = Concurrent::Map.new(initial_capacity: @size)
         @lazy_connection = LazyConnectionProxy.new(self)
+        @pinned_connection = nil
 
         @connections         = []
         @automatic_reconnect = true
@@ -257,8 +258,13 @@ module ActiveRecord
         end
       end
 
-      def pin_connection # :nodoc:
-        @thread_cached_conns[connection_cache_key(current_thread)] ||= checkout
+      def pin_connection!(connection) # :nodoc:
+        old_connection = @pinned_connection
+        @pinned_connection = connection
+        if old_connection && connection.nil?
+          checkin(old_connection)
+        end
+        @pinned_connection
       end
 
       def connection_class # :nodoc:
@@ -429,6 +435,8 @@ module ActiveRecord
       # Raises:
       # - ActiveRecord::ConnectionTimeoutError no connection can be obtained from the pool.
       def checkout(checkout_timeout = @checkout_timeout)
+        return @pinned_connection if @pinned_connection
+
         connection = checkout_and_verify(acquire_connection(checkout_timeout))
         connection.lock_thread = @lock_thread
         connection
@@ -440,6 +448,8 @@ module ActiveRecord
       # +conn+: an AbstractAdapter object, which was obtained by earlier by
       # calling #checkout on this pool.
       def checkin(conn)
+        return if @pinned_connection.equal?(conn)
+
         conn.lock.synchronize do
           synchronize do
             remove_connection_from_thread_cache conn
@@ -724,6 +734,11 @@ module ActiveRecord
         # Implementation detail: the connection returned by +acquire_connection+
         # will already be "+connection.lease+ -ed" to the current thread.
         def acquire_connection(checkout_timeout)
+          if @pinned_connection
+            @pinned_connection.lease
+            return @pinned_connection
+          end
+
           # NOTE: we rely on <tt>@available.poll</tt> and +try_to_checkout_new_connection+ to
           # +conn.lease+ the returned connection (and to do this in a +synchronized+
           # section). This is not the cleanest implementation, as ideally we would

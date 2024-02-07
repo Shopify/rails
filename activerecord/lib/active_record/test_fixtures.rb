@@ -159,8 +159,9 @@ module ActiveRecord
           if connection_name
             pool = ActiveRecord::Base.connection_handler.retrieve_connection_pool(connection_name, shard: shard)
             if pool
-              connection = pool.pin_connection
+              connection = pool.checkout
               connection.connect! # eagerly validate the connection
+              pool.pin_connection!(connection)
 
               setup_shared_connection_pool
 
@@ -191,6 +192,7 @@ module ActiveRecord
         @fixture_connections.each do |connection|
           connection.rollback_transaction if connection.transaction_open?
           connection.pool.lock_thread = false
+          connection.pool.pin_connection!(nil)
         end
         @fixture_connections.clear
         teardown_shared_connection_pool
@@ -204,7 +206,9 @@ module ActiveRecord
     def enlist_fixture_connections
       setup_shared_connection_pool
 
-      ActiveRecord::Base.connection_handler.connection_pool_list(:writing).map(&:pin_connection)
+      ActiveRecord::Base.connection_handler.connection_pool_list(:writing).map do |pool|
+        pool.pin_connection!(pool.checkout)
+      end
     end
 
     private
