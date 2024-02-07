@@ -8,8 +8,13 @@ module ActiveRecord
     module ConnectionPoolTests
       attr_reader :pool
 
+      def self.included(test)
+        test.use_transactional_tests = false
+      end
+
       def setup
         @previous_isolation_level = ActiveSupport::IsolatedExecutionState.isolation_level
+        @previous_cache_connection_checkout = ActiveRecord.cache_connection_checkout
 
         # Keep a duplicate pool so we do not bother others
         config = ActiveRecord::Base.connection_pool.db_config
@@ -39,6 +44,7 @@ module ActiveRecord
         super
         @pool.disconnect!
         ActiveSupport::IsolatedExecutionState.isolation_level = @previous_isolation_level
+        ActiveRecord.cache_connection_checkout = @previous_cache_connection_checkout
       end
 
       def active_connections(pool)
@@ -46,7 +52,7 @@ module ActiveRecord
       end
 
       def test_checkout_after_close
-        connection = pool.connection
+        connection = pool.checkout
         assert_predicate connection, :in_use?
 
         connection.close
@@ -73,7 +79,27 @@ module ActiveRecord
         }.join
       end
 
-      def test_with_connection
+      def test_with_connection_caching_disabled
+        assert_equal 0, active_connections(pool).size
+
+        main_thread = pool.connection
+        assert_equal 0, active_connections(pool).size
+
+        new_thread {
+          pool.with_connection do |conn|
+            assert conn
+            assert_equal 1, active_connections(pool).size
+          end
+          assert_equal 0, active_connections(pool).size
+        }.join
+
+        main_thread.close
+        assert_equal 0, active_connections(pool).size
+      end
+
+      def test_with_connection_caching_enabled
+        ActiveRecord.cache_connection_checkout = true
+
         assert_equal 0, active_connections(pool).size
 
         main_thread = pool.connection
@@ -356,6 +382,8 @@ module ActiveRecord
       end
 
       def test_remove_connection_for_thread
+        ActiveRecord.cache_connection_checkout = true
+
         conn = @pool.connection
         @pool.remove conn
         assert_not_equal(conn, @pool.connection)
@@ -365,7 +393,7 @@ module ActiveRecord
 
       def test_active_connection?
         assert_not_predicate @pool, :active_connection?
-        assert @pool.connection
+        assert_not_nil @pool.connection
         assert_predicate @pool, :active_connection?
         @pool.release_connection
         assert_not_predicate @pool, :active_connection?
@@ -697,7 +725,7 @@ module ActiveRecord
         skip_fiber_testing
         with_single_connection_pool do |pool|
           [:disconnect, :disconnect!, :clear_reloadable_connections, :clear_reloadable_connections!].each do |group_action_method|
-            conn               = pool.connection # drain the only available connection
+            conn               = pool.checkout # drain the only available connection
             second_thread_done = Concurrent::Event.new
 
             begin
@@ -749,25 +777,23 @@ module ActiveRecord
       def test_clear_reloadable_connections_creates_new_connections_for_waiting_threads_if_necessary
         skip_fiber_testing
         with_single_connection_pool do |pool|
-          conn = pool.connection # drain the only available connection
-          def conn.requires_reloading? # make sure it gets removed from the pool by clear_reloadable_connections
-            true
+          conn = pool.checkout # drain the only available connection
+          conn.stub(:requires_reloading?, true) do # make sure it gets removed from the pool by clear_reloadable_connections
+            stuck_thread = new_thread do
+              pool.with_connection { }
+            end
+
+            # wait for stuck_thread to get in queue
+            pass_to(stuck_thread) until pool.num_waiting_in_queue == 1
+
+            pool.clear_reloadable_connections
+
+            unless stuck_thread.join(2)
+              flunk "clear_reloadable_connections must not let other connection waiting threads get stuck in queue"
+            end
+
+            assert_equal 0, pool.num_waiting_in_queue
           end
-
-          stuck_thread = new_thread do
-            pool.with_connection { }
-          end
-
-          # wait for stuck_thread to get in queue
-          pass_to(stuck_thread) until pool.num_waiting_in_queue == 1
-
-          pool.clear_reloadable_connections
-
-          unless stuck_thread.join(2)
-            flunk "clear_reloadable_connections must not let other connection waiting threads get stuck in queue"
-          end
-
-          assert_equal 0, pool.num_waiting_in_queue
         end
       end
 

@@ -56,6 +56,7 @@ module ActiveRecord
 
       define_method(:object_id, ::Kernel.instance_method(:object_id))
       define_method(:__class__, ::Kernel.instance_method(:class))
+      define_method(:nil?, ::Kernel.instance_method(:nil?))
 
       def clear_query_cache
         @pool.query_cache&.clear
