@@ -97,6 +97,7 @@ module ActiveRecord
         def reject_stateful_method!
           ::Kernel.raise "Can't call `##{__callee__}` on a lazy connection"
         end
+        public alias_method :close, :reject_stateful_method!
         public alias_method :raw_connection, :reject_stateful_method!
         public alias_method :disable_lazy_transactions!, :reject_stateful_method!
     end

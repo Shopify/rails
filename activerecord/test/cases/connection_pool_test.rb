@@ -93,7 +93,6 @@ module ActiveRecord
           assert_equal 0, active_connections(pool).size
         }.join
 
-        main_thread.close
         assert_equal 0, active_connections(pool).size
       end
 
@@ -129,7 +128,9 @@ module ActiveRecord
         end
       end
 
-      def test_active_connection_in_use
+      def test_active_connection_in_use_when_caching
+        ActiveRecord.cache_connection_checkout = true
+
         assert_not_predicate pool, :active_connection?
         main_thread = pool.connection
 
@@ -138,6 +139,16 @@ module ActiveRecord
         main_thread.close
 
         assert_not_predicate pool, :active_connection?
+      end
+
+      def test_active_connection_in_use_when_not_caching
+        assert_not_predicate pool, :active_connection?
+        main_thread = pool.connection
+        assert_not_predicate pool, :active_connection?
+
+        assert_raises do
+          main_thread.close
+        end
       end
 
       def test_full_pool_exception
@@ -392,6 +403,8 @@ module ActiveRecord
       end
 
       def test_active_connection?
+        ActiveRecord.cache_connection_checkout = true
+
         assert_not_predicate @pool, :active_connection?
         assert_not_nil @pool.connection
         assert_predicate @pool, :active_connection?
@@ -399,7 +412,9 @@ module ActiveRecord
         assert_not_predicate @pool, :active_connection?
       end
 
-      def test_checkout_behavior
+      def test_checkout_caching_behavior
+        ActiveRecord.cache_connection_checkout = true
+
         pool = ConnectionPool.new(@pool_config)
         main_connection = pool.connection
         assert_not_nil main_connection
@@ -562,7 +577,7 @@ module ActiveRecord
         pool.automatic_reconnect = false
 
         assert_raises(ConnectionNotEstablished) do
-          pool.connection
+          pool.checkout
         end
 
         assert_raises(ConnectionNotEstablished) do
