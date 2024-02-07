@@ -82,7 +82,7 @@ module ActiveRecord
       def test_with_connection_caching_disabled
         assert_equal 0, active_connections(pool).size
 
-        main_thread = pool.connection
+        pool.connection
         assert_equal 0, active_connections(pool).size
 
         new_thread {

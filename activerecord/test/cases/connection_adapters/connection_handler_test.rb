@@ -259,12 +259,18 @@ module ActiveRecord
         assert @handler.retrieve_connection(@connection_name)
       end
 
-      def test_active_connections?
-        assert_not @handler.active_connections?(:all)
-        assert @handler.retrieve_connection(@connection_name)
-        assert @handler.active_connections?(:all)
-        @handler.clear_active_connections!(:all)
-        assert_not @handler.active_connections?(:all)
+      def test_active_connections_with_checkout_caching?
+        cache_connection_checkout_was = ActiveRecord.cache_connection_checkout
+        ActiveRecord.cache_connection_checkout = true
+        begin
+          assert_not @handler.active_connections?(:all)
+          assert @handler.retrieve_connection(@connection_name)
+          assert @handler.active_connections?(:all)
+          @handler.clear_active_connections!(:all)
+          assert_not @handler.active_connections?(:all)
+        ensure
+          ActiveRecord.cache_connection_checkout = cache_connection_checkout_was
+        end
       end
 
       def test_retrieve_connection_pool

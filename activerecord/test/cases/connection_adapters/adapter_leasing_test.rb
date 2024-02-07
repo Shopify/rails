@@ -38,22 +38,28 @@ module ActiveRecord
         assert_not @adapter.in_use?, "adapter is in use"
       end
 
-      def test_close
-        db_config = ActiveRecord::DatabaseConfigurations::HashConfig.new("test", "primary", adapter: "abstract")
-        pool_config = ActiveRecord::ConnectionAdapters::PoolConfig.new(ActiveRecord::Base, db_config, :writing, :default)
-        pool = Pool.new(pool_config)
-        pool.insert_connection_for_test! @adapter
-        @adapter.pool = pool
+      def test_close_with_checkout_caching
+        cache_connection_checkout_was = ActiveRecord.cache_connection_checkout
+        ActiveRecord.cache_connection_checkout = true
+        begin
+          db_config = ActiveRecord::DatabaseConfigurations::HashConfig.new("test", "primary", adapter: "abstract")
+          pool_config = ActiveRecord::ConnectionAdapters::PoolConfig.new(ActiveRecord::Base, db_config, :writing, :default)
+          pool = Pool.new(pool_config)
+          pool.insert_connection_for_test! @adapter
+          @adapter.pool = pool
 
-        # Make sure the pool marks the connection in use
-        assert_equal @adapter, pool.connection
-        assert_predicate @adapter, :in_use?
+          # Make sure the pool marks the connection in use
+          assert_equal @adapter, pool.connection
+          assert_predicate @adapter, :in_use?
 
-        # Close should put the adapter back in the pool
-        @adapter.close
-        assert_not_predicate @adapter, :in_use?
+          # Close should put the adapter back in the pool
+          @adapter.close
+          assert_not_predicate @adapter, :in_use?
 
-        assert_equal @adapter, pool.connection
+          assert_equal @adapter, pool.connection
+        ensure
+          ActiveRecord.cache_connection_checkout = cache_connection_checkout_was
+        end
       end
     end
   end

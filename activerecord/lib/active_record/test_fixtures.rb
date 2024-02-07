@@ -157,15 +157,11 @@ module ActiveRecord
           shard = payload[:shard] if payload.key?(:shard)
 
           if connection_name
-            begin
-              pool = ActiveRecord::Base.connection_handler.retrieve_connection_pool(connection_name, shard: shard)
+            pool = ActiveRecord::Base.connection_handler.retrieve_connection_pool(connection_name, shard: shard)
+            if pool
               connection = pool.pin_connection
               connection.connect! # eagerly validate the connection
-            rescue ConnectionNotEstablished
-              connection = nil
-            end
 
-            if connection
               setup_shared_connection_pool
 
               if !@fixture_connections.include?(connection)

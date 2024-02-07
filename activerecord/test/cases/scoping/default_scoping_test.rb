@@ -720,8 +720,10 @@ class DefaultScopingWithThreadTest < ActiveRecord::TestCase
     def test_default_scoping_with_threads
       2.times do
         Thread.new {
-          assert_includes DeveloperOrderedBySalary.all.to_sql, "salary DESC"
-          DeveloperOrderedBySalary.connection.close
+          DeveloperOrderedBySalary.with_connection do |connection|
+            assert_includes DeveloperOrderedBySalary.all.to_sql, "salary DESC"
+            connection.close
+          end
         }.join
       end
     end
@@ -736,15 +738,19 @@ class DefaultScopingWithThreadTest < ActiveRecord::TestCase
       barrier_2 = Concurrent::CyclicBarrier.new(2)
 
       threads << Thread.new do
-        Thread.current[:default_scope_delay] = -> { barrier_1.wait; barrier_2.wait }
-        assert_equal 1, ThreadsafeDeveloper.all.to_a.count
-        ThreadsafeDeveloper.connection.close
+        ThreadsafeDeveloper.with_connection do |connection|
+          Thread.current[:default_scope_delay] = -> { barrier_1.wait; barrier_2.wait }
+          assert_equal 1, ThreadsafeDeveloper.all.to_a.count
+          connection.close
+        end
       end
       threads << Thread.new do
-        Thread.current[:default_scope_delay] = -> { barrier_2.wait }
-        barrier_1.wait
-        assert_equal 1, ThreadsafeDeveloper.all.to_a.count
-        ThreadsafeDeveloper.connection.close
+        ThreadsafeDeveloper.with_connection do |connection|
+          Thread.current[:default_scope_delay] = -> { barrier_2.wait }
+          barrier_1.wait
+          assert_equal 1, ThreadsafeDeveloper.all.to_a.count
+          connection.close
+        end
       end
       threads.each(&:join)
     ensure
