@@ -6,6 +6,8 @@ require "models/person"
 module ActiveRecord
   module ConnectionAdapters
     class ConnectionHandlerTest < ActiveRecord::TestCase
+      self.use_transactional_tests = false
+
       fixtures :people
 
       def setup
@@ -93,6 +95,8 @@ module ActiveRecord
           connection_handler = ActiveRecord::Base.connection_handler
           ActiveRecord::Base.connection_handler = ActiveRecord::ConnectionAdapters::ConnectionHandler.new
 
+          setup_transactional_fixtures
+
           assert_nothing_raised do
             ActiveRecord::Base.connects_to(database: { reading: :arunit, writing: :arunit })
           end
@@ -102,6 +106,7 @@ module ActiveRecord
 
           assert_equal rw_conn, ro_conn
         ensure
+          teardown_transactional_fixtures
           ActiveRecord::Base.connection_handler = connection_handler
         end
 
@@ -260,10 +265,16 @@ module ActiveRecord
       end
 
       def test_active_connections?
+        with_connection_checkout_caching do
+          assert_not @handler.active_connections?(:all)
+          assert @handler.retrieve_connection(@connection_name)
+          assert @handler.active_connections?(:all)
+          @handler.clear_active_connections!(:all)
+          assert_not @handler.active_connections?(:all)
+        end
+
         assert_not @handler.active_connections?(:all)
         assert @handler.retrieve_connection(@connection_name)
-        assert @handler.active_connections?(:all)
-        @handler.clear_active_connections!(:all)
         assert_not @handler.active_connections?(:all)
       end
 
@@ -351,59 +362,50 @@ module ActiveRecord
         assert_equal :writing, ActiveRecord.writing_role
         assert_equal :reading, ActiveRecord.reading_role
       end
+    end
+
+    class ConnectionHandlerForkTest < ActiveRecord::TestCase
+      self.use_transactional_tests = false
+
+      fixtures :people
+
+      def setup
+        @handler = ConnectionHandler.new
+        @connection_name = "ActiveRecord::Base"
+        db_config = ActiveRecord::Base.configurations.configs_for(env_name: "arunit", name: "primary")
+        @pool = @handler.establish_connection(db_config)
+      end
+
+      def teardown
+        clean_up_connection_handler
+      end
 
       if Process.respond_to?(:fork)
         def test_connection_pool_per_pid
-          object_id = ActiveRecord::Base.connection.object_id
+          with_connection_checkout_caching do
+            object_id = ActiveRecord::Base.connection.object_id
 
-          rd, wr = IO.pipe
-          rd.binmode
-          wr.binmode
+            rd, wr = IO.pipe
+            rd.binmode
+            wr.binmode
 
-          pid = fork {
-            rd.close
-            wr.write Marshal.dump ActiveRecord::Base.connection.object_id
+            pid = fork {
+              rd.close
+              wr.write Marshal.dump ActiveRecord::Base.connection.object_id
+              wr.close
+              exit!
+            }
+
             wr.close
-            exit!
-          }
 
-          wr.close
-
-          Process.waitpid pid
-          assert_not_equal object_id, Marshal.load(rd.read)
-          rd.close
+            Process.waitpid pid
+            assert_not_equal object_id, Marshal.load(rd.read)
+            rd.close
+          end
         end
 
         def test_forked_child_doesnt_mangle_parent_connection
-          object_id = ActiveRecord::Base.connection.object_id
-          assert_predicate ActiveRecord::Base.connection, :active?
-
-          rd, wr = IO.pipe
-          rd.binmode
-          wr.binmode
-
-          pid = fork {
-            rd.close
-            wr.write Marshal.dump [
-              ActiveRecord::Base.connection.object_id,
-            ]
-            wr.close
-
-            exit # allow finalizers to run
-          }
-
-          wr.close
-
-          Process.waitpid pid
-          child_id = Marshal.load(rd.read)
-          assert_not_equal object_id, child_id
-          rd.close
-
-          assert_equal 3, ActiveRecord::Base.connection.select_value("SELECT COUNT(*) FROM people")
-        end
-
-        unless in_memory_db?
-          def test_forked_child_recovers_from_disconnected_parent
+          with_connection_checkout_caching do
             object_id = ActiveRecord::Base.connection.object_id
             assert_predicate ActiveRecord::Base.connection, :active?
 
@@ -411,93 +413,129 @@ module ActiveRecord
             rd.binmode
             wr.binmode
 
-            outer_pid = fork {
-              ActiveRecord::Base.connection.disconnect!
+            pid = fork {
+              rd.close
+              wr.write Marshal.dump [
+                ActiveRecord::Base.connection.object_id,
+              ]
+              wr.close
 
-              pid = fork {
-                rd.close
-                wr.write Marshal.dump [
-                  !!ActiveRecord::Base.connection.active?,
-                  ActiveRecord::Base.connection.object_id,
-                  ActiveRecord::Base.connection.select_value("SELECT COUNT(*) FROM people"),
-                ]
-                wr.close
-
-                exit # allow finalizers to run
-              }
-
-              Process.waitpid pid
+              exit # allow finalizers to run
             }
 
             wr.close
 
-            Process.waitpid outer_pid
-            active, child_id, child_count = Marshal.load(rd.read)
-
-            assert_equal false, active
+            Process.waitpid pid
+            child_id = Marshal.load(rd.read)
             assert_not_equal object_id, child_id
             rd.close
 
-            assert_equal 3, child_count
+            assert_equal 3, ActiveRecord::Base.connection.select_value("SELECT COUNT(*) FROM people")
+          end
+        end
 
-            # Outer connection is unaffected
-            assert_equal 6, ActiveRecord::Base.connection.select_value("SELECT 2 * COUNT(*) FROM people")
+        unless in_memory_db?
+          def test_forked_child_recovers_from_disconnected_parent
+            with_connection_checkout_caching do
+              object_id = ActiveRecord::Base.connection.object_id
+              assert_predicate ActiveRecord::Base.connection, :active?
+
+              rd, wr = IO.pipe
+              rd.binmode
+              wr.binmode
+
+              outer_pid = fork {
+                ActiveRecord::Base.connection.disconnect!
+
+                pid = fork {
+                  rd.close
+                  wr.write Marshal.dump [
+                    !!ActiveRecord::Base.connection.active?,
+                    ActiveRecord::Base.connection.object_id,
+                    ActiveRecord::Base.connection.select_value("SELECT COUNT(*) FROM people"),
+                  ]
+                  wr.close
+
+                  exit # allow finalizers to run
+                }
+
+                Process.waitpid pid
+              }
+
+              wr.close
+
+              Process.waitpid outer_pid
+              active, child_id, child_count = Marshal.load(rd.read)
+
+              assert_equal false, active
+              assert_not_equal object_id, child_id
+              rd.close
+
+              assert_equal 3, child_count
+
+              # Outer connection is unaffected
+              assert_equal 6, ActiveRecord::Base.connection.select_value("SELECT 2 * COUNT(*) FROM people")
+            end
           end
         end
 
         def test_retrieve_connection_pool_copies_schema_cache_from_ancestor_pool
-          @pool.connection.schema_cache.add("posts")
-
-          rd, wr = IO.pipe
-          rd.binmode
-          wr.binmode
-
-          pid = fork {
-            rd.close
-            pool = @handler.retrieve_connection_pool(@connection_name)
-            wr.write Marshal.dump pool.connection.schema_cache.size
-            wr.close
-            exit!
-          }
-
-          wr.close
-
-          Process.waitpid pid
-          assert_equal @pool.connection.schema_cache.size, Marshal.load(rd.read)
-          rd.close
-        end
-
-        if current_adapter?(:SQLite3Adapter)
-          def test_pool_from_any_process_for_uses_most_recent_spec
-            file = Tempfile.new "lol.sqlite3"
+          with_connection_checkout_caching do
+            @pool.connection.schema_cache.add("posts")
 
             rd, wr = IO.pipe
             rd.binmode
             wr.binmode
 
-            pid = fork do
-              config_hash = ActiveRecord::Base.configurations.configs_for(env_name: "arunit", name: "primary").configuration_hash.merge(database: file.path)
-              ActiveRecord::Base.establish_connection(config_hash)
-
-              pid2 = fork do
-                wr.write ActiveRecord::Base.connection_db_config.database
-                wr.close
-              end
-
-              Process.waitpid pid2
-            end
-
-            Process.waitpid pid
+            pid = fork {
+              rd.close
+              pool = @handler.retrieve_connection_pool(@connection_name)
+              wr.write Marshal.dump pool.connection.schema_cache.size
+              wr.close
+              exit!
+            }
 
             wr.close
 
-            assert_equal file.path, rd.read
-
+            Process.waitpid pid
+            assert_equal @pool.connection.schema_cache.size, Marshal.load(rd.read)
             rd.close
-          ensure
-            if file
-              file.close
-              file.unlink
+          end
+        end
+
+        if current_adapter?(:SQLite3Adapter)
+          def test_pool_from_any_process_for_uses_most_recent_spec
+            with_connection_checkout_caching do
+              file = Tempfile.new "lol.sqlite3"
+
+              rd, wr = IO.pipe
+              rd.binmode
+              wr.binmode
+
+              pid = fork do
+                config_hash = ActiveRecord::Base.configurations.configs_for(env_name: "arunit", name: "primary").configuration_hash.merge(database: file.path)
+                ActiveRecord::Base.establish_connection(config_hash)
+
+                pid2 = fork do
+                  wr.write ActiveRecord::Base.connection_db_config.database
+                  wr.close
+                end
+
+                Process.waitpid pid2
+              end
+
+              Process.waitpid pid
+
+              wr.close
+
+              assert_equal file.path, rd.read
+
+              rd.close
+            ensure
+              if file
+                file.close
+                file.unlink
+              end
             end
           end
         end

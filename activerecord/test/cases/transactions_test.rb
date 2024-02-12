@@ -48,22 +48,22 @@ class TransactionTest < ActiveRecord::TestCase
     def test_rollback_dirty_changes_even_with_raise_during_rollback_removes_from_pool
       topic = topics(:fifth)
 
-      connection = Topic.connection
-
-      Topic.connection.class_eval do
-        alias :real_exec_rollback_db_transaction :exec_rollback_db_transaction
-        define_method(:exec_rollback_db_transaction) do
-          raise
+      Topic.with_connection do |connection|
+        connection.class_eval do
+          alias :real_exec_rollback_db_transaction :exec_rollback_db_transaction
+          define_method(:exec_rollback_db_transaction) do
+            raise
+          end
         end
-      end
 
-      ActiveRecord::Base.transaction do
-        topic.update(title: "Rails is broken")
-        raise ActiveRecord::Rollback
-      end
+        ActiveRecord::Base.transaction do
+          topic.update(title: "Rails is broken")
+          raise ActiveRecord::Rollback
+        end
 
-      assert_not connection.active?
-      assert_not Topic.connection_pool.connections.include?(connection)
+        assert_not connection.active?
+        assert_not Topic.connection_pool.connections.include?(connection)
+      end
     ensure
       ActiveRecord::Base.connection_handler.clear_all_connections!(:all)
     end
@@ -95,35 +95,35 @@ class TransactionTest < ActiveRecord::TestCase
     end
 
     def test_connection_removed_from_pool_when_commit_raises_and_rollback_raises
-      connection = Topic.connection
-
-      # Update commit_transaction to raise the first time it is called.
-      Topic.connection.transaction_manager.class_eval do
-        alias :real_commit_transaction :commit_transaction
-        define_method(:commit_transaction) do
-          raise "commit failed"
+      Topic.with_connection do |connection|
+        # Update commit_transaction to raise the first time it is called.
+        connection.transaction_manager.class_eval do
+          alias :real_commit_transaction :commit_transaction
+          define_method(:commit_transaction) do
+            raise "commit failed"
+          end
         end
-      end
 
-      # Update rollback_transaction to raise.
-      Topic.connection.transaction_manager.class_eval do
-        alias :real_rollback_transaction :rollback_transaction
-        define_method(:rollback_transaction) do |*_args|
-          raise "rollback failed"
+        # Update rollback_transaction to raise.
+        connection.transaction_manager.class_eval do
+          alias :real_rollback_transaction :rollback_transaction
+          define_method(:rollback_transaction) do |*_args|
+            raise "rollback failed"
+          end
         end
-      end
 
-      # Start a transaction and update a record. The commit and rollback will fail.
-      topic = topics(:fifth)
-      exception = assert_raises(RuntimeError) do
-        ActiveRecord::Base.transaction do
-          topic.update(title: "Updated title")
+        # Start a transaction and update a record. The commit and rollback will fail.
+        topic = topics(:fifth)
+        exception = assert_raises(RuntimeError) do
+          ActiveRecord::Base.transaction do
+            topic.update(title: "Updated title")
+          end
         end
+        assert_equal "rollback failed", exception.message
+        assert_not connection.active?
+        assert_not Topic.connection_pool.connections.include?(connection)
+        assert_equal "The Fifth Topic of the day", topic.reload.title
       end
-      assert_equal "rollback failed", exception.message
-      assert_not connection.active?
-      assert_not Topic.connection_pool.connections.include?(connection)
-      assert_equal "The Fifth Topic of the day", topic.reload.title
     ensure
       ActiveRecord::Base.connection_handler.clear_all_connections!(:all)
     end

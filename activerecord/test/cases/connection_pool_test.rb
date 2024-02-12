@@ -51,13 +51,15 @@ module ActiveRecord
       end
 
       def test_checkout_after_close
-        connection = pool.connection
-        assert_predicate connection, :in_use?
+        with_connection_checkout_caching do
+          connection = pool.connection
+          assert_predicate connection, :in_use?
 
-        connection.close
-        assert_not_predicate connection, :in_use?
+          connection.close
+          assert_not_predicate connection, :in_use?
 
-        assert_predicate pool.connection, :in_use?
+          assert_predicate pool.connection, :in_use?
+        end
       end
 
       def test_released_connection_moves_between_threads
@@ -81,19 +83,20 @@ module ActiveRecord
       def test_with_connection
         assert_equal 0, active_connections(pool).size
 
-        main_thread = pool.connection
-        assert_equal 1, active_connections(pool).size
-
-        new_thread {
-          pool.with_connection do |conn|
-            assert conn
-            assert_equal 2, active_connections(pool).size
-          end
+        pool.with_connection do |main_thread|
           assert_equal 1, active_connections(pool).size
-        }.join
 
-        main_thread.close
-        assert_equal 0, active_connections(pool).size
+          new_thread {
+            pool.with_connection do |conn|
+              assert conn
+              assert_equal 2, active_connections(pool).size
+            end
+            assert_equal 1, active_connections(pool).size
+          }.join
+
+          main_thread.close
+          assert_equal 0, active_connections(pool).size
+        end
       end
 
       def test_new_connection_no_query
@@ -109,14 +112,16 @@ module ActiveRecord
       end
 
       def test_active_connection_in_use
-        assert_not_predicate pool, :active_connection?
-        main_thread = pool.connection
+        with_connection_checkout_caching do
+          assert_not_predicate pool, :active_connection?
+          main_thread = pool.connection
 
-        assert_predicate pool, :active_connection?
+          assert_predicate pool, :active_connection?
 
-        main_thread.close
+          main_thread.close
 
-        assert_not_predicate pool, :active_connection?
+          assert_not_predicate pool, :active_connection?
+        end
       end
 
       def test_full_pool_exception
@@ -361,19 +366,24 @@ module ActiveRecord
       end
 
       def test_remove_connection_for_thread
-        conn = @pool.connection
-        @pool.remove conn
-        assert_not_equal(conn, @pool.connection)
+        conn = nil
+        with_connection_checkout_caching do
+          conn = @pool.connection
+          @pool.remove conn
+          assert_not_equal(conn, @pool.connection)
+        end
       ensure
         conn.close if conn
       end
 
       def test_active_connection?
-        assert_not_predicate @pool, :active_connection?
-        assert @pool.connection
-        assert_predicate @pool, :active_connection?
-        @pool.release_connection
-        assert_not_predicate @pool, :active_connection?
+        with_connection_checkout_caching do
+          assert_not_predicate @pool, :active_connection?
+          assert @pool.connection
+          assert_predicate @pool, :active_connection?
+          @pool.release_connection
+          assert_not_predicate @pool, :active_connection?
+        end
       end
 
       def test_checkout_behavior
@@ -539,7 +549,9 @@ module ActiveRecord
         pool.automatic_reconnect = false
 
         assert_raises(ConnectionNotEstablished) do
-          pool.connection
+          with_connection_checkout_caching do
+            pool.connection
+          end
         end
 
         assert_raises(ConnectionNotEstablished) do
@@ -702,7 +714,7 @@ module ActiveRecord
         skip_fiber_testing
         with_single_connection_pool do |pool|
           [:disconnect, :disconnect!, :clear_reloadable_connections, :clear_reloadable_connections!].each do |group_action_method|
-            conn               = pool.connection # drain the only available connection
+            conn               = pool.checkout # drain the only available connection
             second_thread_done = Concurrent::Event.new
 
             begin
@@ -754,7 +766,7 @@ module ActiveRecord
       def test_clear_reloadable_connections_creates_new_connections_for_waiting_threads_if_necessary
         skip_fiber_testing
         with_single_connection_pool do |pool|
-          conn = pool.connection # drain the only available connection
+          conn = pool.checkout # drain the only available connection
           def conn.requires_reloading? # make sure it gets removed from the pool by clear_reloadable_connections
             true
           end
@@ -851,13 +863,17 @@ module ActiveRecord
         pinned_connection = @pool.checkout
 
         assert_not_predicate @pool, :active_connection?
-        assert_same pinned_connection, @pool.connection
-        assert_predicate @pool, :active_connection?
+        @pool.with_connection do |connection|
+          assert_same pinned_connection, connection
+          assert_same pinned_connection, @pool.connection
 
-        assert_same pinned_connection, @pool.checkout
+          assert_predicate @pool, :active_connection?
 
-        @pool.release_connection
-        assert_not_predicate @pool, :active_connection?
+          assert_same pinned_connection, @pool.checkout
+
+          @pool.release_connection
+          assert_not_predicate @pool, :active_connection?
+        end
         assert_same pinned_connection, @pool.checkout
       end
 

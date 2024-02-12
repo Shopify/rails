@@ -8,10 +8,14 @@ class StoredProcedureTest < ActiveRecord::AbstractMysqlTestCase
   fixtures :topics
 
   def setup
-    @connection = ActiveRecord::Base.connection
+    @connection = ActiveRecord::Base.connection_pool.checkout
     unless ActiveRecord::Base.connection.database_version >= "5.6.0"
       skip("no stored procedure support")
     end
+  end
+
+  def teardown
+    ActiveRecord::Base.connection_pool.checkin(@connection)
   end
 
   # Test that MySQL allows multiple results for stored procedures

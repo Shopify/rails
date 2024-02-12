@@ -278,26 +278,30 @@ class Mysql2AdapterTest < ActiveRecord::Mysql2TestCase
   end
 
   def test_statement_timeout_error_codes
-    raw_conn = @conn.raw_connection
-    error = assert_raises(ActiveRecord::StatementTimeout) do
-      raw_conn.stub(:query, ->(_sql) { raise Mysql2::Error.new("fail", 50700, ActiveRecord::ConnectionAdapters::AbstractMysqlAdapter::ER_FILSORT_ABORT) }) {
-        @conn.execute("SELECT 1")
-      }
-    end
-    assert_equal @conn.pool, error.connection_pool
+    ActiveRecord::Base.with_connection do |connection|
+      raw_conn = connection.raw_connection
+      error = assert_raises(ActiveRecord::StatementTimeout) do
+        raw_conn.stub(:query, ->(_sql) { raise Mysql2::Error.new("fail", 50700, ActiveRecord::ConnectionAdapters::AbstractMysqlAdapter::ER_FILSORT_ABORT) }) {
+          connection.execute("SELECT 1")
+        }
+      end
+      assert_equal connection.pool, error.connection_pool
 
-    error = assert_raises(ActiveRecord::StatementTimeout) do
-      raw_conn.stub(:query, ->(_sql) { raise Mysql2::Error.new("fail", 50700, ActiveRecord::ConnectionAdapters::AbstractMysqlAdapter::ER_QUERY_TIMEOUT) }) {
-        @conn.execute("SELECT 1")
-      }
+      error = assert_raises(ActiveRecord::StatementTimeout) do
+        raw_conn.stub(:query, ->(_sql) { raise Mysql2::Error.new("fail", 50700, ActiveRecord::ConnectionAdapters::AbstractMysqlAdapter::ER_QUERY_TIMEOUT) }) {
+          connection.execute("SELECT 1")
+        }
+      end
+      assert_equal connection.pool, error.connection_pool
     end
-    assert_equal @conn.pool, error.connection_pool
   end
 
   def test_database_timezone_changes_synced_to_connection
-    with_timezone_config default: :local do
-      assert_changes(-> { @conn.raw_connection.query_options[:database_timezone] }, from: :utc, to: :local) do
-        @conn.execute("SELECT 1")
+    ActiveRecord::Base.with_connection do |connection|
+      with_timezone_config default: :local do
+        assert_changes(-> { connection.raw_connection.query_options[:database_timezone] }, from: :utc, to: :local) do
+          connection.execute("SELECT 1")
+        end
       end
     end
   end

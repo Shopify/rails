@@ -14,7 +14,7 @@ class PooledConnectionsTest < ActiveRecord::TestCase
       ActiveRecord.cache_connection_checkout = true
     end
 
-    teardown do
+    def teardown
       ActiveRecord::Base.connection_handler.clear_all_connections!(:all)
       ActiveRecord::Base.establish_connection(@connection)
       ActiveRecord.cache_connection_checkout = @_cache_connection_checkout_was

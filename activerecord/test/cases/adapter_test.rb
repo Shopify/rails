@@ -11,7 +11,6 @@ module ActiveRecord
   class AdapterTest < ActiveRecord::TestCase
     def setup
       @connection = ActiveRecord::Base.connection
-      @connection.materialize_transactions
     end
 
     ##
@@ -121,6 +120,7 @@ module ActiveRecord
     end
 
     def test_exec_query_returns_an_empty_result
+      @connection.execute "DELETE FROM subscribers WHERE nick = 'me'"
       result = @connection.exec_query "INSERT INTO subscribers(nick) VALUES('me')"
       assert_instance_of(ActiveRecord::Result, result)
     end
@@ -160,8 +160,6 @@ module ActiveRecord
 
     unless in_memory_db? || current_adapter?(:TrilogyAdapter)
       def test_disable_prepared_statements
-        skip "TODO: investigate this test leak"
-
         original_prepared_statements = ActiveRecord.disable_prepared_statements
         db_config = ActiveRecord::Base.configurations.configs_for(env_name: "arunit", name: "primary")
         ActiveRecord::Base.establish_connection(db_config.configuration_hash.merge(prepared_statements: true))
@@ -186,6 +184,7 @@ module ActiveRecord
     end
 
     def test_uniqueness_violations_are_translated_to_specific_exception
+      @connection.execute "DELETE FROM subscribers WHERE nick = 'me'"
       @connection.execute "INSERT INTO subscribers(nick) VALUES('me')"
       error = assert_raises(ActiveRecord::RecordNotUnique) do
         @connection.execute "INSERT INTO subscribers(nick) VALUES('me')"
@@ -299,12 +298,13 @@ module ActiveRecord
     end
 
     def test_select_methods_passing_a_relation
-      Post.create!(title: "foo", body: "bar")
-      query = Post.where(title: "foo").select(:title)
-      assert_equal({ "title" => "foo" }, @connection.select_one(query))
+      title = "foo-#{rand}"
+      Post.create!(title: title, body: "bar")
+      query = Post.where(title: title).select(:title)
+      assert_equal({ "title" => title }, @connection.select_one(query))
       assert @connection.select_all(query).is_a?(ActiveRecord::Result)
-      assert_equal "foo", @connection.select_value(query)
-      assert_equal ["foo"], @connection.select_values(query)
+      assert_equal title, @connection.select_value(query)
+      assert_equal [title], @connection.select_values(query)
     end
 
     test "type_to_sql returns a String for unmapped types" do
@@ -313,16 +313,10 @@ module ActiveRecord
   end
 
   class AdapterForeignKeyTest < ActiveRecord::TestCase
-    self.use_transactional_tests = false
-
     fixtures :fk_test_has_pk
 
     def setup
-      @connection = ActiveRecord::Base.connection_pool.checkout
-    end
-
-    def teardown
-      ActiveRecord::Base.connection_pool.checkin @connection
+      @connection = ActiveRecord::Base.connection
     end
 
     def test_foreign_key_violations_are_translated_to_specific_exception_with_validate_false
@@ -499,7 +493,8 @@ module ActiveRecord
       fixtures :posts, :authors, :author_addresses
 
       def setup
-        @connection = ActiveRecord::Base.connection
+        @connection = ActiveRecord::Base.connection_pool.checkout
+        @connection.verify!
         assert_predicate @connection, :active?
       end
 
@@ -508,6 +503,7 @@ module ActiveRecord
         assert_predicate @connection, :active?
         assert_not_predicate @connection, :transaction_open?
         assert_not raw_transaction_open?(@connection)
+        ActiveRecord::Base.connection_pool.checkin(@connection)
       end
 
       test "reconnect after a disconnect" do
@@ -594,61 +590,69 @@ module ActiveRecord
       end
 
       test "querying a 'clean' failed connection restores and succeeds" do
-        remote_disconnect @connection
+        Post.with_connection do |connection|
+          remote_disconnect connection
 
-        @connection.clean! # this simulates a fresh checkout from the pool
+          connection.clean! # this simulates a fresh checkout from the pool
 
-        # Clean did not verify / fix the connection
-        assert_not_predicate @connection, :active?
+          # Clean did not verify / fix the connection
+          assert_not_predicate connection, :active?
 
-        # Because the connection hasn't been verified since checkout,
-        # and the query cannot safely be retried, the connection will be
-        # verified before querying.
-        Post.delete_all
+          # Because the connection hasn't been verified since checkout,
+          # and the query cannot safely be retried, the connection will be
+          # verified before querying.
+          Post.delete_all
 
-        assert_predicate @connection, :active?
+          assert_predicate connection, :active?
+        end
       end
 
       test "quoting a string on a 'clean' failed connection will not prevent reconnecting" do
-        remote_disconnect @connection
+        Post.with_connection do |connection|
+          remote_disconnect connection
 
-        @connection.clean! # this simulates a fresh checkout from the pool
+          connection.clean! # this simulates a fresh checkout from the pool
 
-        # Clean did not verify / fix the connection
-        assert_not_predicate @connection, :active?
+          # Clean did not verify / fix the connection
+          assert_not_predicate connection, :active?
 
-        # Quote string will not verify a broken connection (although it may
-        # reconnect in some cases)
-        Post.connection.quote_string("")
+          # Quote string will not verify a broken connection (although it may
+          # reconnect in some cases)
+          Post.connection.quote_string("")
 
-        # Because the connection hasn't been verified since checkout,
-        # and the query cannot safely be retried, the connection will be
-        # verified before querying.
-        Post.delete_all
+          # Because the connection hasn't been verified since checkout,
+          # and the query cannot safely be retried, the connection will be
+          # verified before querying.
+          Post.delete_all
 
-        assert_predicate @connection, :active?
+          assert_predicate connection, :active?
+        end
       end
 
       test "querying after a failed query restores and succeeds" do
-        Post.first # Connection verified (and prepared statement pool populated if enabled)
+        Post.with_connection do |connection|
+          Post.first # Connection verified (and prepared statement pool populated if enabled)
 
-        remote_disconnect @connection
+          remote_disconnect connection
 
-        assert_raises(ActiveRecord::ConnectionFailed) do
-          Post.first # Connection no longer verified after failed query
+          assert_raises(ActiveRecord::ConnectionFailed) do
+            Post.first # Connection no longer verified after failed query
+          end
+
+          assert Post.first # Verifying the connection causes a reconnect and the query succeeds
+
+          assert_predicate connection, :active?
         end
-
-        assert Post.first # Verifying the connection causes a reconnect and the query succeeds
-
-        assert_predicate @connection, :active?
       end
 
       test "transaction restores after remote disconnection" do
-        remote_disconnect @connection
-        Post.transaction do
-          Post.count
+        Post.with_connection do |connection|
+          remote_disconnect connection
+          Post.transaction do
+            Post.count
+          end
+          assert_predicate connection, :active?
         end
-        assert_predicate @connection, :active?
       end
 
       test "active transaction is restored after remote disconnection" do
@@ -675,22 +679,24 @@ module ActiveRecord
       end
 
       test "dirty transaction cannot be restored after remote disconnection" do
-        invocations = 0
-        assert_raises ActiveRecord::ConnectionFailed do
-          Post.transaction do
-            invocations += 1
-            Post.delete_all
-            remote_disconnect @connection
-            Post.count
+        Post.with_connection do |connection|
+          invocations = 0
+          assert_raises ActiveRecord::ConnectionFailed do
+            Post.transaction do
+              invocations += 1
+              Post.delete_all
+              remote_disconnect connection
+              Post.count
+            end
           end
+
+          assert_equal 1, invocations # the whole transaction block is not retried
+
+          # After the (outermost) transaction block failed, the connection is
+          # ready to reconnect on next use, but hasn't done so yet
+          assert_not_predicate connection, :active?
+          assert_operator Post.count, :>, 0
         end
-
-        assert_equal 1, invocations # the whole transaction block is not retried
-
-        # After the (outermost) transaction block failed, the connection is
-        # ready to reconnect on next use, but hasn't done so yet
-        assert_not_predicate @connection, :active?
-        assert_operator Post.count, :>, 0
       end
 
       test "can reconnect and retry queries under limit when retry deadline is set" do
@@ -733,20 +739,12 @@ module ActiveRecord
       end
 
       test "#execute is retryable" do
-        conn_id = case @connection.adapter_name
-                  when "Mysql2"
-                    @connection.execute("SELECT CONNECTION_ID()").to_a[0][0]
-                  when "Trilogy"
-                    @connection.execute("SELECT CONNECTION_ID() as connection_id").to_a[0][0]
-                  when "PostgreSQL"
-                    @connection.execute("SELECT pg_backend_pid()").to_a[0]["pg_backend_pid"]
-                  else
-                    skip("kill_connection_from_server unsupported")
+        ActiveRecord::Base.with_connection do |connection|
+          conn_id = connection_id(connection)
+          kill_connection_from_server(conn_id)
+
+          connection.execute("SELECT 1", allow_retry: true)
         end
-
-        kill_connection_from_server(conn_id)
-
-        @connection.execute("SELECT 1", allow_retry: true)
       end
 
       private
@@ -778,10 +776,12 @@ module ActiveRecord
         def remote_disconnect(connection)
           case connection.adapter_name
           when "PostgreSQL"
-            unless connection.instance_variable_get(:@raw_connection).transaction_status == ::PG::PQTRANS_INTRANS
-              connection.instance_variable_get(:@raw_connection).async_exec("begin")
+            connection.send(:with_raw_connection) do |raw_connection|
+              unless raw_connection.transaction_status == ::PG::PQTRANS_INTRANS
+                raw_connection.async_exec("begin")
+              end
+              raw_connection.async_exec("set idle_in_transaction_session_timeout = '10ms'")
             end
-            connection.instance_variable_get(:@raw_connection).async_exec("set idle_in_transaction_session_timeout = '10ms'")
             sleep 0.05
           when "Mysql2", "Trilogy"
             connection.send(:internal_execute, "set @@wait_timeout=1", materialize_transactions: false)
@@ -791,8 +791,24 @@ module ActiveRecord
           end
         end
 
+        def connection_id(connection)
+          case connection.adapter_name
+          when "Mysql2"
+            connection.execute("SELECT CONNECTION_ID()").to_a[0][0]
+          when "Trilogy"
+            connection.execute("SELECT CONNECTION_ID() as connection_id").to_a[0][0]
+          when "PostgreSQL"
+            connection.execute("SELECT pg_backend_pid()").to_a[0]["pg_backend_pid"]
+          else
+            skip("kill_connection_from_server unsupported")
+          end
+        end
+
         def kill_connection_from_server(connection_id)
-          conn = @connection.pool.checkout
+          conn = ActiveRecord::Base.connection_pool.checkout
+
+          assert_not_equal connection_id, connection_id(conn)
+
           case conn.adapter_name
           when "Mysql2", "Trilogy"
             conn.execute("KILL #{connection_id}")

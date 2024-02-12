@@ -16,6 +16,8 @@ module ActiveRecord
     end
 
     setup do
+      @cache_connection_checkout_was = ActiveRecord.cache_connection_checkout
+      ActiveRecord.cache_connection_checkout = true
       @abort, Thread.abort_on_exception = Thread.abort_on_exception, false
       Thread.report_on_exception, @original_report_on_exception = false, Thread.report_on_exception
 
@@ -39,6 +41,8 @@ module ActiveRecord
     teardown do
       ActiveRecord::Base.connection.drop_table "samples", if_exists: true
       ActiveRecord::Base.connection.drop_table "bits", if_exists: true
+
+      ActiveRecord.cache_connection_checkout = @cache_connection_checkout_was
 
       Thread.abort_on_exception = @abort
       Thread.report_on_exception = @original_report_on_exception

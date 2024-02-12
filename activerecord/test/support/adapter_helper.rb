@@ -82,4 +82,14 @@ module AdapterHelper
     connection.disable_extension(extension, force: :cascade)
     connection.reconnect!
   end
+
+  private
+    def with_connection_checkout_caching(&block)
+      old, ActiveRecord.cache_connection_checkout = ActiveRecord.cache_connection_checkout, true
+      begin
+        yield
+      ensure
+        ActiveRecord.cache_connection_checkout = old
+      end
+    end
 end

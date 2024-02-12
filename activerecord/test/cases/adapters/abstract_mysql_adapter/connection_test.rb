@@ -32,43 +32,55 @@ class ConnectionTest < ActiveRecord::AbstractMysqlTestCase
   end
 
   def test_no_automatic_reconnection_after_timeout
-    assert_predicate @connection, :active?
-    cause_server_side_disconnect
-    assert_not_predicate @connection, :active?
+    ActiveRecord::Base.with_connection do |connection|
+      assert_predicate connection, :active?
+      cause_server_side_disconnect(connection)
+      assert_not_predicate connection, :active?
+    end
   ensure
     # Repair all fixture connections so other tests won't break.
     @fixture_connection_pools.each { |p| p.connection.verify! }
   end
 
   def test_successful_reconnection_after_timeout_with_manual_reconnect
-    assert_predicate @connection, :active?
-    cause_server_side_disconnect
-    @connection.reconnect!
-    assert_predicate @connection, :active?
+    ActiveRecord::Base.with_connection do |connection|
+      assert_predicate connection, :active?
+      cause_server_side_disconnect(connection)
+      connection.reconnect!
+      assert_predicate connection, :active?
+    end
   end
 
   def test_successful_reconnection_after_timeout_with_verify
-    assert_predicate @connection, :active?
-    cause_server_side_disconnect
-    @connection.verify!
-    assert_predicate @connection, :active?
+    ActiveRecord::Base.with_connection do |connection|
+      assert_predicate connection, :active?
+      cause_server_side_disconnect(connection)
+      connection.verify!
+      assert_predicate connection, :active?
+    end
   end
 
   def test_execute_after_disconnect_reconnects
-    @connection.disconnect!
+    ActiveRecord::Base.with_connection do |connection|
+      connection.disconnect!
 
-    assert_equal 3, @connection.select_value("SELECT 1+2")
+      assert_equal 3, connection.select_value("SELECT 1+2")
+    end
   end
 
   def test_quote_after_disconnect_reconnects
-    @connection.disconnect!
+    ActiveRecord::Base.with_connection do |connection|
+      connection.disconnect!
 
-    assert_equal "'string'", @connection.quote("string")
+      assert_equal "'string'", connection.quote("string")
+    end
   end
 
   def test_active_after_disconnect
-    @connection.disconnect!
-    assert_equal false, @connection.active?
+    ActiveRecord::Base.with_connection do |connection|
+      connection.disconnect!
+      assert_equal false, connection.active?
+    end
   end
 
   def test_wait_timeout_as_string
@@ -145,14 +157,18 @@ class ConnectionTest < ActiveRecord::AbstractMysqlTestCase
     def test_passing_arbitrary_flags_to_adapter
       run_without_connection do |orig_connection|
         ActiveRecord::Base.establish_connection(orig_connection.merge(flags: Mysql2::Client::COMPRESS))
-        assert_equal (Mysql2::Client::COMPRESS | Mysql2::Client::FOUND_ROWS), ActiveRecord::Base.connection.raw_connection.query_options[:flags]
+        ActiveRecord::Base.with_connection do |connection|
+          assert_equal (Mysql2::Client::COMPRESS | Mysql2::Client::FOUND_ROWS), connection.raw_connection.query_options[:flags]
+        end
       end
     end
 
     def test_passing_flags_by_array_to_adapter
       run_without_connection do |orig_connection|
         ActiveRecord::Base.establish_connection(orig_connection.merge(flags: ["COMPRESS"]))
-        assert_equal ["COMPRESS", "FOUND_ROWS"], ActiveRecord::Base.connection.raw_connection.query_options[:flags]
+        ActiveRecord::Base.with_connection do |connection|
+          assert_equal ["COMPRESS", "FOUND_ROWS"], connection.raw_connection.query_options[:flags]
+        end
       end
     end
   end
@@ -217,12 +233,12 @@ class ConnectionTest < ActiveRecord::AbstractMysqlTestCase
   end
 
   private
-    def cause_server_side_disconnect
-      @connection.update("set @@wait_timeout=1")
+    def cause_server_side_disconnect(connection = @connection)
+      connection.update("set @@wait_timeout=1")
       sleep 2
     end
 
-    def test_lock_free(lock_name)
-      @connection.select_value("SELECT IS_FREE_LOCK(#{@connection.quote(lock_name)})") == 1
+    def test_lock_free(lock_name, connection = @connection)
+      connection.select_value("SELECT IS_FREE_LOCK(#{connection.quote(lock_name)})") == 1
     end
 end

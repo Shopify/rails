@@ -34,48 +34,49 @@ module ActiveRecord
     end
 
     test "deadlock correctly raises Deadlocked inside nested SavepointTransaction" do
-      connection = Sample.connection
-      assert_raises(ActiveRecord::Deadlocked) do
-        barrier = Concurrent::CyclicBarrier.new(2)
+      Sample.with_connection do |connection|
+        assert_raises(ActiveRecord::Deadlocked) do
+          barrier = Concurrent::CyclicBarrier.new(2)
 
-        s1 = Sample.create value: 1
-        s2 = Sample.create value: 2
-
-        begin
-          thread = Thread.new do
-            Sample.transaction(requires_new: false) do
-              make_parent_transaction_dirty
-              Sample.transaction(requires_new: true) do
-                assert_current_transaction_is_savepoint_transaction
-                s1.lock!
-                barrier.wait
-                s2.update value: 1
-              end
-            end
-          end
+          s1 = Sample.create value: 1
+          s2 = Sample.create value: 2
 
           begin
-            Sample.transaction(requires_new: false) do
-              make_parent_transaction_dirty
-              Sample.transaction(requires_new: true) do
-                assert_current_transaction_is_savepoint_transaction
-                s2.lock!
-                barrier.wait
-                s1.update value: 2
+            thread = Thread.new do
+              Sample.transaction(requires_new: false) do
+                make_parent_transaction_dirty
+                Sample.transaction(requires_new: true) do
+                  assert_current_transaction_is_savepoint_transaction
+                  s1.lock!
+                  barrier.wait
+                  s2.update value: 1
+                end
               end
             end
-          ensure
-            thread.join
-          end
-        rescue ActiveRecord::StatementInvalid => e
-          if /SAVEPOINT active_record_. does not exist/ =~ e.to_s
-            flunk "ROLLBACK TO SAVEPOINT query issued for savepoint that no longer exists due to deadlock: #{e}"
-          else
-            raise e
+
+            begin
+              Sample.transaction(requires_new: false) do
+                make_parent_transaction_dirty
+                Sample.transaction(requires_new: true) do
+                  assert_current_transaction_is_savepoint_transaction
+                  s2.lock!
+                  barrier.wait
+                  s1.update value: 2
+                end
+              end
+            ensure
+              thread.join
+            end
+          rescue ActiveRecord::StatementInvalid => e
+            if /SAVEPOINT active_record_. does not exist/ =~ e.to_s
+              flunk "ROLLBACK TO SAVEPOINT query issued for savepoint that no longer exists due to deadlock: #{e}"
+            else
+              raise e
+            end
           end
         end
+        assert_predicate connection, :active?
       end
-      assert_predicate connection, :active?
     end
 
     test "rollback exception is swallowed after a rollback" do

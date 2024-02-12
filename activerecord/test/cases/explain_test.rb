@@ -7,12 +7,12 @@ if ActiveRecord::Base.connection.supports_explain?
   class ExplainTest < ActiveRecord::TestCase
     fixtures :cars
 
-    def base
-      ActiveRecord::Base
+    def setup
+      @connection = ActiveRecord::Base.connection_pool.checkout
     end
 
-    def connection
-      base.connection
+    def teardown
+      ActiveRecord::Base.connection_pool.checkin(@connection)
     end
 
     def test_relation_explain
@@ -132,7 +132,7 @@ if ActiveRecord::Base.connection.supports_explain?
 
       stub_explain_for_query_plans do
         expected = sqls.map { |sql| "#{expected_explain_clause} #{sql}\nquery plan #{sql}" }.join("\n")
-        assert_equal expected, base.exec_explain(queries)
+        assert_equal expected, ActiveRecord::Base.exec_explain(queries)
       end
     end
 
@@ -149,7 +149,7 @@ if ActiveRecord::Base.connection.supports_explain?
           #{expected_explain_clause} #{sqls[1]} [["chaflan", 2]]
           query plan bar
         SQL
-        assert_equal expected, base.exec_explain(queries)
+        assert_equal expected, ActiveRecord::Base.exec_explain(queries)
       end
     end
 
@@ -159,7 +159,7 @@ if ActiveRecord::Base.connection.supports_explain?
 
         # Minitest's `stub` method is unable to correctly replicate method arguments
         # signature, so we need to do a manual stubbing in this case.
-        metaclass = class << connection; self; end
+        metaclass = @connection.singleton_class
         explain_method = metaclass.instance_method(:explain)
         metaclass.define_method(:explain) do |_arel, _binds = [], _options = {}|
           explain_called += 1
@@ -176,8 +176,8 @@ if ActiveRecord::Base.connection.supports_explain?
       end
 
       def expected_explain_clause
-        if connection.respond_to?(:build_explain_clause)
-          connection.build_explain_clause
+        if @connection.respond_to?(:build_explain_clause)
+          @connection.build_explain_clause
         else
           "EXPLAIN for:"
         end

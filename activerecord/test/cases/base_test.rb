@@ -1769,6 +1769,7 @@ class BasicsTest < ActiveRecord::TestCase
   end
 
   test ".columns_hash raises an error if the record has an empty table name" do
+    FirstAbstractClass.connects_to database: { writing: :arunit, reading: :arunit }
     expected_message = "FirstAbstractClass has no table configured. Set one with FirstAbstractClass.table_name="
     exception = assert_raises(ActiveRecord::TableNotSpecified) do
       FirstAbstractClass.columns_hash

@@ -45,15 +45,17 @@ module ActiveRecord
         pool.insert_connection_for_test! @adapter
         @adapter.pool = pool
 
-        # Make sure the pool marks the connection in use
-        assert_equal @adapter, pool.connection
-        assert_predicate @adapter, :in_use?
+        with_connection_checkout_caching do
+          # Make sure the pool marks the connection in use
+          assert_equal @adapter, pool.connection
+          assert_predicate @adapter, :in_use?
 
-        # Close should put the adapter back in the pool
-        @adapter.close
-        assert_not_predicate @adapter, :in_use?
+          # Close should put the adapter back in the pool
+          @adapter.close
+          assert_not_predicate @adapter, :in_use?
 
-        assert_equal @adapter, pool.connection
+          assert_equal @adapter, pool.connection
+        end
       end
     end
   end

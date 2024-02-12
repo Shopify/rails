@@ -157,11 +157,12 @@ class QueryLogsTest < ActiveRecord::TestCase
   end
 
   def test_connection_is_passed_to_tagging_proc
-    connection = ActiveRecord::Base.connection
-    ActiveRecord::QueryLogs.tags = [ same_connection: ->(context) { context[:connection] == connection } ]
+    ActiveRecord::Base.with_connection do |connection|
+      ActiveRecord::QueryLogs.tags = [ same_connection: ->(context) { context[:connection] == connection } ]
 
-    assert_queries_match("SELECT 1 /*same_connection:true*/") do
-      connection.execute "SELECT 1"
+      assert_queries_match("SELECT 1 /*same_connection:true*/") do
+        connection.execute "SELECT 1"
+      end
     end
   end
 

@@ -55,6 +55,7 @@ module ActiveRecord
       end
 
       define_method(:__class__, ::Kernel.instance_method(:class))
+      define_method(:object_id, ::Kernel.instance_method(:object_id))
 
       def clear_query_cache
         @pool.query_cache&.clear
@@ -96,6 +97,8 @@ module ActiveRecord
           ::Kernel.raise "Can't call `##{__callee__}` on a lazy connection"
         end
         public alias_method :raw_connection, :reject_stateful_method!
+        public alias_method :disconnect!, :reject_stateful_method!
+        public alias_method :active?, :reject_stateful_method!
         public alias_method :disable_lazy_transactions!, :reject_stateful_method!
     end
 
@@ -231,13 +234,11 @@ module ActiveRecord
       # #connection can be called any number of times; the connection is
       # held in a cache keyed by a thread.
       def connection
-        @thread_cached_conns[ActiveSupport::IsolatedExecutionState.context] ||= begin
-          if ActiveRecord.cache_connection_checkout
-            checkout
-          else
-            # raise "Checkout cache is disabled, and no connection is checked out yet for #{@db_config.name.inspect} (TODO: better error)"
-            return @lazy_connection # Trying
-          end
+        @thread_cached_conns[ActiveSupport::IsolatedExecutionState.context] ||= if ActiveRecord.cache_connection_checkout
+          checkout
+        else
+          # raise "Checkout cache is disabled, and no connection is checked out yet for #{@db_config.name.inspect} (TODO: better error)"
+          return @lazy_connection # Trying
         end
       end
 

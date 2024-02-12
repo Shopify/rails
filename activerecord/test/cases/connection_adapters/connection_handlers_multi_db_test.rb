@@ -397,16 +397,6 @@ module ActiveRecord
         ActiveRecord.writing_role = old_writing
         ActiveRecord.reading_role = old_reading
       end
-
-      private
-        def with_connection_checkout_caching(&block)
-          old, ActiveRecord.cache_connection_checkout = ActiveRecord.cache_connection_checkout, true
-          begin
-            yield
-          ensure
-            ActiveRecord.cache_connection_checkout = old
-          end
-        end
     end
   end
 end

@@ -15,6 +15,10 @@ module ActiveRecord
       super
     ensure
       teardown_fixtures
+      if ActiveRecord.cache_connection_checkout
+        puts "ActiveRecord.cache_connection_checkout leaked in #{self.class}##{name}"
+        exit!(1)
+      end
     end
 
     included do

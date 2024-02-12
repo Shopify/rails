@@ -6,8 +6,16 @@ require "models/book"
 require "models/post"
 
 class TrilogyAdapterTest < ActiveRecord::TrilogyTestCase
+  self.use_transactional_tests = false
+
   setup do
-    @conn = ActiveRecord::Base.connection
+    @conn = ActiveRecord::Base.connection_pool.checkout
+    @conn.verify!
+  end
+
+  teardown do
+    @conn.verify!
+    ActiveRecord::Base.connection_pool.checkin(@conn) if @conn.in_use?
   end
 
   test "connection_error" do
@@ -167,6 +175,8 @@ class TrilogyAdapterTest < ActiveRecord::TrilogyTestCase
     @conn.cache do
       event_fired = false
       subscription = ->(name, start, finish, id, payload) {
+        next if payload[:name] == "SCHEMA"
+
         event_fired = true
 
         # First, we test keys that are defined by default by the AbstractAdapter
@@ -198,6 +208,8 @@ class TrilogyAdapterTest < ActiveRecord::TrilogyTestCase
 
       event_fired = false
       subscription = ->(name, start, finish, id, payload) {
+        next if payload[:name] == "SCHEMA"
+
         event_fired = true
 
         # First, we test keys that are defined by default by the AbstractAdapter

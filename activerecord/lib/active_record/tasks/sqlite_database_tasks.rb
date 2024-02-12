@@ -16,7 +16,6 @@ module ActiveRecord
         raise DatabaseAlreadyExists if File.exist?(db_config.database)
 
         establish_connection
-        connection
       end
 
       def drop
@@ -29,12 +28,14 @@ module ActiveRecord
       end
 
       def purge
-        connection.disconnect!
-        drop
-      rescue NoDatabaseError
-      ensure
-        create
-        connection.reconnect!
+        Base.with_connection do |connection|
+          connection.disconnect!
+          drop
+        rescue NoDatabaseError
+        ensure
+          create
+          connection.reconnect!
+        end
       end
 
       def charset
@@ -71,7 +72,7 @@ module ActiveRecord
 
         def establish_connection(config = db_config)
           ActiveRecord::Base.establish_connection(config)
-          connection.connect!
+          ActiveRecord::Base.with_connection(&:connect!)
         end
 
         def run_cmd(cmd, args, out)

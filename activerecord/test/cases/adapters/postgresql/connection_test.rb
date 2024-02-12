@@ -13,7 +13,7 @@ module ActiveRecord
     def setup
       super
       @subscriber = SQLSubscriber.new
-      @connection = ActiveRecord::Base.connection
+      @connection = ActiveRecord::Base.connection_pool.checkout
       @connection.materialize_transactions
       @subscription = ActiveSupport::Notifications.subscribe("sql.active_record", @subscriber)
     end

@@ -657,15 +657,6 @@ class QueryCacheTest < ActiveRecord::TestCase
   end
 
   private
-    def with_connection_checkout_caching(&block)
-      old, ActiveRecord.cache_connection_checkout = ActiveRecord.cache_connection_checkout, true
-      begin
-        yield
-      ensure
-        ActiveRecord.cache_connection_checkout = old
-      end
-    end
-
     def with_temporary_connection_pool(&block)
       pool_config = ActiveRecord::Base.connection.pool.pool_config
       new_pool = ActiveRecord::ConnectionAdapters::ConnectionPool.new(pool_config)

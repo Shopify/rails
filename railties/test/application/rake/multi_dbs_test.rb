@@ -929,16 +929,18 @@ module ApplicationTests
           use_postgresql(multi_db: true)
           generate_models_for_animals
 
-          rails "db:create:animals", "db:migrate:animals", "db:create:primary", "db:migrate:primary", "db:schema:dump"
-          rails "db:drop:primary"
-          Dog.create!
-          output = rails("db:prepare")
+          ::Dog.with_connection do |connection|
+            rails "db:create:animals", "db:migrate:animals", "db:create:primary", "db:migrate:primary", "db:schema:dump"
+            rails "db:drop:primary"
+            Dog.create!
+            output = rails("db:prepare")
 
-          assert_match(/Created database/, output)
-          assert_equal 1, Dog.count
-        ensure
-          Dog.connection.disconnect!
-          rails "db:drop" rescue nil
+            assert_match(/Created database/, output)
+            assert_equal 1, Dog.count
+          ensure
+            connection.disconnect!
+            rails "db:drop" rescue nil
+          end
         end
       end
 
@@ -949,18 +951,21 @@ module ApplicationTests
 
           rails "db:drop"
           generate_models_for_animals
-          rails "generate", "model", "recipe", "title:string"
 
-          app_file "db/seeds.rb", <<-RUBY
-            Dog.create!
-          RUBY
+          Dog.with_connection do |connection|
+            rails "generate", "model", "recipe", "title:string"
 
-          rails("db:prepare")
+            app_file "db/seeds.rb", <<-RUBY
+              Dog.create!
+            RUBY
 
-          assert_equal 1, Dog.count
-        ensure
-          Dog.connection.disconnect!
-          rails "db:drop" rescue nil
+            rails("db:prepare")
+
+            assert_equal 1, Dog.count
+          ensure
+            connection.disconnect!
+            rails "db:drop" rescue nil
+          end
         end
       end
 
