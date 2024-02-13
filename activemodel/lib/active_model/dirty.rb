@@ -247,12 +247,27 @@ module ActiveModel
 
     def initialize_dup(other) # :nodoc:
       super
-      if self.class.respond_to?(:_default_attributes)
-        @attributes = self.class._default_attributes.map do |attr|
-          attr.with_value_from_user(@attributes.fetch_value(attr.name))
-        end
-      end
+      @attribute = @attributes.deep_dup
       @mutations_from_database = nil
+
+      self.class._default_attributes.each_value do |default_attr|
+        new_attr = default_attr.with_value_from_user(@attributes.fetch_value(default_attr.name))
+        was_differnt_from_default = new_attr.changed?
+        puts "#{default_attr.name} was different from default: #{was_differnt_from_default}"
+        attribute_will_change!(default_attr.name) if was_differnt_from_default
+      end
+
+      # if self.class.respond_to?(:_default_attributes)
+      #   @attributes = self.class._default_attributes.map do |default_attr|
+      #     if @attributes[default_attr.name].came_from_user?
+      #       puts "#{default_attr.name} came from user"
+      #       default_attr.with_value_from_user(@attributes.fetch_value(default_attr.name))
+      #     else
+      #       puts "#{default_attr.name} came from database"
+      #       ActiveModel::Attribute.force_from_database(default_attr.name, @attributes.fetch_value(default_attr.name), default_attr.type, default_attr)
+      #     end
+      #   end
+      # end
     end
 
     def as_json(options = {}) # :nodoc:

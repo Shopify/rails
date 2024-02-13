@@ -9,6 +9,10 @@ module ActiveModel
         FromDatabase.new(name, value_before_type_cast, type, nil, value)
       end
 
+      def force_from_database(...)
+        FromDatabase.new(...)
+      end
+
       def from_user(name, value_before_type_cast, type, original_attribute = nil)
         FromUser.new(name, value_before_type_cast, type, original_attribute)
       end

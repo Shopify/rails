@@ -42,6 +42,7 @@ module ActiveModel
     end
 
     def changed?(attr_name, from: OPTION_NOT_GIVEN, to: OPTION_NOT_GIVEN)
+      require "debug"; debugger if attr_name.to_s == "name" && $do_debug
       attribute_changed?(attr_name) &&
         (OPTION_NOT_GIVEN == from || original_value(attr_name) == type_cast(attr_name, from)) &&
         (OPTION_NOT_GIVEN == to || fetch_value(attr_name) == type_cast(attr_name, to))

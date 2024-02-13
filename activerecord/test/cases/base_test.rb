@@ -1113,6 +1113,7 @@ class BasicsTest < ActiveRecord::TestCase
     assert_not_predicate developer, :salary_changed?
 
     cloned_developer = developer.dup
+    $do_debug = true
     assert_predicate cloned_developer, :name_changed?     # ... but on cloned object should be
     assert_not cloned_developer.salary_changed?  # ... BUT salary has non-nil default which should be treated as not changed on cloned instance
   end

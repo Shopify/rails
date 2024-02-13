@@ -109,7 +109,7 @@ module ActiveModel
     end
 
     def initialize_dup(other) # :nodoc:
-      @attributes = @attributes.deep_dup
+      #@attributes = @attributes.deep_dup
       super
     end
 
