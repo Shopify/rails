@@ -247,14 +247,14 @@ module ActiveModel
 
     def initialize_dup(other) # :nodoc:
       super
-      @attribute = @attributes.deep_dup
+
+      @attributes = @attributes.deep_dup
       @mutations_from_database = nil
 
       self.class._default_attributes.each_value do |default_attr|
         new_attr = default_attr.with_value_from_user(@attributes.fetch_value(default_attr.name))
-        was_differnt_from_default = new_attr.changed?
-        puts "#{default_attr.name} was different from default: #{was_differnt_from_default}"
-        attribute_will_change!(default_attr.name) if was_differnt_from_default
+        different_from_default = new_attr.changed?
+        attribute_will_change!(default_attr.name) if different_from_default
       end
 
       # if self.class.respond_to?(:_default_attributes)

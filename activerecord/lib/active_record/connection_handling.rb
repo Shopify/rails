@@ -243,7 +243,7 @@ module ActiveRecord
     # Clears the query cache for all connections associated with the current thread.
     def clear_query_caches_for_current_thread
       connection_handler.each_connection_pool do |pool|
-        pool.connection.clear_query_cache if pool.active_connection?
+        pool.connection.`clear_query_cache` if pool.active_connection?
       end
     end
 

@@ -426,6 +426,7 @@ module ActiveRecord
       end
 
       def columns
+        debugger if $do_debug
         load_schema unless @columns
         @columns ||= columns_hash.values.freeze
       end
