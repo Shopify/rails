@@ -295,9 +295,10 @@ module ActiveRecord
                 conn.steal!
                 checkin conn
               end
+
               conn.disconnect!
             end
-            @connections = []
+            @connections = [@pinned_connection].compact
             @thread_cached_conns.clear
             @available.clear
           end

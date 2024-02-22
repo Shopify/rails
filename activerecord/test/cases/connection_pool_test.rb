@@ -871,6 +871,7 @@ module ActiveRecord
         pin_connection = @pool.checkout
 
         @pool.disconnect
+        assert_equal [pin_connection], @pool.connections
         assert_not_predicate @pool, :connected?
         assert_same pin_connection, @pool.checkout
         assert_predicate @pool, :connected?
