@@ -8,7 +8,13 @@ module ActiveRecord
       # If it's not, it will execute the given block.
       def cache(&block)
         if connected? || !configurations.empty?
-          connection_pool.enable_query_cache(&block)
+          pool = connection_pool
+          was_enabled = pool.query_cache_enabled
+          begin
+            pool.enable_query_cache(&block)
+          ensure
+            pool.clear_query_cache unless was_enabled
+          end
         else
           yield
         end
@@ -32,6 +38,7 @@ module ActiveRecord
     def self.complete(pools)
       pools.each do |pool|
         pool.disable_query_cache!
+        pool.clear_query_cache
       end
 
       ActiveRecord::Base.connection_handler.each_connection_pool do |pool|

@@ -184,7 +184,9 @@ module ActiveRecord
       # the same SQL query and repeatedly return the same result each time, silently
       # undermining the randomness you were expecting.
       def clear_query_cache
-        pool.clear_query_cache
+        @lock.synchronize do
+          @query_cache&.clear
+        end
       end
 
       def select_all(arel, name = nil, binds = [], preparable: nil, async: false) # :nodoc:
