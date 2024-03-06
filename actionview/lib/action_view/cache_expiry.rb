@@ -10,8 +10,6 @@ module ActionView
         @watcher = nil
         @previous_change = false
 
-        rebuild_watcher
-
         ActionView::PathRegistry.file_system_resolver_hooks << method(:rebuild_watcher)
       end
 
@@ -20,12 +18,27 @@ module ActionView
       end
 
       def execute
+        return unless @watcher
+
         watcher = nil
         @mutex.synchronize do
+          return unless @watcher
+
           @previous_change = false
           watcher = @watcher
         end
         watcher.execute
+      end
+
+      def build_watcher
+        @mutex.synchronize do
+          return if @watcher
+
+          @watched_dirs = dirs_to_watch
+          @watcher = @watcher_class.new([], @watched_dirs) do
+            reload!
+          end
+        end
       end
 
       private
@@ -34,7 +47,10 @@ module ActionView
         end
 
         def rebuild_watcher
+          return unless @watcher
           @mutex.synchronize do
+            return unless @watcher
+
             old_watcher = @watcher
 
             if @watched_dirs != dirs_to_watch
