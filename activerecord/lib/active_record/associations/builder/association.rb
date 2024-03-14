@@ -19,7 +19,8 @@ module ActiveRecord::Associations::Builder # :nodoc:
     self.extensions = []
 
     VALID_OPTIONS = [
-      :class_name, :anonymous_class, :primary_key, :foreign_key, :dependent, :validate, :inverse_of, :strict_loading, :query_constraints
+      :class_name, :anonymous_class, :primary_key, :foreign_key, :dependent, :validate, :inverse_of, :strict_loading, :query_constraints,
+      :_query_constraints
     ].freeze # :nodoc:
 
     def self.build(model, name, scope, options, &block)
