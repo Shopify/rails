@@ -432,10 +432,11 @@ module ActiveRecord
               where(wheres).limit(1)
             }
 
-          begin
-            statement.execute(values.flatten, lease_connection, allow_retry: true).then(&:first)
-          rescue TypeError
-            raise ActiveRecord::StatementInvalid
+            begin
+              statement.execute(values.flatten, lease_connection, allow_retry: true).then(&:first)
+            rescue TypeError
+              raise ActiveRecord::StatementInvalid
+            end
           end
         end
     end
