@@ -964,10 +964,8 @@ module ActiveRecord
           internal_execute("SET #{encoding} #{sql_mode_assignment} #{variable_assignments}")
         end
 
-        def column_definitions(table_name) # :nodoc:
-          execute_and_free("SHOW FULL FIELDS FROM #{quote_table_name(table_name)}", "SCHEMA") do |result|
-            each_hash(result)
-          end
+        def column_definitions(table_name, async: false) # :nodoc:
+          select_all("SHOW FULL FIELDS FROM #{quote_table_name(table_name)}", "SCHEMA", async: async)
         end
 
         def create_table_info(table_name) # :nodoc:

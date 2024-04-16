@@ -30,6 +30,10 @@ module ActiveRecord
         self
       end
 
+      def preload_async(pool, sources)
+        cache(pool).preload_async(pool, sources)
+      end
+
       def primary_keys(pool, table_name)
         cache(pool).primary_keys(pool, table_name)
       end
@@ -172,6 +176,10 @@ module ActiveRecord
 
       def cached?(table_name)
         @schema_reflection.cached?(table_name)
+      end
+
+      def preload_async(sources)
+        @schema_reflection.preload_async(@pool, sources)
       end
 
       def primary_keys(table_name)
@@ -331,6 +339,20 @@ module ActiveRecord
             columns_hash(pool, table_name)
             indexes(pool, table_name)
           end
+        end
+      end
+
+      def preload_async(pool, sources)
+        columns = pool.with_connection do |connection|
+          sources.each_with_object({}) do |table_name, hash|
+            unless @columns.key?(table_name)
+              hash[table_name] = connection.columns(table_name, async: true)
+            end
+          end
+        end
+        columns.each do |table_name, column_info|
+          @columns[deep_deduplicate(table_name)] = deep_deduplicate(column_info.value)
+        rescue StatementInvalid
         end
       end
 

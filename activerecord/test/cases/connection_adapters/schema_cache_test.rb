@@ -28,6 +28,20 @@ module ActiveRecord
         end
       end
 
+      def test_preload_async
+        cache = new_bound_reflection
+        assert_not cache.cached?("courses")
+
+        cache.preload_async(["courses", "omgponies", "professors", "colleges"])
+
+        assert cache.cached?("courses")
+        assert_not cache.cached?("omgponies")
+        assert cache.cached?("professors")
+        assert cache.cached?("colleges")
+
+        assert_equal ["id", "name", "college_id"], cache.columns("courses").map(&:name)
+      end
+
       def test_cached?
         cache = new_bound_reflection
         assert_not cache.cached?("courses")

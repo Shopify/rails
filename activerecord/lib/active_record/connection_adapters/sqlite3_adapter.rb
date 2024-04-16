@@ -475,14 +475,17 @@ module ActiveRecord
           999
         end
 
-        def table_structure(table_name)
-          structure = if supports_virtual_columns?
-            internal_exec_query("PRAGMA table_xinfo(#{quote_table_name(table_name)})", "SCHEMA")
+        def table_structure(table_name, async: false)
+          result = if supports_virtual_columns?
+            select_all("PRAGMA table_xinfo(#{quote_table_name(table_name)})", "SCHEMA", async: async)
           else
-            internal_exec_query("PRAGMA table_info(#{quote_table_name(table_name)})", "SCHEMA")
+            select_all("PRAGMA table_info(#{quote_table_name(table_name)})", "SCHEMA", async: async)
           end
-          raise ActiveRecord::StatementInvalid.new("Could not find table '#{table_name}'", connection_pool: @pool) if structure.empty?
-          table_structure_with_collation(table_name, structure)
+
+          result.then do |structure|
+            raise ActiveRecord::StatementInvalid.new("Could not find table '#{table_name}'", connection_pool: @pool) if structure.empty?
+            table_structure_with_collation(table_name, structure)
+          end
         end
         alias column_definitions table_structure
 

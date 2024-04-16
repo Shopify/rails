@@ -104,11 +104,13 @@ module ActiveRecord
       end
 
       # Returns an array of +Column+ objects for the table specified by +table_name+.
-      def columns(table_name)
+      def columns(table_name, async: false)
         table_name = table_name.to_s
-        definitions = column_definitions(table_name)
-        definitions.map do |field|
-          new_column_from_field(table_name, field, definitions)
+        result = column_definitions(table_name, async: async)
+        result.then do |definitions|
+          definitions.map do |field|
+            new_column_from_field(table_name, field, definitions)
+          end
         end
       end
 
