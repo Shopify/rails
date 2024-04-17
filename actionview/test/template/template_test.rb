@@ -62,7 +62,7 @@ class TestERBTemplate < ActiveSupport::TestCase
     ActionView::Template.new(body.dup, "hello template", details.delete(:handler) || ERBHandler, virtual_path: "hello", **details)
   end
 
-  def render(implicit_locals: [], **locals)
+  def render(implicit_locals: [], **locals, &_)
     @template.render(@context, locals, implicit_locals: implicit_locals)
   end
 

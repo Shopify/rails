@@ -118,7 +118,7 @@ module ActiveRecord
       def materialized?; false; end
       def before_commit; yield; end
       def after_commit; yield; end
-      def after_rollback; end # noop
+      def after_rollback(&_); end # noop
     end
 
     class Transaction < ActiveRecord::Transaction # :nodoc:

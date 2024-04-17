@@ -17,7 +17,7 @@ module ActionView # :nodoc:
         @filename
       end
 
-      def render(*args)
+      def render(*args, &_)
         ::File.read(@filename)
       end
     end

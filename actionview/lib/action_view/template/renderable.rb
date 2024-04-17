@@ -12,7 +12,7 @@ module ActionView
         @renderable.class.name
       end
 
-      def render(context, *args)
+      def render(context, *args, &_)
         @renderable.render_in(context)
       rescue NoMethodError
         if !@renderable.respond_to?(:render_in)

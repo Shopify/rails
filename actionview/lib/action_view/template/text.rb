@@ -20,7 +20,7 @@ module ActionView # :nodoc:
         @string
       end
 
-      def render(*args)
+      def render(*args, &_)
         to_str
       end
 

@@ -15,7 +15,7 @@ module Arel # :nodoc: all
         self
       end
 
-      def add_bind(bind)
+      def add_bind(bind, &_)
         bind = bind.value_for_database if bind.respond_to?(:value_for_database)
         self << quoter.quote(bind)
       end

@@ -28,7 +28,7 @@ module ActionMailer
     ruby2_keywords(:initialize)
 
     # Method calls are delegated to the Mail::Message that's ready to deliver.
-    def __getobj__ # :nodoc:
+    def __getobj__(&_) # :nodoc:
       @mail_message ||= processed_mailer.message
     end
 
