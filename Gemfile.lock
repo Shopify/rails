@@ -207,6 +207,7 @@ GEM
       rake (>= 12.0.0, < 14.0.0)
     drb (2.2.0)
       ruby2_keywords
+    error_highlight (0.6.0)
     erubi (1.12.0)
     et-orbi (1.2.7)
       tzinfo
@@ -270,7 +271,7 @@ GEM
       google-cloud-core (~> 1.6)
       googleauth (>= 0.16.2, < 2.a)
       mini_mime (~> 1.0)
-    google-protobuf (3.25.1)
+    google-protobuf (3.25.1-x86_64-linux)
     googleauth (1.9.1)
       faraday (>= 1.0, < 3.a)
       google-cloud-env (~> 2.1)
@@ -329,7 +330,6 @@ GEM
       mixlib-shellout
     mini_magick (4.12.0)
     mini_mime (1.1.5)
-    mini_portile2 (2.8.6)
     minitest (5.21.1)
     minitest-bisect (1.7.0)
       minitest-server (~> 1.0)
@@ -362,11 +362,6 @@ GEM
     net-smtp (0.4.0)
       net-protocol
     nio4r (2.7.0)
-    nokogiri (1.16.0)
-      mini_portile2 (~> 2.8.2)
-      racc (~> 1.4)
-    nokogiri (1.16.0-x86_64-darwin)
-      racc (~> 1.4)
     nokogiri (1.16.0-x86_64-linux)
       racc (~> 1.4)
     os (1.1.4)
@@ -415,7 +410,7 @@ GEM
     rb-inotify (0.10.1)
       ffi (~> 1.0)
     rbtree (0.4.6)
-    rdoc (6.6.2)
+    rdoc (6.6.3.1)
       psych (>= 4.0.0)
     redcarpet (3.2.3)
     redis (5.0.8)
@@ -484,11 +479,6 @@ GEM
     rubyzip (2.3.2)
     rufus-scheduler (3.9.1)
       fugit (~> 1.1, >= 1.1.6)
-    sass-embedded (1.69.6)
-      google-protobuf (~> 3.25)
-      rake (>= 13.0.0)
-    sass-embedded (1.69.6-x86_64-darwin)
-      google-protobuf (~> 3.25)
     sass-embedded (1.69.6-x86_64-linux-gnu)
       google-protobuf (~> 3.25)
     selenium-webdriver (4.16.0)
@@ -527,9 +517,6 @@ GEM
       actionpack (>= 5.2)
       activesupport (>= 5.2)
       sprockets (>= 3.0.0)
-    sqlite3 (2.0.0)
-      mini_portile2 (~> 2.8.0)
-    sqlite3 (2.0.0-x86_64-darwin)
     sqlite3 (2.0.0-x86_64-linux-gnu)
     stackprof (0.2.25)
     stimulus-rails (1.3.0)
@@ -539,10 +526,6 @@ GEM
       concurrent-ruby (~> 1.0)
     syntax_tree (6.1.1)
       prettier_print (>= 1.2.0)
-    tailwindcss-rails (2.1.0)
-      railties (>= 6.0.0)
-    tailwindcss-rails (2.1.0-x86_64-darwin)
-      railties (>= 6.0.0)
     tailwindcss-rails (2.1.0-x86_64-linux)
       railties (>= 6.0.0)
     terser (1.1.20)
@@ -584,8 +567,6 @@ GEM
     zeitwerk (2.6.12)
 
 PLATFORMS
-  ruby
-  x86_64-darwin
   x86_64-linux
 
 DEPENDENCIES
@@ -608,6 +589,7 @@ DEPENDENCIES
   debug (>= 1.1.0)
   delayed_job
   delayed_job_active_record
+  error_highlight (>= 0.4.0)
   google-cloud-storage (~> 1.11)
   httpclient!
   image_processing (~> 1.2)
@@ -636,7 +618,7 @@ DEPENDENCIES
   rack-cache (~> 1.2)
   rails!
   rake (>= 13)
-  rdoc (~> 6.5)
+  rdoc (~> 6.6)
   redcarpet (~> 3.2.3)
   redis (>= 4.0.1)
   redis-namespace
