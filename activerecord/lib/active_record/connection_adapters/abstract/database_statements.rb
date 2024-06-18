@@ -468,15 +468,42 @@ module ActiveRecord
         execute(build_fixture_sql(Array.wrap(fixture), table_name), "Fixture Insert")
       end
 
+      # Verify assumption that we'll never insert fixtures from within a transaction block.
       def insert_fixtures_set(fixture_set, tables_to_delete = [])
-        fixture_inserts = build_fixture_statements(fixture_set)
-        table_deletes = tables_to_delete.map { |table| "DELETE FROM #{quote_table_name(table)}" }
-        statements = table_deletes + fixture_inserts
+        # should we check current_transaction.joinable?
+        if async_enabled? && false
+          fixture_set.each do |table_name, fixtures|
+            next if fixtures.empty?
 
-        with_multi_statements do
-          transaction(requires_new: true) do
-            disable_referential_integrity do
-              execute_batch(statements, "Fixtures Load")
+            insert_sql = build_fixture_sql(fixtures, table_name)
+            statement = tables_to_delete.include?(table_name) ? "DELETE FROM #{quote_table_name(table_name)};\n" : ""
+            statement += transform_query(insert_sql)
+
+            future_result = async.new(
+              pool,
+              statement,
+              "Fixture Load for #{table_name}",
+              binds: [],
+              prepare: prepare,
+            )
+            require 'debug'; debugger
+            if supports_concurrent_connections? && current_transaction.closed?
+              future_result.schedule!(ActiveRecord::Base.asynchronous_queries_session)
+            else
+              future_result.execute!(self)
+            end
+            future_result
+          end
+        else
+          fixture_inserts = build_fixture_statements(fixture_set)
+          table_deletes = tables_to_delete.map { |table| "DELETE FROM #{quote_table_name(table)}" }
+          statements = table_deletes + fixture_inserts
+
+          with_multi_statements do
+            transaction(requires_new: true) do
+              disable_referential_integrity do
+                execute_batch(statements, "Fixtures Load")
+              end
             end
           end
         end
