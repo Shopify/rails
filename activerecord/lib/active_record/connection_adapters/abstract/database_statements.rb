@@ -469,14 +469,57 @@ module ActiveRecord
       end
 
       def insert_fixtures_set(fixture_set, tables_to_delete = [])
-        fixture_inserts = build_fixture_statements(fixture_set)
-        table_deletes = tables_to_delete.map { |table| "DELETE FROM #{quote_table_name(table)}" }
-        statements = table_deletes + fixture_inserts
+        # If async is enabled, and we're not in a transaction, insert fixtures async. Otherwise, fallback to multi-statement inserts.
+        if async_enabled? && current_transaction.closed?
+          queries = []
+          fixture_set.each do |table_name, fixtures|
+            next if fixtures.empty?
 
+            insert_sql = build_fixture_sql(fixtures, table_name)
+            statement = tables_to_delete.include?(table_name) ? "DELETE FROM #{quote_table_name(table_name)};\n" : "" # Combine delete and insert into single statement since it's async
+            statement += transform_query(insert_sql)
+
+            query_label = "Fixture Load for #{table_name}"
+            # puts "Scheduling #{query_label} for async execution"
+            result = ActiveRecord::FutureResult::InsertFixtures.new(pool, statement, query_label)
+            result.schedule!(ActiveRecord::Base.asynchronous_queries_session)
+            queries << result
+          end
+          # puts "waiting for queries to complete"
+          begin
+            queries.each(&:result)
+          rescue => e
+            puts "Error: #{e}"
+            # truncate instead of rolling back; can't rollback async queries
+            truncate_tables(*tables_to_delete)
+          end
+        else
+          fixture_inserts = build_fixture_statements(fixture_set)
+          table_deletes = tables_to_delete.map { |table| "DELETE FROM #{quote_table_name(table)}" }
+          statements = table_deletes + fixture_inserts
+
+          with_multi_statements do
+            transaction(requires_new: true) do
+              disable_referential_integrity do
+                execute_batch(statements, "Fixtures Load")
+              end
+            end
+          end
+        end
+      end
+
+      def exec_fixtures_insert(*args, **kwargs)
         with_multi_statements do
-          transaction(requires_new: true) do
-            disable_referential_integrity do
-              execute_batch(statements, "Fixtures Load")
+          disable_referential_integrity do
+            with_raw_connection do |conn|
+              # Simulate something raising to verify table truncating happens correctly
+              # if args[0].match?(/author_addresses/)
+              #   puts "sending malformed SQL"
+              #   args[0] = "BAD QUERY;"
+              # end
+              internal_exec_query(*args, **kwargs)
+              # This only works for trilogy rn; will need to make work for other adapters using multi-statement client API
+              conn.next_result while conn.more_results_exist?
             end
           end
         end
