@@ -48,6 +48,7 @@ module ActiveSupport
   autoload :ErrorReporter
   autoload :FileUpdateChecker
   autoload :EventedFileUpdateChecker
+  autoload :FileUpdateCheckerDaemon
   autoload :ForkTracker
   autoload :LogSubscriber
   autoload :IsolatedExecutionState
