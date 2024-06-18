@@ -98,12 +98,16 @@ class FixturesTest < ActiveRecord::TestCase
       subscriber = InsertQuerySubscriber.new
       subscription = ActiveSupport::Notifications.subscribe("sql.active_record", subscriber)
 
-      create_fixtures("bulbs", "movies", "computers")
+      conn = ActiveRecord::Base.lease_connection
+
+      conn.stub(:async_enabled?, false) do
+        create_fixtures("bulbs", "movies", "computers")
+      end
 
       expected_sql = <<~EOS.chop
-        INSERT INTO #{quote_table_name("bulbs")} .*
-        INSERT INTO #{quote_table_name("movies")} .*
-        INSERT INTO #{quote_table_name("computers")} .*
+        INSERT INTO #{conn.quote_table_name("bulbs")} .*
+        INSERT INTO #{conn.quote_table_name("movies")} .*
+        INSERT INTO #{conn.quote_table_name("computers")} .*
       EOS
       assert_equal 1, subscriber.events.size
       assert_match(/#{expected_sql}/, subscriber.events.first)
@@ -124,7 +128,10 @@ class FixturesTest < ActiveRecord::TestCase
 
       assert_no_difference "Aircraft.count" do
         assert_raises(ActiveRecord::NotNullViolation) do
-          ActiveRecord::Base.lease_connection.insert_fixtures_set(fixtures)
+          conn = ActiveRecord::Base.lease_connection
+          conn.stub(:async_enabled?, false) do
+            conn.insert_fixtures_set(fixtures)
+          end
         end
       end
     end
@@ -201,7 +208,7 @@ class FixturesTest < ActiveRecord::TestCase
       end
     end
 
-    def test_bulk_insert_with_multi_statements_disabled
+    def test_bulk_insert_with_async_and_multi_statements_disabled
       adapter_name = ActiveRecord::Base.lease_connection.adapter_name
       run_without_connection do |orig_connection|
         case adapter_name
@@ -234,7 +241,9 @@ class FixturesTest < ActiveRecord::TestCase
 
         assert_difference "TrafficLight.count" do
           conn = ActiveRecord::Base.lease_connection
-          conn.insert_fixtures_set(fixtures)
+          conn.stub(:async_enabled?, false) do
+            conn.insert_fixtures_set(fixtures)
+          end
         end
 
         assert_raises(ActiveRecord::StatementInvalid) do
@@ -250,59 +259,65 @@ class FixturesTest < ActiveRecord::TestCase
       end
     end
 
-    def test_insert_fixtures_set_raises_an_error_when_max_allowed_packet_is_smaller_than_fixtures_set_size
+    def test_insert_fixtures_set_using_multi_statements_raises_an_error_when_max_allowed_packet_is_smaller_than_fixtures_set_size
       conn = ActiveRecord::Base.lease_connection
-      mysql_margin = 2
-      packet_size = 1024
-      bytes_needed_to_have_a_1024_bytes_fixture = 906
-      fixtures = {
-        "traffic_lights" => [
-          { "location" => "US", "state" => ["NY"], "long_state" => ["a" * bytes_needed_to_have_a_1024_bytes_fixture] },
-        ]
-      }
+      conn.stub(:async_enabled?, false) do # Test the multi-statements path
+        mysql_margin = 2
+        packet_size = 1024
+        bytes_needed_to_have_a_1024_bytes_fixture = 906
+        fixtures = {
+          "traffic_lights" => [
+            { "location" => "US", "state" => ["NY"], "long_state" => ["a" * bytes_needed_to_have_a_1024_bytes_fixture] },
+          ]
+        }
 
-      conn.stub(:max_allowed_packet, packet_size - mysql_margin) do
-        error = assert_raises(ActiveRecord::ActiveRecordError) { conn.insert_fixtures_set(fixtures) }
-        assert_match(/Fixtures set is too large #{packet_size}\./, error.message)
-      end
-    end
-
-    def test_insert_fixture_set_when_max_allowed_packet_is_bigger_than_fixtures_set_size
-      conn = ActiveRecord::Base.lease_connection
-      packet_size = 1024
-      fixtures = {
-        "traffic_lights" => [
-          { "location" => "US", "state" => ["NY"], "long_state" => ["a" * 51] },
-        ]
-      }
-
-      conn.stub(:max_allowed_packet, packet_size) do
-        assert_difference "TrafficLight.count" do
-          conn.insert_fixtures_set(fixtures)
+        conn.stub(:max_allowed_packet, packet_size - mysql_margin) do
+          error = assert_raises(ActiveRecord::ActiveRecordError) { conn.insert_fixtures_set(fixtures) }
+          assert_match(/Fixtures set is too large #{packet_size}\./, error.message)
         end
       end
     end
 
-    def test_insert_fixtures_set_split_the_total_sql_into_two_chunks_smaller_than_max_allowed_packet
+    def test_insert_fixture_set_using_multi_statements_when_max_allowed_packet_is_bigger_than_fixtures_set_size
+      conn = ActiveRecord::Base.lease_connection
+      conn.stub(:async_enabled?, false) do
+        packet_size = 1024
+        fixtures = {
+          "traffic_lights" => [
+            { "location" => "US", "state" => ["NY"], "long_state" => ["a" * 51] },
+          ]
+        }
+
+        conn.stub(:max_allowed_packet, packet_size) do
+          assert_difference "TrafficLight.count" do
+            conn.insert_fixtures_set(fixtures)
+          end
+        end
+      end
+    end
+
+    def test_insert_fixtures_set_using_multi_statements_split_the_total_sql_into_two_chunks_smaller_than_max_allowed_packet
       subscriber = InsertQuerySubscriber.new
       subscription = ActiveSupport::Notifications.subscribe("sql.active_record", subscriber)
       conn = ActiveRecord::Base.lease_connection
-      packet_size = 1024
-      fixtures = {
-        "traffic_lights" => [
-          { "location" => "US", "state" => ["NY"], "long_state" => ["a" * 450] },
-        ],
-        "comments" => [
-          { "post_id" => 1, "body" => "a" * 450 },
-        ]
-      }
+      conn.stub(:async_enabled?, false) do
+        packet_size = 1024
+        fixtures = {
+          "traffic_lights" => [
+            { "location" => "US", "state" => ["NY"], "long_state" => ["a" * 450] },
+          ],
+          "comments" => [
+            { "post_id" => 1, "body" => "a" * 450 },
+          ]
+        }
 
-      conn.stub(:max_allowed_packet, packet_size) do
-        conn.insert_fixtures_set(fixtures)
+        conn.stub(:max_allowed_packet, packet_size) do
+          conn.insert_fixtures_set(fixtures)
 
-        assert_equal 2, subscriber.events.size
-        assert_operator subscriber.events.first.bytesize, :<, packet_size
-        assert_operator subscriber.events.second.bytesize, :<, packet_size
+          assert_equal 2, subscriber.events.size
+          assert_operator subscriber.events.first.bytesize, :<, packet_size
+          assert_operator subscriber.events.second.bytesize, :<, packet_size
+        end
       end
     ensure
       ActiveSupport::Notifications.unsubscribe(subscription)
@@ -312,24 +327,65 @@ class FixturesTest < ActiveRecord::TestCase
       subscriber = InsertQuerySubscriber.new
       subscription = ActiveSupport::Notifications.subscribe("sql.active_record", subscriber)
       conn = ActiveRecord::Base.lease_connection
-      packet_size = 1024
-      fixtures = {
-        "traffic_lights" => [
-          { "location" => "US", "state" => ["NY"], "long_state" => ["a" * 200] },
-        ],
-        "comments" => [
-          { "post_id" => 1, "body" => "a" * 200 },
-        ]
-      }
+      conn.stub(:async_enabled?, false) do
+        packet_size = 1024
+        fixtures = {
+          "traffic_lights" => [
+            { "location" => "US", "state" => ["NY"], "long_state" => ["a" * 200] },
+          ],
+          "comments" => [
+            { "post_id" => 1, "body" => "a" * 200 },
+          ]
+        }
 
-      conn.stub(:max_allowed_packet, packet_size) do
-        assert_difference ["TrafficLight.count", "Comment.count"], +1 do
-          conn.insert_fixtures_set(fixtures)
+        conn.stub(:max_allowed_packet, packet_size) do
+          assert_difference ["TrafficLight.count", "Comment.count"], +1 do
+            conn.insert_fixtures_set(fixtures)
+          end
         end
       end
       assert_equal 1, subscriber.events.size
     ensure
       ActiveSupport::Notifications.unsubscribe(subscription)
+    end
+  end
+
+  if current_adapter?(:Mysql2Adapter, :TrilogyAdapter)
+    def test_insert_fixtures_async
+      async_queries = []
+      subscriber = ActiveSupport::Notifications.subscribe("sql.active_record") do |event|
+        if event.payload[:sql].match?(/INSERT/)
+          query = {
+            sql: event.payload[:sql],
+            executed: true,
+            async: event.payload[:async],
+          }
+          async_queries << query
+        end
+      end
+
+      create_fixtures("bulbs", "movies", "computers")
+
+      expected_sql_queries = [
+        /DELETE FROM `bulbs`;\nINSERT INTO `bulbs`/,
+        /DELETE FROM `movies`;\nINSERT INTO `movies`/,
+        /DELETE FROM `computers`;\nINSERT INTO `computers`/,
+      ]
+
+      assert_equal expected_sql_queries.size, async_queries.size
+      expected_sql_queries.each_with_index do |query, i|
+        assert_match(query, async_queries[i][:sql])
+        assert async_queries[i][:executed]
+        assert async_queries[i][:async]
+      end
+    ensure
+      ActiveSupport::Notifications.unsubscribe(subscriber)
+    end
+
+    def test_insert_fixtures_async_uses_multi_statement_when_in_transaction
+    end
+
+    def test_insert_fixtures_async_truncates_tables_on_exception_and_raises
     end
   end
 

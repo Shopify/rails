@@ -178,5 +178,12 @@ module ActiveRecord
             ActiveRecord::Result.empty
           end
       end
+
+      class InsertFixtures < FutureResult # :nodoc:
+        private
+          def exec_query(connection, *args, **kwargs)
+            connection.exec_fixtures_insert(*args, **kwargs)
+          end
+      end
   end
 end
