@@ -6,7 +6,7 @@ module Rails
   class Engine
     class Configuration < ::Rails::Railtie::Configuration
       attr_reader :root
-      attr_accessor :middleware, :javascript_path
+      attr_accessor :middleware, :javascript_path, :route_set_class
       attr_writer :eager_load_paths, :autoload_once_paths, :autoload_paths
 
       # An array of custom autoload paths to be added to the ones defined
