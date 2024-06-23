@@ -559,8 +559,9 @@ module ActiveRecord
       # should be used instead of `foreign_key` for all querying purposes: load association targets, preload.
       # otherwise it will differ from `foreign_key` if association has `_query_constraints` option or it can be derived
       def query_constraints_foreign_key
-        @query_constraints_foreign_key ||= if options[:_query_constraints]
-          options[:_query_constraints].map { |fk| fk.to_s.freeze }.freeze
+        @query_constraints_foreign_key ||= if options[:query_constraints]
+         qc = Array(options[:query_constraints]).map { |fk| fk.to_s.freeze }
+         [*qc, *foreign_key].freeze
         else
           foreign_key
         end
@@ -595,7 +596,7 @@ module ActiveRecord
       end
 
       def active_record_query_constraints_primary_key
-        if active_record.has_query_constraints? || options[:_query_constraints]
+        if active_record.has_query_constraints? || options[:query_constraints]
           @active_record_query_constraints_primary_key ||= active_record.query_constraints_list
         else
           active_record_primary_key
@@ -953,7 +954,7 @@ module ActiveRecord
       end
 
       def association_query_constraints_primary_key(klass = nil)
-        if (klass || self.klass).has_query_constraints? || options[:_query_constraints]
+        if (klass || self.klass).has_query_constraints? || options[:query_constraints]
           @association_query_constraints_primary_key ||= (klass || self.klass).query_constraints_list
         else
           association_primary_key(klass)
@@ -968,9 +969,9 @@ module ActiveRecord
           else
             -primary_key.to_s
           end
-        elsif options[:_query_constraints]
+        elsif options[:query_constraints]
           primary_key(klass || self.klass)
-        elsif (klass || self.klass).has_query_constraints? || options[:query_constraints]
+        elsif (klass || self.klass).has_query_constraints?
           (klass || self.klass).composite_query_constraints_list
         elsif (klass || self.klass).composite_primary_key?
           # If klass has composite primary key of shape [:<tenant_key>, :id], infer primary_key as :id

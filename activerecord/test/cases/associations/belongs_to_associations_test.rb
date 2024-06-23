@@ -1801,8 +1801,8 @@ class BelongsToAssociationsTest < ActiveRecord::TestCase
     end
 
     assert_equal(<<~MESSAGE.squish, error.message)
-      Association Cpk::BrokenBook#order primary key ["shop_id", "status"]
-      doesn't match with foreign key order_id. Please specify query_constraints, or primary_key and foreign_key values.
+      Association Cpk::BrokenBook#order primary key `["shop_id", "status"]`
+      doesn't match with foreign key `order_id`. Please specify query_constraints, or primary_key and foreign_key values.
     MESSAGE
   end
 
@@ -1813,8 +1813,8 @@ class BelongsToAssociationsTest < ActiveRecord::TestCase
     end
 
     assert_equal(<<~MESSAGE.squish, error.message)
-      Association Cpk::BrokenBookWithNonCpkOrder#order primary key ["id"]
-      doesn't match with foreign key ["shop_id", "order_id"]. Please specify query_constraints, or primary_key and foreign_key values.
+      Association Cpk::BrokenBookWithNonCpkOrder#order primary key `id`
+      doesn't match with foreign key `["shop_id", "order_id"]`. Please specify query_constraints, or primary_key and foreign_key values.
     MESSAGE
   end
 
@@ -1838,59 +1838,5 @@ class BelongsToWithForeignKeyTest < ActiveRecord::TestCase
 
     assert_not AuthorAddress.exists?(address.id)
     assert_not Author.exists?(author.id)
-  end
-end
-
-
-class BelongsToWithDecoupledQueryConstraintsTest < ActiveRecord::TestCase
-  fixtures :sharded_comments, :sharded_blog_posts
-
-  def test_belongs_to_with_decoupled_qc_queries_record_using_all_constraints
-    comment = sharded_comments(:great_comment_blog_post_one)
-    expected_blog_post = sharded_blog_posts(:great_post_blog_one)
-
-    sql = capture_sql do
-      assert_equal expected_blog_post, comment.blog_post_with_decoupled_qc
-    end.first
-
-    assert_match(/#{Regexp.escape(Sharded::BlogPost.lease_connection.quote_table_name("sharded_blog_posts.blog_id"))} =/, sql)
-    assert_match(/#{Regexp.escape(Sharded::BlogPost.lease_connection.quote_table_name("sharded_blog_posts.id"))} =/, sql)
-  end
-
-  def test_belongs_to_association_preload_with_decoupled_qc
-    comment = sharded_comments(:great_comment_blog_post_one)
-    expected_blog_post = sharded_blog_posts(:great_post_blog_one)
-
-    sql = capture_sql do
-      comment = Sharded::Comment.where(id: comment.id).preload(:blog_post_with_decoupled_qc).to_a.first
-      loaded_blog_post = assert_no_queries { comment.blog_post_with_decoupled_qc }
-      assert_equal expected_blog_post, loaded_blog_post
-    end.last
-
-    assert_match(/#{Regexp.escape(Sharded::BlogPost.lease_connection.quote_table_name("sharded_blog_posts.blog_id"))} =/, sql)
-    assert_match(/#{Regexp.escape(Sharded::BlogPost.lease_connection.quote_table_name("sharded_blog_posts.id"))} =/, sql)
-  end
-
-  def test_nullifiying_belongs_to_association_with_decoupled_query_constraints_doesnt_reset_tenant_key
-    comment = sharded_comments(:great_comment_blog_post_one)
-    comment.blog_post_with_decoupled_qc = nil
-    comment.save!
-
-    assert comment.blog_id
-    assert_nil comment.blog_post_id
-  end
-
-  def test_setting_belongs_to_association_with_decoupled_query_constraints_doesnt_set_tenant_key
-    blog_post = sharded_blog_posts(:great_post_blog_one)
-    comment = Sharded::Comment.new(blog_post_with_decoupled_qc: blog_post)
-
-    assert_nil comment.blog_id
-    assert_equal comment.blog_post_id, blog_post.id
-
-    comment.blog_id = 123_456
-    comment.save!
-
-    assert_equal 123_456, comment.blog_id
-    assert_equal comment.blog_post_id, blog_post.id
   end
 end
