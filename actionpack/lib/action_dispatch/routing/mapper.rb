@@ -729,55 +729,54 @@ module ActionDispatch
         # [match](rdoc-ref:Base#match)
         #
         #     get 'bacon', to: 'food#bacon'
-        def get(*args, &block)
-          map_method(:get, args, &block)
+        def get(path, options = {}, &block)
+          map_method(:get, path, options, &block)
         end
 
         # Define a route that only recognizes HTTP POST. For supported arguments, see
         # [match](rdoc-ref:Base#match)
         #
         #     post 'bacon', to: 'food#bacon'
-        def post(*args, &block)
-          map_method(:post, args, &block)
+        def post(path, options = {}, &block)
+          map_method(:post, path, options, &block)
         end
 
         # Define a route that only recognizes HTTP PATCH. For supported arguments, see
         # [match](rdoc-ref:Base#match)
         #
         #     patch 'bacon', to: 'food#bacon'
-        def patch(*args, &block)
-          map_method(:patch, args, &block)
+        def patch(path, options = {}, &block)
+          map_method(:patch, path, options, &block)
         end
 
         # Define a route that only recognizes HTTP PUT. For supported arguments, see
         # [match](rdoc-ref:Base#match)
         #
         #     put 'bacon', to: 'food#bacon'
-        def put(*args, &block)
-          map_method(:put, args, &block)
+        def put(path, options = {}, &block)
+          map_method(:put, path, options, &block)
         end
 
         # Define a route that only recognizes HTTP DELETE. For supported arguments, see
         # [match](rdoc-ref:Base#match)
         #
         #     delete 'broccoli', to: 'food#broccoli'
-        def delete(*args, &block)
-          map_method(:delete, args, &block)
+        def delete(path, options = {}, &block)
+          map_method(:delete, path, options, &block)
         end
 
         # Define a route that only recognizes HTTP OPTIONS. For supported arguments, see
         # [match](rdoc-ref:Base#match)
         #
         #     options 'carrots', to: 'food#carrots'
-        def options(*args, &block)
-          map_method(:options, args, &block)
+        def options(path, options = {}, &block)
+          map_method(:options, path, options, &block)
         end
 
         private
-          def map_method(method, args, &block)
-            options = args.extract_options!
+          def map_method(method, path, options, &block)
             options[:via] = method
-            match(*args, options, &block)
+            match(path, options, &block)
             self
           end
       end
@@ -1675,9 +1674,9 @@ module ActionDispatch
         #     match 'path' => 'controller#action', via: :patch
         #     match 'path', to: 'controller#action', via: :post
         #     match 'path', 'otherpath', on: :member, via: :get
-        def match(path, *rest, &block)
-          if rest.empty? && Hash === path
-            options  = path
+        def match(path, options = {}, &block)
+          if Hash === path
+            options.merge!(path)
             path, to = options.find { |name, _value| name.is_a?(String) }
 
             raise ArgumentError, "Route path not specified" if path.nil?
@@ -1696,16 +1695,12 @@ module ActionDispatch
             end
 
             options.delete(path)
-            paths = [path]
-          else
-            options = rest.pop || {}
-            paths = [path] + rest
           end
 
           if options.key?(:defaults)
-            defaults(options.delete(:defaults)) { map_match(paths, options, &block) }
+            defaults(options.delete(:defaults)) { map_match(path, options, &block) }
           else
-            map_match(paths, options, &block)
+            map_match(path, options, &block)
           end
         end
 
@@ -1933,7 +1928,7 @@ module ActionDispatch
             @scope = @scope.parent
           end
 
-          def map_match(paths, options)
+          def map_match(path, options)
             if (on = options[:on]) && !VALID_ON_OPTIONS.include?(on)
               raise ArgumentError, "Unknown scope #{on.inspect} given to :on"
             end
@@ -1956,24 +1951,18 @@ module ActionDispatch
             anchor = options.delete(:anchor) { true }
             options_constraints = options.delete(:constraints) || {}
 
-            path_types = paths.group_by(&:class)
-
-            if (string_paths = path_types[String])
-              string_paths.each do |_path|
-                route_options = options.dup
-                if _path && option_path
-                  raise ArgumentError, "Ambiguous route definition. Both :path and the route path were specified as strings."
-                end
-                to = get_to_from_path(_path, to, route_options[:action])
-                decomposed_match(_path, controller, route_options, _path, to, via, formatted, anchor, options_constraints)
+            case path
+            when String
+              route_options = options.dup
+              if path && option_path
+                raise ArgumentError, "Ambiguous route definition. Both :path and the route path were specified as strings."
               end
-            end
-
-            if (symbol_paths = path_types[Symbol])
-              symbol_paths.each do |action|
-                route_options = options.dup
-                decomposed_match(action, controller, route_options, option_path, to, via, formatted, anchor, options_constraints)
-              end
+              to = get_to_from_path(path, to, route_options[:action])
+              decomposed_match(path, controller, route_options, path, to, via, formatted, anchor, options_constraints)
+            when Symbol
+              action = path
+              route_options = options.dup
+              decomposed_match(action, controller, route_options, option_path, to, via, formatted, anchor, options_constraints)
             end
 
             self
