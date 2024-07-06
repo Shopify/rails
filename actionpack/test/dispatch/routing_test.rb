@@ -31,7 +31,7 @@ class TestRoutingMapper < ActionDispatch::IntegrationTest
   def test_logout
     draw do
       controller :sessions do
-        delete "logout" => :destroy
+        delete "logout", to: :destroy
       end
     end
 
@@ -47,8 +47,8 @@ class TestRoutingMapper < ActionDispatch::IntegrationTest
       default_url_options host: "rubyonrails.org"
 
       controller :sessions do
-        get  "login" => :new
-        post "login" => :create
+        get  "login", to: :new
+        post "login", to: :create
       end
     end
 
@@ -73,16 +73,6 @@ class TestRoutingMapper < ActionDispatch::IntegrationTest
 
     get "/account/login"
     verify_redirect "http://www.example.com/login"
-  end
-
-  def test_logout_redirect_without_to
-    draw do
-      get "account/logout" => redirect("/logout"), :as => :logout_redirect
-    end
-
-    assert_equal "/account/logout", logout_redirect_path
-    get "/account/logout"
-    verify_redirect "http://www.example.com/logout"
   end
 
   def test_namespace_redirect
@@ -4163,7 +4153,7 @@ class TestHttpMethods < ActionDispatch::IntegrationTest
 
     routes.draw do
       (RFC2616 + RFC2518 + RFC3253 + RFC3648 + RFC3744 + RFC5323 + RFC4791 + RFC5789).each do |method|
-        match "/" => s.simple_app(method), :via => method.underscore.to_sym
+        match "/", to: s.simple_app(method), via: method.underscore.to_sym
       end
     end
   end
@@ -4217,7 +4207,7 @@ end
 class TestUnicodePaths < ActionDispatch::IntegrationTest
   Routes = ActionDispatch::Routing::RouteSet.new.tap do |app|
     app.draw do
-      get "/ほげ" => lambda { |env|
+      get "/ほげ", to: lambda { |env|
         [200, { "Content-Type" => "text/plain" }, []]
       }, :as => :unicode_path
     end
@@ -4238,10 +4228,10 @@ class TestMultipleNestedController < ActionDispatch::IntegrationTest
     app.draw do
       namespace :foo do
         namespace :bar do
-          get "baz" => "baz#index"
+          get "baz", to: "baz#index"
         end
       end
-      get "pooh" => "pooh#index"
+      get "pooh", to: "pooh#index"
     end
   end
 
@@ -4271,8 +4261,8 @@ class TestTildeAndMinusPaths < ActionDispatch::IntegrationTest
     app.draw do
       ok = lambda { |env| [200, { "Content-Type" => "text/plain" }, []] }
 
-      get "/~user" => ok
-      get "/young-and-fine" => ok
+      get "/~user", to: ok
+      get "/young-and-fine", to: ok
     end
   end
 
@@ -4296,11 +4286,11 @@ class TestRedirectInterpolation < ActionDispatch::IntegrationTest
     app.draw do
       ok = lambda { |env| [200, { "Content-Type" => "text/plain" }, []] }
 
-      get "/foo/:id" => redirect("/foo/bar/%{id}")
-      get "/bar/:id" => redirect(path: "/foo/bar/%{id}")
-      get "/baz/:id" => redirect("/baz?id=%{id}&foo=?&bar=1#id-%{id}")
-      get "/foo/bar/:id" => ok
-      get "/baz" => ok
+      get "/foo/:id", to: redirect("/foo/bar/%{id}")
+      get "/bar/:id", to: redirect(path: "/foo/bar/%{id}")
+      get "/baz/:id", to: redirect("/baz?id=%{id}&foo=?&bar=1#id-%{id}")
+      get "/foo/bar/:id", to: ok
+      get "/baz", to: ok
     end
   end
 
@@ -4338,8 +4328,8 @@ class TestConstraintsAccessingParameters < ActionDispatch::IntegrationTest
     app.draw do
       ok = lambda { |env| [200, { "Content-Type" => "text/plain" }, []] }
 
-      get "/:foo" => ok, :constraints => lambda { |r| r.params[:foo] == "foo" }
-      get "/:bar" => ok
+      get "/:foo", to: ok, constraints: lambda { |r| r.params[:foo] == "foo" }
+      get "/:bar", to: ok
     end
   end
 
@@ -4387,16 +4377,16 @@ class TestOptimizedNamedRoutes < ActionDispatch::IntegrationTest
   Routes = ActionDispatch::Routing::RouteSet.new.tap do |app|
     app.draw do
       ok = lambda { |env| [200, { "Content-Type" => "text/plain" }, []] }
-      get "/foo" => ok, as: :foo
+      get "/foo", to: ok, as: :foo
 
       ActionDispatch.deprecator.silence do
-        get "/post(/:action(/:id))" => ok, as: :posts
+        get "/post(/:action(/:id))", to: ok, as: :posts
       end
 
-      get "/:foo/:foo_type/bars/:id" => ok, as: :bar
-      get "/projects/:id.:format" => ok, as: :project
-      get "/pages/:id" => ok, as: :page
-      get "/wiki/*page" => ok, as: :wiki
+      get "/:foo/:foo_type/bars/:id", to: ok, as: :bar
+      get "/projects/:id.:format", to: ok, as: :project
+      get "/pages/:id", to: ok, as: :page
+      get "/wiki/*page", to: ok, as: :wiki
     end
   end
 
@@ -4468,8 +4458,8 @@ class TestNamedRouteUrlHelpers < ActionDispatch::IntegrationTest
   Routes = ActionDispatch::Routing::RouteSet.new.tap do |app|
     app.draw do
       scope module: "test_named_route_url_helpers" do
-        get "/categories/:id" => "categories#show", :as => :category
-        get "/products/:id" => "products#show", :as => :product
+        get "/categories/:id", to: "categories#show", :as => :category
+        get "/products/:id", to: "products#show", :as => :product
       end
     end
   end
@@ -4494,18 +4484,18 @@ class TestUrlConstraints < ActionDispatch::IntegrationTest
       ok = lambda { |env| [200, { "Content-Type" => "text/plain" }, []] }
 
       constraints subdomain: "admin" do
-        get "/" => ok, :as => :admin_root
+        get "/", to: ok, as: :admin_root
       end
 
       scope constraints: { protocol: "https://" } do
-        get "/" => ok, :as => :secure_root
+        get "/", to: ok, as: :secure_root
       end
 
-      get "/" => ok, :as => :alternate_root, :constraints => { port: 8080 }
+      get "/", to: ok, as: :alternate_root, constraints: { port: 8080 }
 
-      get "/search" => ok, :constraints => { subdomain: false }
+      get "/search", to: ok, constraints: { subdomain: false }
 
-      get "/logs" => ok, :constraints => { subdomain: true }
+      get "/logs", to: ok, constraints: { subdomain: true }
     end
   end
 
@@ -4859,7 +4849,7 @@ end
 class TestUrlGenerationErrors < ActionDispatch::IntegrationTest
   Routes = ActionDispatch::Routing::RouteSet.new.tap do |app|
     app.draw do
-      get "/products/:id" => "products#show", :as => :product
+      get "/products/:id", to: "products#show", as: :product
     end
   end
 
@@ -5135,7 +5125,7 @@ end
 class TestInternalRoutingParams < ActionDispatch::IntegrationTest
   Routes = ActionDispatch::Routing::RouteSet.new.tap do |app|
     app.draw do
-      get "/test_internal/:internal" => "internal#internal"
+      get "/test_internal/:internal", to: "internal#internal"
     end
   end
 

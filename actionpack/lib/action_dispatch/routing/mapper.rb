@@ -630,21 +630,13 @@ module ActionDispatch
         # This will generate the `exciting_path` and `exciting_url` helpers which can be
         # used to navigate to this mounted app.
         def mount(app, options = nil)
-          if options
-            path = options.delete(:at)
-          elsif Hash === app
-            options = app
-            app, path = options.find { |k, _| k.respond_to?(:call) }
-            options.delete(app) if app
-          end
+          path = options.delete(:at) if options
 
           raise ArgumentError, "A rack application must be specified" unless app.respond_to?(:call)
           raise ArgumentError, <<~MSG unless path
             Must be called with mount point
 
               mount SomeRackApp, at: "some_route"
-              or
-              mount(SomeRackApp => "some_route")
           MSG
 
           rails_app = rails_app? app
@@ -1675,28 +1667,6 @@ module ActionDispatch
         #     match 'path', to: 'controller#action', via: :post
         #     match 'path', 'otherpath', on: :member, via: :get
         def match(path, options = {}, &block)
-          if Hash === path
-            options.merge!(path)
-            path, to = options.find { |name, _value| name.is_a?(String) }
-
-            raise ArgumentError, "Route path not specified" if path.nil?
-
-            case to
-            when Symbol
-              options[:action] = to
-            when String
-              if to.include?("#")
-                options[:to] = to
-              else
-                options[:controller] = to
-              end
-            else
-              options[:to] = to
-            end
-
-            options.delete(path)
-          end
-
           if options.key?(:defaults)
             defaults(options.delete(:defaults)) { map_match(path, options, &block) }
           else

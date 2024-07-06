@@ -649,7 +649,7 @@ class IntegrationProcessTest < ActionDispatch::IntegrationTest
         end
 
         set.draw do
-          get "moved" => redirect("/method")
+          get "moved", to: redirect("/method")
 
           ActionDispatch.deprecator.silence do
             match ":action", to: controller, via: [:get, :post], as: :action
@@ -784,7 +784,7 @@ class ApplicationIntegrationTest < ActionDispatch::IntegrationTest
     get "foo", to: "application_integration_test/test#index", as: :foo
     get "bar", to: "application_integration_test/test#index", as: :bar
 
-    mount MountedApp => "/mounted", :as => "mounted"
+    mount MountedApp, at: "/mounted", as: "mounted"
     get "fooz" => proc { |env| [ 200, { ActionDispatch::Constants::X_CASCADE => "pass" }, [ "omg" ] ] },
       :anchor => false
     get "fooz", to: "application_integration_test/test#index"
@@ -890,7 +890,7 @@ class ControllerWithHeadersMethodIntegrationTest < ActionDispatch::IntegrationTe
   test "doesn't call controller's headers method" do
     with_routing do |routes|
       routes.draw do
-        get "/ok" => "controller_with_headers_method_integration_test/test#index"
+        get "/ok", to: "controller_with_headers_method_integration_test/test#index"
       end
 
       get "/ok"
@@ -941,10 +941,10 @@ class UrlOptionsIntegrationTest < ActionDispatch::IntegrationTest
     default_url_options host: "foo.com"
 
     scope module: "url_options_integration_test" do
-      get "/foo" => "foo#index", :as => :foos
-      get "/foo/:id" => "foo#show", :as => :foo
-      get "/foo/:id/edit" => "foo#edit", :as => :edit_foo
-      get "/bar" => "bar#index", :as => :bars
+      get "/foo", to: "foo#index", as: :foos
+      get "/foo/:id", to: "foo#show", as: :foo
+      get "/foo/:id/edit", to: "foo#edit", as: :edit_foo
+      get "/bar", to: "bar#index", as: :bars
     end
   end
 
@@ -1004,7 +1004,7 @@ class HeadWithStatusActionIntegrationTest < ActionDispatch::IntegrationTest
   end
 
   routes.draw do
-    get "/foo/status" => "head_with_status_action_integration_test/foo#status"
+    get "/foo/status", to: "head_with_status_action_integration_test/foo#status"
   end
 
   test "get /foo/status with head result does not cause stack overflow error" do

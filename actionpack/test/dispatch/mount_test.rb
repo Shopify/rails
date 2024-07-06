@@ -28,7 +28,7 @@ class TestRoutingMount < ActionDispatch::IntegrationTest
 
     mount SprocketsApp, at: "/sprockets"
     mount SprocketsApp, at: "/star*"
-    mount SprocketsApp => "/shorthand"
+    mount SprocketsApp, at: "/shorthand"
 
     mount SinatraLikeApp, at: "/fakeengine", as: :fake
     mount SinatraLikeApp, at: "/getfake", via: :get
