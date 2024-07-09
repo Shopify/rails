@@ -87,7 +87,7 @@ module ActionDispatch
         attr_reader :path, :requirements, :defaults, :to, :default_controller,
                     :default_action, :required_defaults, :ast, :scope_options
 
-        def self.build(scope, set, ast, controller, default_action, to, via, formatted, options_constraints, anchor, options)
+        def self.build(scope, set, ast, controller, default_action, to, via, formatted, options_constraints, anchor, internal)
           scope_params = {
             blocks: scope[:blocks] || [],
             constraints: scope[:constraints] || {},
@@ -98,7 +98,7 @@ module ActionDispatch
 
           new set: set, ast: ast, controller: controller, default_action: default_action,
               to: to, formatted: formatted, via: via, options_constraints: options_constraints,
-              anchor: anchor, scope_params: scope_params, options: scope_params[:options].merge(options)
+              anchor: anchor, scope_params: scope_params, internal: internal, options: scope_params[:options].dup
         end
 
         def self.check_via(via)
@@ -129,7 +129,7 @@ module ActionDispatch
           format != false && !path.match?(OPTIONAL_FORMAT_REGEX)
         end
 
-        def initialize(set:, ast:, controller:, default_action:, to:, formatted:, via:, options_constraints:, anchor:, scope_params:, options:)
+        def initialize(set:, ast:, controller:, default_action:, to:, formatted:, via:, options_constraints:, anchor:, scope_params:, internal:, options:)
           @defaults           = scope_params[:defaults]
           @set                = set
           @to                 = intern(to)
@@ -137,7 +137,7 @@ module ActionDispatch
           @default_action     = intern(default_action)
           @anchor             = anchor
           @via                = via
-          @internal           = options.delete(:internal)
+          @internal           = internal
           @scope_options      = scope_params[:options]
           ast                 = Journey::Ast.new(ast, formatted)
 
@@ -629,8 +629,8 @@ module ActionDispatch
         #
         # This will generate the `exciting_path` and `exciting_url` helpers which can be
         # used to navigate to this mounted app.
-        def mount(app, options = nil)
-          path = options.delete(:at) if options
+        def mount(app, at: nil, as: nil, via: nil)
+          path = at
 
           raise ArgumentError, "A rack application must be specified" unless app.respond_to?(:call)
           raise ArgumentError, <<~MSG unless path
@@ -640,12 +640,12 @@ module ActionDispatch
           MSG
 
           rails_app = rails_app? app
-          options[:as] ||= app_name(app, rails_app)
+          as ||= app_name(app, rails_app)
 
-          target_as       = name_for_action(options[:as], path)
-          options[:via] ||= :all
+          target_as       = name_for_action(as, path)
+          via ||= :all
 
-          match(path, { to: app, anchor: false, format: false }.merge(options))
+          match(path, to: app, anchor: false, format: false, as:, via:)
 
           define_generate_prefix(app, target_as) if rails_app
           self
@@ -721,56 +721,55 @@ module ActionDispatch
         # [match](rdoc-ref:Base#match)
         #
         #     get 'bacon', to: 'food#bacon'
-        def get(path, options = {}, &block)
-          map_method(:get, path, options, &block)
+        def get(path, as: nil, via: nil, to: nil, controller: nil, action: nil, on: nil, defaults: nil, constraints: nil, anchor: false, format: false, internal: nil, &block)
+          match(path, as:, to:, controller:, action:, on:, defaults:, constraints:, anchor:, format:, via: :get, &block)
+          self
         end
 
         # Define a route that only recognizes HTTP POST. For supported arguments, see
         # [match](rdoc-ref:Base#match)
         #
         #     post 'bacon', to: 'food#bacon'
-        def post(path, options = {}, &block)
-          map_method(:post, path, options, &block)
+        def post(path, as: nil, via: nil, to: nil, controller: nil, action: nil, on: nil, defaults: nil, constraints: nil, anchor: false, format: false, internal: nil, &block)
+          match(path, as:, to:, controller:, action:, on:, defaults:, constraints:, anchor:, format:, via: :post, &block)
+          self
         end
 
         # Define a route that only recognizes HTTP PATCH. For supported arguments, see
         # [match](rdoc-ref:Base#match)
         #
         #     patch 'bacon', to: 'food#bacon'
-        def patch(path, options = {}, &block)
-          map_method(:patch, path, options, &block)
+        def patch(path, as: nil, via: nil, to: nil, controller: nil, action: nil, on: nil, defaults: nil, constraints: nil, anchor: false, format: false, internal: nil, &block)
+          match(path, as:, to:, controller:, action:, on:, defaults:, constraints:, anchor:, format:, via: :patch, &block)
+          self
         end
 
         # Define a route that only recognizes HTTP PUT. For supported arguments, see
         # [match](rdoc-ref:Base#match)
         #
         #     put 'bacon', to: 'food#bacon'
-        def put(path, options = {}, &block)
-          map_method(:put, path, options, &block)
+        def put(path, as: nil, via: nil, to: nil, controller: nil, action: nil, on: nil, defaults: nil, constraints: nil, anchor: false, format: false, internal: nil, &block)
+          match(path, as:, to:, controller:, action:, on:, defaults:, constraints:, anchor:, format:, via: :put, &block)
+          self
         end
 
         # Define a route that only recognizes HTTP DELETE. For supported arguments, see
         # [match](rdoc-ref:Base#match)
         #
         #     delete 'broccoli', to: 'food#broccoli'
-        def delete(path, options = {}, &block)
-          map_method(:delete, path, options, &block)
+        def delete(path, as: nil, via: nil, to: nil, controller: nil, action: nil, on: nil, defaults: nil, constraints: nil, anchor: false, format: false, internal: nil, &block)
+          match(path, as:, to:, controller:, action:, on:, defaults:, constraints:, anchor:, format:, via: :delete, &block)
+          self
         end
 
         # Define a route that only recognizes HTTP OPTIONS. For supported arguments, see
         # [match](rdoc-ref:Base#match)
         #
         #     options 'carrots', to: 'food#carrots'
-        def options(path, options = {}, &block)
-          map_method(:options, path, options, &block)
+        def options(path, as: nil, via: nil, to: nil, controller: nil, action: nil, on: nil, defaults: nil, constraints: nil, anchor: false, format: false, internal: nil, &block)
+          match(path, as:, to:, controller:, action:, on:, defaults:, constraints:, anchor:, format:, via: :options, &block)
+          self
         end
-
-        private
-          def map_method(method, path, options, &block)
-            options[:via] = method
-            match(path, options, &block)
-            self
-          end
       end
 
       # You may wish to organize groups of controllers under a namespace. Most
@@ -1666,11 +1665,11 @@ module ActionDispatch
         #     match 'path' => 'controller#action', via: :patch
         #     match 'path', to: 'controller#action', via: :post
         #     match 'path', 'otherpath', on: :member, via: :get
-        def match(path, options = {}, &block)
-          if options.key?(:defaults)
-            defaults(options.delete(:defaults)) { map_match(path, options, &block) }
+        def match(path, as: nil, via: nil, to: nil, controller: nil, action: nil, on: nil, defaults: nil, constraints: nil, anchor: false, format: false, internal: nil, &block)
+          if defaults
+            defaults(defaults) { map_match(path, as:, via:, to:, controller:, action:, on:, constraints:, internal:, &block) }
           else
-            map_match(path, options, &block)
+            map_match(path, as:, via:, to:, controller:, action:, on:, constraints:, internal:, &block)
           end
         end
 
@@ -1898,41 +1897,36 @@ module ActionDispatch
             @scope = @scope.parent
           end
 
-          def map_match(path, options)
-            if (on = options[:on]) && !VALID_ON_OPTIONS.include?(on)
+          def map_match(path_or_symbol, constraints: nil, anchor: nil, format: nil, path: nil, as: nil, via: nil, to: nil, controller: nil, action: nil, on: nil, internal: nil)
+            if on && !VALID_ON_OPTIONS.include?(on)
               raise ArgumentError, "Unknown scope #{on.inspect} given to :on"
             end
 
             if @scope[:to]
-              options[:to] ||= @scope[:to]
+              to ||= @scope[:to]
             end
 
             if @scope[:controller] && @scope[:action]
-              options[:to] ||= "#{@scope[:controller]}##{@scope[:action]}"
+              to ||= "#{@scope[:controller]}##{@scope[:action]}"
             end
 
-            controller = options.delete(:controller) || @scope[:controller]
-            option_path = options.delete :path
-            to = options.delete :to
-            via = Mapping.check_via Array(options.delete(:via) {
-              @scope[:via]
-            })
-            formatted = options.delete(:format) { @scope[:format] }
-            anchor = options.delete(:anchor) { true }
-            options_constraints = options.delete(:constraints) || {}
+            controller ||= @scope[:controller]
+            via = Mapping.check_via Array(via || @scope[:via])
+            format ||= @scope[:format]
+            anchor ||= true
+            constraints ||= {}
 
-            case path
+            case path_or_symbol
             when String
-              route_options = options.dup
-              if path && option_path
+              if path_or_symbol && path
                 raise ArgumentError, "Ambiguous route definition. Both :path and the route path were specified as strings."
               end
-              to = get_to_from_path(path, to, route_options[:action])
-              decomposed_match(path, controller, route_options, path, to, via, formatted, anchor, options_constraints)
+              path = path_or_symbol
+              to = get_to_from_path(path, to, action)
+              decomposed_match(path, controller, as, action, path, to, via, format, anchor, constraints, internal, on)
             when Symbol
-              action = path
-              route_options = options.dup
-              decomposed_match(action, controller, route_options, option_path, to, via, formatted, anchor, options_constraints)
+              action = path_or_symbol
+              decomposed_match(action, controller, as, action, path, to, via, format, anchor, constraints, internal, on)
             end
 
             self
@@ -1953,28 +1947,28 @@ module ActionDispatch
             %r{^/?[-\w]+/[-\w/]+$}.match?(path)
           end
 
-          def decomposed_match(path, controller, options, _path, to, via, formatted, anchor, options_constraints)
-            if on = options.delete(:on)
-              send(on) { decomposed_match(path, controller, options, _path, to, via, formatted, anchor, options_constraints) }
+          def decomposed_match(path, controller, as, action, _path, to, via, formatted, anchor, options_constraints, internal, on = nil)
+            if on
+              send(on) { decomposed_match(path, controller, as, action, _path, to, via, formatted, anchor, options_constraints, internal) }
             else
               case @scope.scope_level
               when :resources
-                nested { decomposed_match(path, controller, options, _path, to, via, formatted, anchor, options_constraints) }
+                nested { decomposed_match(path, controller, as, action, _path, to, via, formatted, anchor, options_constraints, internal) }
               when :resource
-                member { decomposed_match(path, controller, options, _path, to, via, formatted, anchor, options_constraints) }
+                member { decomposed_match(path, controller, as, action, _path, to, via, formatted, anchor, options_constraints, internal) }
               else
-                add_route(path, controller, options, _path, to, via, formatted, anchor, options_constraints)
+                add_route(path, controller, as, action, _path, to, via, formatted, anchor, options_constraints, internal)
               end
             end
           end
 
-          def add_route(action, controller, options, _path, to, via, formatted, anchor, options_constraints)
+          def add_route(action, controller, as, options_action, _path, to, via, formatted, anchor, options_constraints, internal)
             path = path_for_action(action, _path)
             raise ArgumentError, "path is required" if path.blank?
 
             action = action.to_s
 
-            default_action = options.delete(:action) || @scope[:action]
+            default_action = options_action || @scope[:action]
 
             if /^[\w\-\/]+$/.match?(action)
               default_action ||= action.tr("-", "_") unless action.include?("/")
@@ -1982,22 +1976,21 @@ module ActionDispatch
               action = nil
             end
 
-            as = if !options.fetch(:as, true) # if it's set to nil or false
-              options.delete(:as)
+            as = if !as
+              as
             else
-              name_for_action(options.delete(:as), action)
+              name_for_action(as, action)
             end
 
             path = Mapping.normalize_path URI::DEFAULT_PARSER.escape(path), formatted
             ast = Journey::Parser.parse path
 
-            mapping = Mapping.build(@scope, @set, ast, controller, default_action, to, via, formatted, options_constraints, anchor, options)
+            mapping = Mapping.build(@scope, @set, ast, controller, default_action, to, via, formatted, options_constraints, anchor, internal)
             @set.add_route(mapping, as)
           end
 
           def match_root_route(options)
-            args = ["/", { as: :root, via: :get }.merge(options)]
-            match(*args)
+            match("/", as: :root, via: :get, **options)
           end
       end
 
