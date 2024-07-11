@@ -112,7 +112,7 @@ npm_version = version.gsub(/\./).with_index { |s, i| i >= 2 ? "-" : s }
         Dir.chdir("#{framework}") do
           npm_otp = ""
           begin
-            npm_otp = " --otp " + `ykman oath accounts code -s npmjs.com`.chomp
+            npm_otp = " --otp " + `ykman oath accounts code -s npmjs.org`.chomp # TODO: don't push this
           rescue
             # User doesn't have ykman
           end
