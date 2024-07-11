@@ -285,8 +285,10 @@ namespace :all do
   end
 
   task :tag do
-    sh "git tag -s -m '#{tag} release' #{tag}"
-    sh "git push --tags"
+    unless ENV["SKIP_TAG"]
+      sh "git tag -s -m '#{tag} release' #{tag}"
+      sh "git push --tags"
+    end
   end
 
   task prep_release: %w(ensure_clean_state build bundle commit)
