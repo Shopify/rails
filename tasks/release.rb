@@ -125,7 +125,7 @@ npm_version = version.gsub(/\./).with_index { |s, i| i >= 2 ? "-" : s }
             npm_tag = " --tag v#{local_major_version}"
           end
 
-          sh "npm publish#{npm_tag}#{npm_otp}"
+          sh "npm publish#{npm_tag}#{npm_otp} || true"
         end
       end
     end
