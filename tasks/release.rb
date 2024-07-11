@@ -106,7 +106,7 @@ npm_version = version.gsub(/\./).with_index { |s, i| i >= 2 ? "-" : s }
         # User doesn't have ykman
       end
 
-      sh "gem push #{gem}#{otp}"
+      sh "gem push #{gem}#{otp} || true"
 
       if File.exist?("#{framework}/package.json")
         Dir.chdir("#{framework}") do
