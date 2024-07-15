@@ -8,6 +8,7 @@ require "active_support/testing/assertions"
 require "active_support/testing/error_reporter_assertions"
 require "active_support/testing/deprecation"
 require "active_support/testing/declarative"
+require "active_support/testing/mocking"
 require "active_support/testing/isolation"
 require "active_support/testing/constant_lookup"
 require "active_support/testing/time_helpers"
@@ -147,6 +148,7 @@ module ActiveSupport
     include ActiveSupport::Testing::Assertions
     include ActiveSupport::Testing::ErrorReporterAssertions
     include ActiveSupport::Testing::Deprecation
+    include ActiveSupport::Testing::Mocking
     include ActiveSupport::Testing::ConstantStubbing
     include ActiveSupport::Testing::TimeHelpers
     include ActiveSupport::Testing::FileFixtures
