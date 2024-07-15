@@ -7,11 +7,11 @@ module ActiveSupport
 
       SubprocessCrashed = Class.new(StandardError)
 
-      def self.included(klass) # :nodoc:
-        klass.class_eval do
-          parallelize_me! unless Minitest.parallel_executor.is_a?(ActiveSupport::Testing::ParallelizeExecutor)
-        end
-      end
+      # def self.included(klass) # :nodoc:
+      #   klass.class_eval do
+      #     parallelize_me! unless Minitest.parallel_executor.is_a?(ActiveSupport::Testing::ParallelizeExecutor)
+      #   end
+      # end
 
       def self.forking_env?
         !ENV["NO_FORK"] && Process.respond_to?(:fork)

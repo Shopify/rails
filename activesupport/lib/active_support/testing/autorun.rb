@@ -1,5 +1,5 @@
 # frozen_string_literal: true
 
-require "minitest"
-
-Minitest.autorun
+# require "minitest"
+#
+# Minitest.autorun

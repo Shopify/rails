@@ -12,7 +12,6 @@ silence_warnings do
   Encoding.default_external = Encoding::UTF_8
 end
 
-require "active_support/testing/autorun"
 require "active_support/testing/method_call_assertions"
 require "active_support/testing/error_reporter_assertions"
 

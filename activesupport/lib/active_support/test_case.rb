@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require "minitest"
+require "megatest"
 require "active_support/testing/tagged_logging"
 require "active_support/testing/setup_and_teardown"
 require "active_support/testing/tests_without_assertions"
@@ -18,8 +18,8 @@ require "active_support/testing/parallelize_executor"
 require "concurrent/utility/processor_counter"
 
 module ActiveSupport
-  class TestCase < ::Minitest::Test
-    Assertion = Minitest::Assertion
+  class TestCase < ::Megatest::Test
+    Assertion = Megatest::Assertion
 
     class << self
       # Sets the order in which test cases are run.
@@ -79,10 +79,10 @@ module ActiveSupport
       # number of tests to run is above the +threshold+ param. The default value is
       # 50, and it's configurable via +config.active_support.test_parallelization_threshold+.
       def parallelize(workers: :number_of_processors, with: :processes, threshold: ActiveSupport.test_parallelization_threshold)
-        workers = Concurrent.processor_count if workers == :number_of_processors
-        workers = ENV["PARALLEL_WORKERS"].to_i if ENV["PARALLEL_WORKERS"]
-
-        Minitest.parallel_executor = ActiveSupport::Testing::ParallelizeExecutor.new(size: workers, with: with, threshold: threshold)
+        # workers = Concurrent.processor_count if workers == :number_of_processors
+        # workers = ENV["PARALLEL_WORKERS"].to_i if ENV["PARALLEL_WORKERS"]
+        #
+        # Minitest.parallel_executor = ActiveSupport::Testing::ParallelizeExecutor.new(size: workers, with: with, threshold: threshold)
       end
 
       # Set up hook for parallel testing. This can be used if you have multiple
@@ -139,7 +139,7 @@ module ActiveSupport
       # In your +test_helper.rb+ you must have <tt>require "rails/test_help"</tt>.
     end
 
-    alias_method :method_name, :name
+    # alias_method :method_name, :name
 
     include ActiveSupport::Testing::TaggedLogging
     prepend ActiveSupport::Testing::SetupAndTeardown
@@ -150,7 +150,7 @@ module ActiveSupport
     include ActiveSupport::Testing::ConstantStubbing
     include ActiveSupport::Testing::TimeHelpers
     include ActiveSupport::Testing::FileFixtures
-    extend ActiveSupport::Testing::Declarative
+    # extend ActiveSupport::Testing::Declarative
 
     ##
     # :method: assert_not_empty

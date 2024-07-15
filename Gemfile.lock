@@ -119,6 +119,11 @@ PATH
       thor (~> 1.0, >= 1.2.2)
       zeitwerk (~> 2.6)
 
+PATH
+  remote: /Users/byroot/src/github.com/Shopify/megatest
+  specs:
+    megatest (0.1.0)
+
 GEM
   remote: https://rubygems.org/
   specs:
@@ -646,6 +651,7 @@ DEPENDENCIES
   libxml-ruby
   listen (~> 3.3)
   mdl (!= 0.13.0)
+  megatest!
   minitest (>= 5.15.0)
   minitest-bisect
   minitest-ci

@@ -85,11 +85,7 @@ class TestJSONDecoding < ActiveSupport::TestCase
       with_tz_default "Eastern Time (US & Canada)" do
         with_parse_json_times(true) do
           silence_warnings do
-            if expected.nil?
-              assert_nil ActiveSupport::JSON.decode(json), fail_message
-            else
-              assert_equal expected, ActiveSupport::JSON.decode(json), fail_message
-            end
+            assert_equal expected, ActiveSupport::JSON.decode(json), message: fail_message, allow_nil: true
           end
         end
       end

@@ -78,7 +78,7 @@ class MessageVerifierTest < ActiveSupport::TestCase
     assert_equal data, verifier.verified(message)
     assert_equal message, URI.encode_www_form_component(message)
     assert_not_equal 0, message.rpartition("--").first.length % 4,
-      "Unable to assert that the message payload is unpadded, because it does not require padding"
+      message: "Unable to assert that the message payload is unpadded, because it does not require padding"
   end
 
   def test_alternative_serialization_method
