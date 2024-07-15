@@ -314,6 +314,17 @@ class TestDefaultAutosaveAssociationOnAHasOneAssociation < ActiveRecord::TestCas
     assert_equal 1, eye.iris.after_save_callbacks_counter
   end
 
+  def test_callbacks_on_child_when_parent_autosaves_child_twice
+    eye = Eye.create!(iris: Iris.new)
+    eye.update!(iris: Iris.new)
+    assert_equal 1, eye.iris.before_validation_callbacks_counter
+    assert_equal 1, eye.iris.before_create_callbacks_counter
+    assert_equal 1, eye.iris.before_save_callbacks_counter
+    assert_equal 1, eye.iris.after_validation_callbacks_counter
+    assert_equal 1, eye.iris.after_create_callbacks_counter
+    assert_equal 1, eye.iris.after_save_callbacks_counter
+  end
+
   def test_callbacks_on_child_when_parent_autosaves_polymorphic_child_with_inverse_of
     drink_designer = DrinkDesigner.create!(chef: ChefWithPolymorphicInverseOf.new)
     assert_equal 1, drink_designer.chef.before_validation_callbacks_counter
@@ -332,6 +343,17 @@ class TestDefaultAutosaveAssociationOnAHasOneAssociation < ActiveRecord::TestCas
     assert_equal 1, iris.after_validation_callbacks_counter
     assert_equal 1, iris.after_create_callbacks_counter
     assert_equal 1, iris.after_save_callbacks_counter
+  end
+
+  def test_callbacks_on_child_when_child_autosaves_parent_twice
+    iris = Iris.create!(eye: Eye.new)
+    iris.update!(eye: Eye.new)
+    assert_equal 2, iris.before_validation_callbacks_counter
+    assert_equal 1, iris.before_create_callbacks_counter
+    assert_equal 2, iris.before_save_callbacks_counter
+    assert_equal 2, iris.after_validation_callbacks_counter
+    assert_equal 1, iris.after_create_callbacks_counter
+    assert_equal 2, iris.after_save_callbacks_counter
   end
 
   def test_callbacks_on_child_when_polymorphic_child_with_inverse_of_autosaves_parent
