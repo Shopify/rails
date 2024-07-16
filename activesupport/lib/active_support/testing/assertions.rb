@@ -48,7 +48,7 @@ module ActiveSupport
       def assert_nothing_raised
         yield.tap { assert(true) }
       rescue => error
-        raise Minitest::UnexpectedError.new(error)
+        raise Megatest::UnexpectedError.new(error)
       end
 
       # Test numeric difference between the return value of an expression as a
@@ -216,7 +216,7 @@ module ActiveSupport
           error = "#{message}.\n#{error}" if message
           error
         end
-        refute_equal before, after, rich_message
+        refute_equal before, after, rich_message, allow_nil: true
 
         unless to == UNTRACKED
           rich_message = -> do
@@ -285,7 +285,7 @@ module ActiveSupport
       private
         def _assert_nothing_raised_or_warn(assertion, &block)
           assert_nothing_raised(&block)
-        rescue Minitest::UnexpectedError => e
+        rescue Megatest::UnexpectedError => e
           if tagged_logger && tagged_logger.warn?
             warning = <<~MSG
               #{self.class} - #{name}: #{e.error.class} raised.

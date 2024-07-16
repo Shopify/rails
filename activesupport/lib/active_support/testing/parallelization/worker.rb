@@ -66,7 +66,7 @@ module ActiveSupport
               else
                 error = DRb::DRbRemoteError.new(failure.exception)
               end
-              Minitest::UnexpectedError.new(error)
+              Megatest::UnexpectedError.new(error)
             end
             @queue.record(reporter, result)
           rescue Interrupt
@@ -91,7 +91,7 @@ module ActiveSupport
 
         private
           def add_setup_exception(result)
-            result.failures.prepend Minitest::UnexpectedError.new(@setup_exception)
+            result.failures.prepend Megatest::UnexpectedError.new(@setup_exception)
           end
 
           def set_process_title(status)

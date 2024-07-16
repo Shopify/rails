@@ -42,12 +42,8 @@ module ActiveSupport
       end
 
       def after_teardown # :nodoc:
-        begin
+        @__m.record_failures do
           run_callbacks :teardown
-        rescue => e
-          self.failures << Minitest::UnexpectedError.new(e)
-        rescue Megatest::Assertion => e
-          self.failures << e
         end
 
         super

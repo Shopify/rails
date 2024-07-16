@@ -25,7 +25,7 @@ module ActiveSupport
         unless status&.success?
           error = SubprocessCrashed.new("Subprocess exited with an error: #{status.inspect}\noutput: #{serialized.inspect}")
           error.set_backtrace(caller)
-          self.failures << Minitest::UnexpectedError.new(error)
+          self.failures << Megatest::UnexpectedError.new(error)
           return defined?(Minitest::Result) ? Minitest::Result.from(self) : dup
         end
 
@@ -50,7 +50,7 @@ module ActiveSupport
                     rescue TypeError
                       ex = Exception.new e.message
                       ex.set_backtrace e.backtrace
-                      Minitest::UnexpectedError.new ex
+                      Megatest::UnexpectedError.new ex
                     end
                   }
                 end

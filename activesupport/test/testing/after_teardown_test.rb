@@ -22,7 +22,8 @@ class AfterTeardownTest < ActiveSupport::TestCase
   end
 
   def after_teardown
-    assert_changes -> { failures.count }, from: 0, to: 1 do
+    # FIXME: Megatest doesn't offer this as public API. Not sure we want to, maybe just remove the test
+    assert_changes -> { @__m.instance_variable_get(:@result).failures.count }, from: 0, to: 1 do
       super
     end
 

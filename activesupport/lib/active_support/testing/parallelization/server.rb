@@ -70,7 +70,7 @@ module ActiveSupport
             result = Minitest::Result.from(klass.new(name))
             error = RuntimeError.new("result not reported")
             error.set_backtrace([""])
-            result.failures << Minitest::UnexpectedError.new(error)
+            result.failures << Megatest::UnexpectedError.new(error)
             reporter.synchronize do
               reporter.record(result)
             end

@@ -528,7 +528,7 @@ class ExceptionsInsideAssertionsTest < ActiveSupport::TestCase
 
   private
     def run_test_that_should_pass_and_log_a_warning
-      assert_raises(Minitest::UnexpectedError) do # this assertion passes, but it's unlikely to be how anyone writes a test
+      assert_raises(Megatest::UnexpectedError) do # this assertion passes, but it's unlikely to be how anyone writes a test
         assert_no_changes -> { 1 } do # this assertion doesn't run. the error below is caught and the warning logged.
           raise ArgumentError.new
         end
@@ -536,7 +536,7 @@ class ExceptionsInsideAssertionsTest < ActiveSupport::TestCase
     end
 
     def run_test_that_should_fail_confusingly
-      assert_raises(ArgumentError) do # this assertion fails (confusingly) because it catches a Minitest::UnexpectedError.
+      assert_raises(ArgumentError) do # this assertion fails (confusingly) because it catches a Megatest::UnexpectedError.
         assert_no_changes -> { 1 } do # this assertion doesn't run. the error below is caught and the warning logged.
           raise ArgumentError.new
         end
