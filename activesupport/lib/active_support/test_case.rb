@@ -304,3 +304,8 @@ module ActiveSupport
     end
   end
 end
+
+module Minitest
+  Mock = ActiveSupport::Testing::Mock
+  Assertion = Megatest::Assertion
+end

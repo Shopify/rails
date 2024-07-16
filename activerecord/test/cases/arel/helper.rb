@@ -1,7 +1,6 @@
 # frozen_string_literal: true
 
 require "active_support"
-require "minitest/autorun"
 require "arel"
 
 require_relative "support/fake_record"
