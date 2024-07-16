@@ -15,7 +15,7 @@ class AfterTeardownAssertionTest < ActiveSupport::TestCase
   attr_writer :witness
 
   teardown do
-    flunk "Test raises a Minitest::Assertion error, all after_teardown should still get called"
+    flunk "Test raises a Megatest::Assertion error, all after_teardown should still get called"
   end
 
   def after_teardown

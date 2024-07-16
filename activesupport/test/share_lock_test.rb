@@ -526,28 +526,28 @@ class ShareLockTest < ActiveSupport::TestCase
       end
 
       def test_detects_stuck_thread
-        assert_raises(Minitest::Assertion) do
+        assert_raises(Megatest::Assertion) do
           assert_threads_not_stuck @thread
         end
       end
 
       def test_detects_free_thread
         @latch.count_down
-        assert_raises(Minitest::Assertion) do
+        assert_raises(Megatest::Assertion) do
           assert_threads_stuck @thread
         end
       end
 
       def test_detects_already_released
         @latch.count_down
-        assert_raises(Minitest::Assertion) do
+        assert_raises(Megatest::Assertion) do
           assert_threads_stuck_but_releasable_by_latch @thread, @latch
         end
       end
 
       def test_detects_remains_latched
         another_latch = Concurrent::CountDownLatch.new
-        assert_raises(Minitest::Assertion) do
+        assert_raises(Megatest::Assertion) do
           assert_threads_stuck_but_releasable_by_latch @thread, another_latch
         end
       end

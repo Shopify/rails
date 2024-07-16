@@ -16,7 +16,7 @@ module ActiveSupport
         end
 
         def assert_called_with(object, method_name, args, returns: false, **kwargs, &block)
-          mock = Minitest::Mock.new
+          mock = Testing::Mock.new
           expect_called_with(mock, args, returns: returns, **kwargs)
 
           object.stub(method_name, mock, &block)

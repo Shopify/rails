@@ -41,7 +41,7 @@ class MethodCallAssertionsTest < ActiveSupport::TestCase
   end
 
   def test_assert_called_failure
-    error = assert_raises(Minitest::Assertion) do
+    error = assert_raises(Megatest::Assertion) do
       assert_called(@object, :increment) do
         # Call nothing...
       end
@@ -51,7 +51,7 @@ class MethodCallAssertionsTest < ActiveSupport::TestCase
   end
 
   def test_assert_called_with_message
-    error = assert_raises(Minitest::Assertion) do
+    error = assert_raises(Megatest::Assertion) do
       assert_called(@object, :increment, "dang it") do
         # Call nothing...
       end
@@ -110,7 +110,7 @@ class MethodCallAssertionsTest < ActiveSupport::TestCase
   end
 
   def test_assert_called_on_instance_of_failure
-    error = assert_raises(Minitest::Assertion) do
+    error = assert_raises(Megatest::Assertion) do
       assert_called_on_instance_of(Level, :increment) do
         # Call nothing...
       end
@@ -120,7 +120,7 @@ class MethodCallAssertionsTest < ActiveSupport::TestCase
   end
 
   def test_assert_called_on_instance_of_with_message
-    error = assert_raises(Minitest::Assertion) do
+    error = assert_raises(Megatest::Assertion) do
       assert_called_on_instance_of(Level, :increment, "dang it") do
         # Call nothing...
       end
@@ -148,7 +148,7 @@ class MethodCallAssertionsTest < ActiveSupport::TestCase
   end
 
   def test_assert_not_called_failure
-    error = assert_raises(Minitest::Assertion) do
+    error = assert_raises(Megatest::Assertion) do
       assert_not_called(@object, :increment) do
         @object.increment
       end
@@ -164,7 +164,7 @@ class MethodCallAssertionsTest < ActiveSupport::TestCase
   end
 
   def test_assert_not_called_on_instance_of_failure
-    error = assert_raises(Minitest::Assertion) do
+    error = assert_raises(Megatest::Assertion) do
       assert_not_called_on_instance_of(Level, :increment) do
         @object.increment
       end

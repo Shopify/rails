@@ -21,10 +21,10 @@ class AssertionsTest < ActiveSupport::TestCase
     assert_equal true, assert_not(nil)
     assert_equal true, assert_not(false)
 
-    e = assert_raises(Minitest::Assertion) { assert_not true }
+    e = assert_raises(Megatest::Assertion) { assert_not true }
     assert_equal "Expected true to be nil or false", e.message
 
-    e = assert_raises(Minitest::Assertion) { assert_not true, "custom" }
+    e = assert_raises(Megatest::Assertion) { assert_not true, "custom" }
     assert_equal "custom", e.message
   end
 
@@ -35,7 +35,7 @@ class AssertionsTest < ActiveSupport::TestCase
   end
 
   def test_assert_raises_with_match_fail
-    assert_raises(Minitest::Assertion, match: "Expected /incorrect/i to match \"Wrong argument\".") do
+    assert_raises(Megatest::Assertion, match: "Expected /incorrect/i to match \"Wrong argument\".") do
       assert_raises(ArgumentError, match: /incorrect/i) do
         raise ArgumentError, "Wrong argument"
       end
@@ -49,7 +49,7 @@ class AssertionsTest < ActiveSupport::TestCase
   end
 
   def test_assert_no_difference_fail
-    error = assert_raises(Minitest::Assertion) do
+    error = assert_raises(Megatest::Assertion) do
       assert_no_difference "@object.num" do
         @object.increment
       end
@@ -58,7 +58,7 @@ class AssertionsTest < ActiveSupport::TestCase
   end
 
   def test_assert_no_difference_with_message_fail
-    error = assert_raises(Minitest::Assertion) do
+    error = assert_raises(Megatest::Assertion) do
       assert_no_difference "@object.num", "Object Changed" do
         @object.increment
       end
@@ -75,7 +75,7 @@ class AssertionsTest < ActiveSupport::TestCase
 
   def test_assert_no_difference_with_multiple_expressions_fail
     another_object = @object.dup
-    assert_raises(Minitest::Assertion) do
+    assert_raises(Megatest::Assertion) do
       assert_no_difference ["@object.num", -> { another_object.num }], "Another Object Changed" do
         another_object.increment
       end
@@ -130,7 +130,7 @@ class AssertionsTest < ActiveSupport::TestCase
   end
 
   def test_array_of_expressions_identify_failure
-    assert_raises(Minitest::Assertion) do
+    assert_raises(Megatest::Assertion) do
       assert_difference ["@object.num", "1 + 1"] do
         @object.increment
       end
@@ -138,7 +138,7 @@ class AssertionsTest < ActiveSupport::TestCase
   end
 
   def test_array_of_expressions_identify_failure_when_message_provided
-    assert_raises(Minitest::Assertion) do
+    assert_raises(Megatest::Assertion) do
       assert_difference ["@object.num", "1 + 1"], 1, "something went wrong" do
         @object.increment
       end
@@ -152,7 +152,7 @@ class AssertionsTest < ActiveSupport::TestCase
   end
 
   def test_hash_of_expressions_with_message
-    error = assert_raises Minitest::Assertion do
+    error = assert_raises Megatest::Assertion do
       assert_difference({ "@object.num" => 0 }, "Object Changed") do
         @object.increment
       end
@@ -161,7 +161,7 @@ class AssertionsTest < ActiveSupport::TestCase
   end
 
   def test_assert_difference_message_includes_change
-    error = assert_raises Minitest::Assertion do
+    error = assert_raises Megatest::Assertion do
       assert_difference "@object.num", +5 do
         @object.increment
         @object.increment
@@ -173,7 +173,7 @@ class AssertionsTest < ActiveSupport::TestCase
   def test_assert_difference_message_with_lambda
     skip if !defined?(RubyVM::AbstractSyntaxTree)
 
-    error = assert_raises Minitest::Assertion do
+    error = assert_raises Megatest::Assertion do
       assert_difference(-> { @object.num }, 1, "Object Changed") do
       end
     end
@@ -187,7 +187,7 @@ class AssertionsTest < ActiveSupport::TestCase
   end
 
   def test_hash_of_expressions_identify_failure
-    assert_raises(Minitest::Assertion) do
+    assert_raises(Megatest::Assertion) do
       assert_difference "@object.num" => 1, "1 + 1" => 1 do
         @object.increment
       end
@@ -213,7 +213,7 @@ class AssertionsTest < ActiveSupport::TestCase
   end
 
   def test_assert_changes_with_from_option_with_wrong_value
-    assert_raises Minitest::Assertion do
+    assert_raises Megatest::Assertion do
       assert_changes "@object.num", from: -1 do
         @object.increment
       end
@@ -221,7 +221,7 @@ class AssertionsTest < ActiveSupport::TestCase
   end
 
   def test_assert_changes_with_from_option_with_nil
-    error = assert_raises Minitest::Assertion do
+    error = assert_raises Megatest::Assertion do
       assert_changes "@object.num", from: nil do
         @object.increment
       end
@@ -237,7 +237,7 @@ class AssertionsTest < ActiveSupport::TestCase
   end
 
   def test_assert_changes_with_to_option_but_no_change_has_special_message
-    error = assert_raises Minitest::Assertion do
+    error = assert_raises Megatest::Assertion do
       assert_changes "@object.num", to: 0 do
         # no changes
       end
@@ -249,7 +249,7 @@ class AssertionsTest < ActiveSupport::TestCase
   def test_assert_changes_message_with_lambda
     skip if !defined?(RubyVM::AbstractSyntaxTree)
 
-    error = assert_raises Minitest::Assertion do
+    error = assert_raises Megatest::Assertion do
       assert_changes -> { @object.num }, to: 0 do
         # no changes
       end
@@ -259,7 +259,7 @@ class AssertionsTest < ActiveSupport::TestCase
   end
 
   def test_assert_changes_with_wrong_to_option
-    assert_raises Minitest::Assertion do
+    assert_raises Megatest::Assertion do
       assert_changes "@object.num", to: 2 do
         @object.increment
       end
@@ -273,7 +273,7 @@ class AssertionsTest < ActiveSupport::TestCase
   end
 
   def test_assert_changes_with_from_and_to_options_and_wrong_to_value
-    assert_raises Minitest::Assertion do
+    assert_raises Megatest::Assertion do
       assert_changes "@object.num", from: 0, to: 2 do
         @object.increment
       end
@@ -318,7 +318,7 @@ class AssertionsTest < ActiveSupport::TestCase
   end
 
   def test_assert_changes_with_message
-    error = assert_raises Minitest::Assertion do
+    error = assert_raises Megatest::Assertion do
       assert_changes "@object.num", "@object.num should be 1", to: 1 do
         @object.decrement
       end
@@ -340,7 +340,7 @@ class AssertionsTest < ActiveSupport::TestCase
   end
 
   def test_assert_no_changes_with_from_option_with_wrong_value
-    assert_raises Minitest::Assertion do
+    assert_raises Megatest::Assertion do
       assert_no_changes "@object.num", from: -1 do
         # ...
       end
@@ -348,7 +348,7 @@ class AssertionsTest < ActiveSupport::TestCase
   end
 
   def test_assert_no_changes_with_from_option_with_nil
-    error = assert_raises Minitest::Assertion do
+    error = assert_raises Megatest::Assertion do
       assert_no_changes "@object.num", from: nil do
         @object.increment
       end
@@ -365,7 +365,7 @@ class AssertionsTest < ActiveSupport::TestCase
   end
 
   def test_assert_no_changes_with_message
-    error = assert_raises Minitest::Assertion do
+    error = assert_raises Megatest::Assertion do
       assert_no_changes "@object.num", "@object.num should not change" do
         @object.increment
       end
@@ -377,7 +377,7 @@ class AssertionsTest < ActiveSupport::TestCase
   def test_assert_no_changes_message_with_lambda
     skip if !defined?(RubyVM::AbstractSyntaxTree)
 
-    error = assert_raises Minitest::Assertion do
+    error = assert_raises Megatest::Assertion do
       assert_no_changes -> { @object.num } do
         @object.increment
       end
@@ -387,7 +387,7 @@ class AssertionsTest < ActiveSupport::TestCase
     check = Proc.new {
       @object.num
     }
-    error = assert_raises Minitest::Assertion do
+    error = assert_raises Megatest::Assertion do
       assert_no_changes check do
         @object.increment
       end
@@ -397,21 +397,21 @@ class AssertionsTest < ActiveSupport::TestCase
     check = lambda {
       @object.num
     }
-    error = assert_raises Minitest::Assertion do
+    error = assert_raises Megatest::Assertion do
       assert_no_changes check do
         @object.increment
       end
     end
     assert_equal "`@object.num` changed.\nExpected: 2\n  Actual: 3", error.message
 
-    error = assert_raises Minitest::Assertion do
+    error = assert_raises Megatest::Assertion do
       assert_no_changes -> { @object.num } do
         @object.increment
       end
     end
     assert_equal "`@object.num` changed.\nExpected: 3\n  Actual: 4", error.message
 
-    error = assert_raises Minitest::Assertion do
+    error = assert_raises Megatest::Assertion do
       assert_no_changes ->(a = nil) { @object.num } do
         @object.increment
       end
@@ -424,7 +424,7 @@ class AssertionsTest < ActiveSupport::TestCase
       "title".upcase
       @object.num
     }
-    error = assert_raises Minitest::Assertion do
+    error = assert_raises Megatest::Assertion do
       assert_no_changes check do
         @object.increment
       end
@@ -435,7 +435,7 @@ class AssertionsTest < ActiveSupport::TestCase
       "title".upcase
       @object.num
     }
-    error = assert_raises Minitest::Assertion do
+    error = assert_raises Megatest::Assertion do
       assert_no_changes check do
         @object.increment
       end
@@ -450,7 +450,7 @@ class AssertionsTest < ActiveSupport::TestCase
     end
     check.instance_variable_set(:@object, @object)
 
-    error = assert_raises Minitest::Assertion do
+    error = assert_raises Megatest::Assertion do
       assert_no_changes check do
         @object.increment
       end
@@ -461,7 +461,7 @@ class AssertionsTest < ActiveSupport::TestCase
   def test_assert_no_changes_with_long_string_wont_output_everything
     lines = "HEY\n" * 12
 
-    error = assert_raises Minitest::Assertion do
+    error = assert_raises Megatest::Assertion do
       assert_no_changes "lines" do
         lines += "HEY ALSO\n"
       end
@@ -505,7 +505,7 @@ class ExceptionsInsideAssertionsTest < ActiveSupport::TestCase
   end
 
   def test_warning_is_not_logged_if_assertions_are_nested_correctly
-    error = assert_raises(Minitest::Assertion) do
+    error = assert_raises(Megatest::Assertion) do
       run_test_that_should_fail_but_not_log_a_warning
     end
     assert_not @out.string.include?("assert_nothing_raised")
@@ -513,7 +513,7 @@ class ExceptionsInsideAssertionsTest < ActiveSupport::TestCase
   end
 
   def test_fails_and_warning_is_logged_if_wrong_error_caught
-    error = assert_raises(Minitest::Assertion) do
+    error = assert_raises(Megatest::Assertion) do
       run_test_that_should_fail_confusingly
     end
     expected = <<~MSG

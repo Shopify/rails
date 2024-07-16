@@ -387,13 +387,13 @@ class DeprecationTest < ActiveSupport::TestCase
   end
 
   test "assert_deprecated raises when no deprecation warning" do
-    assert_raises(Minitest::Assertion) do
+    assert_raises(Megatest::Assertion) do
       assert_deprecated(@deprecator) { 1 + 1 }
     end
   end
 
   test "assert_not_deprecated raises when some deprecation warning" do
-    assert_raises(Minitest::Assertion) do
+    assert_raises(Megatest::Assertion) do
       assert_not_deprecated(@deprecator) { @deprecator.warn }
     end
   end
@@ -409,7 +409,7 @@ class DeprecationTest < ActiveSupport::TestCase
       @deprecator.warn "abc"
       @deprecator.warn "def"
     end
-  rescue Minitest::Assertion
+  rescue Megatest::Assertion
     flunk "assert_deprecated should match any warning in block, not just the last one"
   end
 
