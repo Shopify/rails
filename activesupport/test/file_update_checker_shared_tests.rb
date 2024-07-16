@@ -8,7 +8,7 @@ module FileUpdateCheckerSharedTests
       extend ActiveSupport::Testing::Declarative
 
       def tmpdir
-        @tmpdir
+        @tmpdir ||= Dir.mktmpdir
       end
 
       def tmpfile(name)
@@ -19,11 +19,12 @@ module FileUpdateCheckerSharedTests
         @tmpfiles ||= %w(foo.rb bar.rb baz.rb).map { |f| tmpfile(f) }
       end
 
-      def run(*args)
-        capture_exceptions do
-          Dir.mktmpdir(nil, __dir__) { |dir| @tmpdir = dir; super }
-        end
-      end
+      # FIXME: support around callbacks?
+      # def run(*args)
+      #   capture_exceptions do
+      #     Dir.mktmpdir(nil, __dir__) { |dir| @tmpdir = dir; super }
+      #   end
+      # end
 
       test "should not execute the block if no paths are given" do
         silence_warnings { require "listen" }

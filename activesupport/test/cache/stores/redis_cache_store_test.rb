@@ -85,7 +85,7 @@ module ActiveSupport::Cache::RedisCacheStoreTests
         write_timeout: 1
       }
 
-      mock = Minitest::Mock.new
+      mock = ActiveSupport::Testing::Mock.new
       mock.expect(:call, Redis.new, [{ url: REDIS_URLS.first }.merge(default_args)])
       mock.expect(:call, Redis.new, [{ url: REDIS_URLS.last }.merge(default_args)])
 

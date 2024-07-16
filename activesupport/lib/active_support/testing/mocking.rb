@@ -257,7 +257,7 @@ end
 
 
 ##
-# Object extensions for Minitest::Mock.
+# Object extensions for Mock.
 
 class ::Object
 
