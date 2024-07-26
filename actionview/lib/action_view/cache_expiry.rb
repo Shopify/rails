@@ -2,6 +2,8 @@
 
 module ActionView
   module CacheExpiry # :nodoc: all
+    cattr_accessor :view_reloader, instance_accessor: false
+
     class ViewReloader # :nodoc:
       def initialize(watcher:, &block)
         @mutex = Mutex.new
@@ -9,13 +11,14 @@ module ActionView
         @watched_dirs = nil
         @watcher = nil
         @previous_change = false
+        @watching = false
 
         ActionView::PathRegistry.file_system_resolver_hooks << method(:rebuild_watcher)
       end
 
       def updated?
-        build_watcher unless @watcher
-        @previous_change || @watcher.updated?
+        build_watcher if @watching && !@watcher
+        @previous_change || @watcher&.updated?
       end
 
       def execute
@@ -39,6 +42,7 @@ module ActionView
               reload!
             end
             @watcher = new_watcher
+            @watching = true
 
             # We must check the old watcher after initializing the new one to
             # ensure we don't miss any events

@@ -138,6 +138,7 @@ module ActionView
         rendered_format = rendered_template.format || lookup_context.formats.first
         @_rendered_format = Template::Types[rendered_format]
 
+        CacheExpiry.view_reloader&.build_watcher
         rendered_template.body
       end
 

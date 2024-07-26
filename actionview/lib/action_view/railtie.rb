@@ -114,6 +114,7 @@ module ActionView
 
       unless enable_caching
         view_reloader = ActionView::CacheExpiry::ViewReloader.new(watcher: app.config.file_watcher)
+        CacheExpiry.view_reloader = view_reloader
 
         app.reloaders << view_reloader
         app.reloader.to_run do
