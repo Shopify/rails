@@ -5,7 +5,7 @@ require "active_support/core_ext/enumerable"
 module ActiveRecord
   class InsertAll # :nodoc:
     attr_reader :model, :connection, :inserts, :keys
-    attr_reader :on_duplicate, :update_only, :returning, :unique_by, :update_sql
+    attr_reader :on_duplicate, :update_only, :returning, :unique_by, :update_sql, :typecast
 
     class << self
       def execute(relation, ...)
@@ -19,7 +19,7 @@ module ActiveRecord
       @column_mode
     end
 
-    def initialize(relation, connection, inserts, on_duplicate:, update_only: nil, returning: nil, unique_by: nil, record_timestamps: nil, columns: nil)
+    def initialize(relation, connection, inserts, on_duplicate:, update_only: nil, returning: nil, unique_by: nil, record_timestamps: nil, columns: nil, typecast: nil)
       @relation = relation
       @model, @connection = relation.model, connection
       @column_mode = !!columns
@@ -32,6 +32,12 @@ module ActiveRecord
 
       @on_duplicate, @update_only, @returning, @unique_by = on_duplicate, update_only, returning, unique_by
       @record_timestamps = record_timestamps.nil? ? model.record_timestamps : record_timestamps
+
+      unless typecast.nil?
+        @typecast = typecast
+      else
+        @typecast = true
+      end
 
       disallow_raw_sql!(on_duplicate)
       disallow_raw_sql!(returning)
@@ -260,7 +266,16 @@ module ActiveRecord
                 raise ArgumentError, "Number of columns (#{row.length}) does not match number of keys (#{keys_including_timestamps.length})"
               end
             end
-            values_list = insert_all.inserts
+            if insert_all.typecast
+              types = extract_types_from_columns_on(model.table_name, keys: keys_including_timestamps)
+
+              values_list = insert_all.map_key_with_value do |key, value|
+                next value if Arel::Nodes::SqlLiteral === value
+                connection.with_yaml_fallback(types[key].serialize(value))
+              end
+            else
+              values_list = insert_all.inserts
+            end
           else
             types = extract_types_from_columns_on(model.table_name, keys: keys_including_timestamps)
 

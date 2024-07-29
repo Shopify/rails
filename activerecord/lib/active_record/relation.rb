@@ -726,8 +726,8 @@ module ActiveRecord
     #     { id: 1, title: "Rework" },
     #     { id: 2, title: "Eloquent Ruby" }
     #   ])
-    def insert_all(attributes, returning: nil, unique_by: nil, record_timestamps: nil, columns: nil)
-      InsertAll.execute(self, attributes, on_duplicate: :skip, returning: returning, unique_by: unique_by, record_timestamps: record_timestamps, columns: columns)
+    def insert_all(attributes, returning: nil, unique_by: nil, record_timestamps: nil, columns: nil, typecast: nil)
+      InsertAll.execute(self, attributes, on_duplicate: :skip, returning: returning, unique_by: unique_by, record_timestamps: record_timestamps, columns: columns, typecast: typecast)
     end
 
     # Inserts a single record into the database in a single SQL INSERT
