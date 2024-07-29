@@ -161,6 +161,7 @@ GEM
     bcrypt (3.1.20)
     bcrypt_pbkdf (1.1.0)
     beaneater (1.1.3)
+    benchmark-ips (2.13.0)
     bigdecimal (3.1.8)
     bindex (0.8.1)
     bootsnap (1.17.0)
@@ -593,6 +594,7 @@ GEM
     uber (0.1.0)
     unicode-display_width (2.5.0)
     useragent (0.16.10)
+    vernier (1.1.1)
     w3c_validators (1.3.7)
       json (>= 1.8)
       nokogiri (~> 1.6)
@@ -626,6 +628,7 @@ DEPENDENCIES
   azure-storage-blob (~> 2.0)
   backburner
   bcrypt (~> 3.1.11)
+  benchmark-ips
   bootsnap (>= 1.4.4)
   brakeman
   capybara (>= 3.39)
@@ -698,6 +701,7 @@ DEPENDENCIES
   turbo-rails
   tzinfo-data
   useragent
+  vernier
   w3c_validators (~> 1.3.6)
   wdm (>= 0.1.0)
   web-console

@@ -93,15 +93,23 @@ module ActiveRecord
     end
 
     def map_key_with_value
-      inserts.map do |attributes|
-        attributes = attributes.stringify_keys
-        attributes.merge!(@scope_attributes)
-        attributes.reverse_merge!(timestamps_for_create) if record_timestamps?
+      if column_mode?
+        inserts.map do |row|
+          keys.map.with_index do |key, index|
+            yield key, row[index]
+          end
+        end
+      else
+        inserts.map do |attributes|
+          attributes = attributes.stringify_keys
+          attributes.merge!(@scope_attributes)
+          attributes.reverse_merge!(timestamps_for_create) if record_timestamps?
 
-        verify_attributes(attributes)
+          verify_attributes(attributes)
 
-        keys_including_timestamps.map do |key|
-          yield key, attributes[key]
+          keys_including_timestamps.map do |key|
+            yield key, attributes[key]
+          end
         end
       end
     end
