@@ -76,48 +76,48 @@ end
 
 relation = Exhibit.all
 
-require 'vernier'
-Vernier.profile(out: "time_profile.json") do
-  300.times do
-    relation.insert_all(
-      rows,
-      columns: columns,
-      typecast: true
-    )
-  end
-end
-
-
-# Benchmark.ips do |x|
-#
-#   x.report("raw sql") do
-#     conn.execute(raw_sql)
-#   end
-#
-#   x.report("arel") do
-#     conn.execute(build_insert_with_arel(Exhibit, columns, rows))
-#   end
-#
-#   x.report("rows no-cast") do
-#     relation.insert_all(
-#       rows,
-#       columns: columns,
-#       typecast: false
-#     )
-#   end
-#
-#   x.report("rows cast") do
+# require 'vernier'
+# Vernier.profile(out: "time_profile.json") do
+#   300.times do
 #     relation.insert_all(
 #       rows,
 #       columns: columns,
 #       typecast: true
 #     )
 #   end
-#
-#   insert_all_rows = [ATTRS] * ROWS_COUNT
-#   x.report("insert_all") do
-#     relation.insert_all(insert_all_rows)
-#   end
-#
-#   x.compare!(order: :baseline)
 # end
+
+
+Benchmark.ips do |x|
+
+  x.report("raw sql") do
+    conn.execute(raw_sql)
+  end
+
+  x.report("arel") do
+    conn.execute(build_insert_with_arel(Exhibit, columns, rows))
+  end
+
+  x.report("rows no-cast") do
+    relation.insert_all(
+      rows,
+      columns: columns,
+      typecast: false
+    )
+  end
+
+  x.report("rows cast") do
+    relation.insert_all(
+      rows,
+      columns: columns,
+      typecast: true
+    )
+  end
+
+  insert_all_rows = [ATTRS] * ROWS_COUNT
+  x.report("insert_all") do
+    relation.insert_all(insert_all_rows)
+  end
+
+  x.compare!(order: :baseline)
+end

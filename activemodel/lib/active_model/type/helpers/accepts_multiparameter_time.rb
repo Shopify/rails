@@ -5,8 +5,19 @@ module ActiveModel
     module Helpers # :nodoc: all
       class AcceptsMultiparameterTime < Module
         module InstanceMethods
+          DB_DATETIME = /
+            \A
+            (\d{4})-(\d\d)-(\d\d)(?:T|\s)            # 2020-06-20T
+            (\d\d):(\d\d):(\d\d)(?:\.(\d{1,6})\d*)?  # 10:20:30.123456
+            \z
+          /x
+          
           def serialize(value)
-            serialize_cast_value(cast(value))
+            if value.is_a?(::String) && DB_DATETIME.match?(value)
+              value
+            else
+              serialize_cast_value(cast(value))
+            end
           end
 
           def serialize_cast_value(value)
