@@ -87,37 +87,76 @@ relation = Exhibit.all
 #   end
 # end
 
+# Sqlite3 is missing frozen_string_literal: true
+eval <<~RUBY
+  def sqlite3_quote(str)
+    str.gsub("'", "''")
+  end
+RUBY
+
+def quote_fstr(str)
+  str.gsub("'", "''")
+end
+
+def quote_reg(str)
+  str.gsub(/'/, "''")
+end
+
+def quote_opt(str)
+  if str.include?("'")
+    str.gsub(/'/, "''")
+  else
+    str.dup
+  end
+end
+
+def quote_opt2(str)
+  if str.include?("'")
+    str.gsub(/'/, "''")
+  else
+    str
+  end
+end
 
 Benchmark.ips do |x|
-
-  x.report("raw sql") do
-    conn.execute(raw_sql)
-  end
-
-  x.report("arel") do
-    conn.execute(build_insert_with_arel(Exhibit, columns, rows))
-  end
-
-  x.report("rows no-cast") do
-    relation.insert_all(
-      rows,
-      columns: columns,
-      typecast: false
-    )
-  end
-
-  x.report("rows cast") do
-    relation.insert_all(
-      rows,
-      columns: columns,
-      typecast: true
-    )
-  end
-
-  insert_all_rows = [ATTRS] * ROWS_COUNT
-  x.report("insert_all") do
-    relation.insert_all(insert_all_rows)
-  end
-
+  x.report("sqlite3 quote") { sqlite3_quote("kirs@shopify.com") }
+  x.report("gsub fstr") { quote_fstr("kirs@shopify.com") }
+  x.report("gsub reg") { quote_reg("kirs@shopify.com") }
+  x.report("opt include?") { quote_opt("kirs@shopify.com") }
+  x.report("opt no-dup") { quote_opt2("kirs@shopify.com") }
   x.compare!(order: :baseline)
 end
+
+# Benchmark.ips do |x|
+#
+#   x.report("raw sql") do
+#     conn.execute(raw_sql)
+#   end
+#
+#   x.report("arel") do
+#     conn.execute(build_insert_with_arel(Exhibit, columns, rows))
+#   end
+#
+#   x.report("rows no-cast") do
+#     relation.insert_all(
+#       rows,
+#       columns: columns,
+#       typecast: false
+#     )
+#   end
+#
+#   x.report("rows cast") do
+#     relation.insert_all(
+#       rows,
+#       columns: columns,
+#       typecast: true
+#     )
+#   end
+#
+#   insert_all_rows = [ATTRS] * ROWS_COUNT
+#   x.report("insert_all") do
+#     relation.insert_all(insert_all_rows)
+#   end
+#
+#   x.compare!(order: :baseline)
+# end
