@@ -163,18 +163,18 @@ module ActiveRecord
       # +binds+ as the bind substitutes. +name+ is logged along with
       # the executed +sql+ statement.
       def exec_delete(sql, name = nil, binds = [])
-        affected_rows(internal_execute(sql, name, binds))
+        affected_rows(internal_execute(sql, name, binds, readonly: false))
       end
 
       # Executes update +sql+ statement in the context of this connection using
       # +binds+ as the bind substitutes. +name+ is logged along with
       # the executed +sql+ statement.
       def exec_update(sql, name = nil, binds = [])
-        affected_rows(internal_execute(sql, name, binds))
+        affected_rows(internal_execute(sql, name, binds, readonly: false))
       end
 
       def exec_insert_all(sql, name) # :nodoc:
-        internal_exec_query(sql, name)
+        internal_exec_query(sql, name, readonly: false)
       end
 
       def explain(arel, binds = [], options = []) # :nodoc:
@@ -370,13 +370,6 @@ module ActiveRecord
                :commit_transaction, :rollback_transaction, :materialize_transactions,
                :disable_lazy_transactions!, :enable_lazy_transactions!, :dirty_current_transaction,
                to: :transaction_manager
-
-      def mark_transaction_written_if_write(sql) # :nodoc:
-        transaction = current_transaction
-        if transaction.open?
-          transaction.written ||= write_query?(sql)
-        end
-      end
 
       def transaction_open?
         current_transaction.open?
@@ -579,9 +572,21 @@ module ActiveRecord
           raise NotImplementedError
         end
 
-        def preprocess_query(sql)
-          check_if_write_query(sql)
-          mark_transaction_written_if_write(sql)
+        # Same as #internal_exec_query, but yields a native adapter result
+        def internal_execute(sql, name = "SQL", binds = [], prepare: false, async: false, allow_retry: false, materialize_transactions: true, readonly: nil, &block)
+          transaction = current_transaction
+
+          if (transaction.open? && !transaction.written) || preventing_writes?
+            # If the caller passed readonly: true/false we believe it.
+            # If `readonly` is nil, we do a best effort check using `write_query?`
+            if readonly.nil? ? write_query?(sql) : !readonly
+              if preventing_writes?
+                raise ActiveRecord::ReadOnlyError, "Write query attempted while in readonly mode: #{sql}"
+              end
+
+              transaction.written = true
+            end
+          end
 
           # We call tranformers after the write checks so we don't add extra parsing work.
           # This means we assume no transformer whille change a read for a write
@@ -590,12 +595,6 @@ module ActiveRecord
             sql = transformer.call(sql, self)
           end
 
-          sql
-        end
-
-        # Same as #internal_exec_query, but yields a native adapter result
-        def internal_execute(sql, name = "SQL", binds = [], prepare: false, async: false, allow_retry: false, materialize_transactions: true, &block)
-          sql = preprocess_query(sql)
           raw_execute(sql, name, binds, prepare: prepare, async: async, allow_retry: allow_retry, materialize_transactions: materialize_transactions, &block)
         end
 

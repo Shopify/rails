@@ -221,11 +221,11 @@ module ActiveRecord
       #++
 
       def begin_db_transaction # :nodoc:
-        internal_execute("BEGIN", "TRANSACTION", allow_retry: true, materialize_transactions: false)
+        internal_execute("BEGIN", "TRANSACTION", allow_retry: true, materialize_transactions: false, readonly: true)
       end
 
       def begin_isolated_db_transaction(isolation) # :nodoc:
-        internal_execute("SET TRANSACTION ISOLATION LEVEL #{transaction_isolation_levels.fetch(isolation)}", "TRANSACTION", allow_retry: true, materialize_transactions: false)
+        internal_execute("SET TRANSACTION ISOLATION LEVEL #{transaction_isolation_levels.fetch(isolation)}", "TRANSACTION", allow_retry: true, materialize_transactions: false, readonly: true)
         begin_db_transaction
       end
 
