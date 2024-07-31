@@ -4,11 +4,6 @@ module ActiveRecord
   module ConnectionAdapters
     module Trilogy
       module DatabaseStatements
-        def exec_insert(sql, name, binds, pk = nil, sequence_name = nil, returning: nil) # :nodoc:
-          sql, _binds = sql_for_insert(sql, pk, binds, returning)
-          internal_execute(sql, name)
-        end
-
         private
           def perform_query(raw_connection, sql, binds, type_casted_binds, prepare:, notification_payload:)
             # Make sure we carry over any changes to ActiveRecord.default_timezone that have been
@@ -41,12 +36,8 @@ module ActiveRecord
             result.affected_rows
           end
 
-          def last_inserted_id(result)
-            if supports_insert_returning?
-              super
-            else
-              result.last_insert_id
-            end
+          def last_inserted_id(raw_result)
+            raw_result.last_insert_id
           end
 
           def execute_batch(statements, name = nil)

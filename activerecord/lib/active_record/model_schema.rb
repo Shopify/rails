@@ -435,10 +435,10 @@ module ActiveRecord
         @columns ||= columns_hash.values.freeze
       end
 
-      def _returning_columns_for_insert(connection) # :nodoc:
+      def _returning_columns_for_insert # :nodoc:
         @_returning_columns_for_insert ||= begin
           auto_populated_columns = columns.filter_map do |c|
-            c.name if connection.return_value_after_insert?(c)
+            c.name if c.auto_populated?
           end
 
           auto_populated_columns.empty? ? Array(primary_key) : auto_populated_columns

@@ -558,10 +558,6 @@ module ActiveRecord
         false
       end
 
-      def return_value_after_insert?(column) # :nodoc:
-        column.auto_populated?
-      end
-
       def async_enabled? # :nodoc:
         supports_concurrent_connections? &&
           !ActiveRecord.async_query_executor.nil? && !pool.async_executor.nil?

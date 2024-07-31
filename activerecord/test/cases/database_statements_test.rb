@@ -8,8 +8,7 @@ class DatabaseStatementsTest < ActiveRecord::TestCase
   end
 
   def test_exec_insert
-    result = @connection.exec_insert("INSERT INTO accounts (firm_id,credit_limit) VALUES (42,5000)", nil, [])
-    assert_not_nil @connection.send(:last_inserted_id, result)
+    assert_not_nil @connection.exec_insert("INSERT INTO accounts (firm_id,credit_limit) VALUES (42,5000)", nil, [])
   end
 
   def test_insert_should_return_the_inserted_id

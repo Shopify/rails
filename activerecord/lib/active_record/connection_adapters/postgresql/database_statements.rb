@@ -205,10 +205,6 @@ module ActiveRecord
             internal_exec_query("SELECT currval(#{quote(sequence_name)})", "SQL")
           end
 
-          def returning_column_values(result)
-            result.rows.first
-          end
-
           def suppress_composite_primary_key(pk)
             pk unless pk.is_a?(Array)
           end

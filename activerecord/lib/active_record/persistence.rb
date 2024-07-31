@@ -921,7 +921,7 @@ module ActiveRecord
       attribute_names = attributes_for_create(attribute_names)
 
       self.class.with_connection do |connection|
-        returning_columns = self.class._returning_columns_for_insert(connection)
+        returning_columns = self.class._returning_columns_for_insert
 
         returning_values = self.class._insert_record(
           connection,

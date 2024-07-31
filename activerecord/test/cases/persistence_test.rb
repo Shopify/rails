@@ -1443,6 +1443,18 @@ class PersistenceTest < ActiveRecord::TestCase
     assert_equal "Wright Glider", Aircraft.last.name
   end
 
+  def test_multiple_auto_populated_columns
+    assert_equal ["id", "manufactured_at"], Aircraft.columns.select(&:auto_populated?).map(&:name).sort
+
+    aircraft = Aircraft.create!
+    assert_not_nil aircraft.id
+    if supports_insert_returning?
+      assert_not_nil aircraft.manufactured_at
+    else
+      assert_nil aircraft.manufactured_at
+    end
+  end
+
   def test_instantiate_creates_a_new_instance
     post = Post.instantiate("title" => "appropriate documentation", "type" => "SpecialPost")
     assert_equal "appropriate documentation", post.title

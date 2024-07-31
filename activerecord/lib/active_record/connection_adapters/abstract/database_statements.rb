@@ -155,7 +155,7 @@ module ActiveRecord
       # `nil` is the default value and maintains default behavior. If an array of column names is passed -
       # the result will contain values of the specified columns from the inserted row.
       def exec_insert(sql, name = nil, binds = [], pk = nil, sequence_name = nil, returning: nil)
-        sql, binds = sql_for_insert(sql, pk, binds, returning)
+        sql = sql_for_insert(sql, pk, returning)
         internal_exec_query(sql, name, binds)
       end
 
@@ -194,11 +194,18 @@ module ActiveRecord
       # an array of is returned from the method representing values of the specified columns from the inserted row.
       def insert(arel, name = nil, pk = nil, id_value = nil, sequence_name = nil, binds = [], returning: nil)
         sql, binds = to_sql_and_binds(arel, binds)
-        value = exec_insert(sql, name, binds, pk, sequence_name, returning: returning)
+        sql = sql_for_insert(sql, pk, returning)
+        raw_result = internal_execute(sql, name, binds)
 
-        return returning_column_values(value) unless returning.nil?
-
-        id_value || last_inserted_id(value)
+        if returning.nil?
+          id_value || last_inserted_id(raw_result)
+        else
+          if supports_insert_returning?
+            cast_result(raw_result).rows.first
+          else
+            [id_value || last_inserted_id(raw_result)]
+          end
+        end
       end
       alias create insert
 
@@ -707,7 +714,7 @@ module ActiveRecord
           end
         end
 
-        def sql_for_insert(sql, pk, binds, returning) # :nodoc:
+        def sql_for_insert(sql, pk, returning) # :nodoc:
           if supports_insert_returning?
             if pk.nil?
               # Extract the table from the insert sql. Yuck.
@@ -717,19 +724,17 @@ module ActiveRecord
 
             returning_columns = returning || Array(pk)
 
-            returning_columns_statement = returning_columns.map { |c| quote_column_name(c) }.join(", ")
-            sql = "#{sql} RETURNING #{returning_columns_statement}" if returning_columns.any?
+            unless returning_columns.empty?
+              returning_columns_statement = returning_columns.map { |c| quote_column_name(c) }.join(", ")
+              sql = "#{sql} RETURNING #{returning_columns_statement}" 
+            end
           end
 
-          [sql, binds]
+          sql
         end
 
-        def last_inserted_id(result)
-          single_value_from_rows(result.rows)
-        end
-
-        def returning_column_values(result)
-          [last_inserted_id(result)]
+        def last_inserted_id(raw_result)
+          single_value_from_rows(raw_result.rows)
         end
 
         def single_value_from_rows(rows)

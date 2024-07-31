@@ -22,12 +22,8 @@ module ActiveRecord
             end
           end
 
-          def last_inserted_id(result)
-            if supports_insert_returning?
-              super
-            else
-              @raw_connection&.last_id
-            end
+          def last_inserted_id(_raw_result)
+            @raw_connection&.last_id
           end
 
           def multi_statements_enabled?

@@ -121,6 +121,10 @@ module ActiveRecord
             @last_affected_rows
           end
 
+          def last_inserted_id(_raw_result)
+            @raw_connection&.last_insert_row_id
+          end
+
           def execute_batch(statements, name = nil)
             sql = combine_multi_statements(statements)
 
@@ -141,10 +145,6 @@ module ActiveRecord
 
           def build_truncate_statement(table_name)
             "DELETE FROM #{quote_table_name(table_name)}"
-          end
-
-          def returning_column_values(result)
-            result.rows.first
           end
       end
     end
