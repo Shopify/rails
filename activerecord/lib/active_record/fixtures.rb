@@ -610,7 +610,7 @@ module ActiveRecord
             class_names,
             connection_pool,
           )
-          cache_fixtures(connection_pool, fixtures_map)
+          # cache_fixtures(connection_pool, fixtures_map)
         end
         cached_fixtures(connection_pool, fixture_set_names)
       end
@@ -683,7 +683,20 @@ module ActiveRecord
             end
 
             pool.with_connection do |conn|
-              conn.insert_fixtures_set(table_rows_for_connection, table_rows_for_connection.keys)
+              if conn.async_enabled? && conn.current_transaction.closed? && !$async_disabled
+                conn.with_referential_integrity_disabled_globally do
+                  futures = table_rows_for_connection.map do |table_name, fixtures|
+                    Concurrent::Future.execute(executor: pool.async_executor) do
+                      pool.with_connection do |async_conn|
+                        async_conn.insert_fixtures_async(table_name, fixtures)
+                      end
+                    end
+                  end
+                  futures.each(&:value!)
+                end
+              else
+                conn.insert_fixtures_set(table_rows_for_connection, table_rows_for_connection.keys)
+              end
 
               check_all_foreign_keys_valid!(conn)
 

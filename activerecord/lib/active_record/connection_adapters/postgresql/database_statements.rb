@@ -120,6 +120,12 @@ module ActiveRecord
           execute("SET CONSTRAINTS #{constraints} #{deferred.to_s.upcase}")
         end
 
+        def with_referential_integrity_disabled_globally # :nodoc:
+          disable_referential_integrity do
+            yield
+          end
+        end
+
         private
           IDLE_TRANSACTION_STATUSES = [PG::PQTRANS_IDLE, PG::PQTRANS_INTRANS, PG::PQTRANS_INERROR]
           private_constant :IDLE_TRANSACTION_STATUSES
@@ -184,6 +190,14 @@ module ActiveRecord
             ar_result = ActiveRecord::Result.new(fields, result.values, types.freeze)
             result.clear
             ar_result
+          end
+
+          def truncate_fixture_sql(table_name)
+            "DELETE FROM #{quote_table_name(table_name)}"
+          end
+
+          def with_referential_integrity_disabled_per_conn
+            yield
           end
 
           def affected_rows(result)

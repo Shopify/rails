@@ -1,3 +1,11 @@
+*   Insert fixtures concurrently when async is supported.
+
+    When async is enabled on the connection adapter, concurrently insert fixtures across tables.
+    This provides speedups compared to simple multi-statement fixture insertion.
+
+    *Adrianna Chang*
+
+
 *   Support batching using custom columns.
 
     ```ruby

@@ -495,6 +495,19 @@ module ActiveRecord
         end
       end
 
+      def insert_fixtures_async(table_name, fixtures)
+        with_referential_integrity_disabled_per_conn do
+          statements = []
+          statements << truncate_fixture_sql(table_name)
+          statements += build_fixture_statements({ table_name => fixtures })
+
+          execute_batch(statements, "Fixtures Load #{table_name}")
+        rescue
+          raw_execute(truncate_fixture_sql(table_name), "Truncate Table #{table_name}")
+          raise
+        end
+      end
+
       def empty_insert_statement_value(primary_key = nil)
         "DEFAULT VALUES"
       end
@@ -545,6 +558,10 @@ module ActiveRecord
       # Execute a query and returns an ActiveRecord::Result
       def internal_exec_query(...) # :nodoc:
         cast_result(internal_execute(...))
+      end
+
+      def with_referential_integrity_disabled_globally # :nodoc:
+        yield
       end
 
       private
@@ -644,6 +661,16 @@ module ActiveRecord
 
           manager.values = manager.create_values_list(values_list)
           visitor.compile(manager.ast)
+        end
+
+        def truncate_fixture_sql(table_name)
+          build_truncate_statement(table_name)
+        end
+
+        def with_referential_integrity_disabled_per_conn
+          disable_referential_integrity do
+            yield
+          end
         end
 
         def build_fixture_statements(fixture_set)
