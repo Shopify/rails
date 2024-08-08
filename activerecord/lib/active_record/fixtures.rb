@@ -776,18 +776,18 @@ module ActiveRecord
         @ignored_fixtures.compact
       end
 
-      # Loads the fixtures from the YAML file at +path+.
+      # Loads the fixtures from the YAML/ERB files at +path+.
       # If the file sets the +model_class+ and current instance value is not set,
       # it uses the file value.
 
       def read_fixture_files(path)
-        yaml_files = Dir["#{path}{.yml,/{**,*}/*.yml}"].select { |f|
+        fixture_files = Dir["#{path}{.yml,/{**,*}/*.{yml, erb}"].select { |f|
           ::File.file?(f)
         }
 
-        raise ArgumentError, "No fixture files found for #{@name}" if yaml_files.empty?
+        raise ArgumentError, "No fixture files found for #{@name}" if fixture_files.empty?
 
-        yaml_files.each_with_object({}) do |file, fixtures|
+        fixture_files.each_with_object({}) do |file, fixtures|
           FixtureSet::File.open(file) do |fh|
             self.model_class ||= fh.model_class if fh.model_class
             self.model_class ||= default_fixture_model_class
