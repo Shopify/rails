@@ -257,6 +257,21 @@ module CacheStoreBehavior
     assert_equal(other_key * 2, @cache.read(other_key))
   end
 
+  def test_fetch_multi_with_read_multi
+    key = SecureRandom.uuid
+    other_key = SecureRandom.uuid
+    third_key = SecureRandom.alphanumeric
+    @cache.write(key, "bar")
+
+    values = @cache.fetch_multi(key, other_key, third_key, read_multi: true) do |values|
+      values.index_with { |value| value * 2 }
+    end
+
+    assert_equal({ key => "bar", other_key => (other_key * 2), third_key => (third_key * 2) }, values)
+    assert_equal((other_key * 2), @cache.read(other_key))
+    assert_equal((third_key * 2), @cache.read(third_key))
+  end
+
   def test_fetch_multi_with_skip_nil
     key = SecureRandom.uuid
     other_key = SecureRandom.uuid

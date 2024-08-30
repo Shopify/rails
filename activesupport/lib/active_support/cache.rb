@@ -607,8 +607,18 @@ module ActiveSupport
             reads = read_multi_entries(names, **options)
           end
 
-          ordered = names.index_with do |name|
-            reads.fetch(name) { writes[name] = yield(name) }
+          ordered = if options[:read_multi]
+            missing_names = names - reads.keys
+            missing_data = yield(missing_names)
+            writes.update(missing_data)
+            reads.update(missing_data)
+            names.index_with do |name|
+              reads.fetch(name)
+            end
+          else
+            names.index_with do |name|
+              reads.fetch(name) { writes[name] = yield(name) }
+            end
           end
           writes.compact! if options[:skip_nil]
 
