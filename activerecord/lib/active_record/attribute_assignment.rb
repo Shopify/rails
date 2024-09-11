@@ -4,27 +4,24 @@ module ActiveRecord
   module AttributeAssignment
     private
       def _assign_attributes(attributes)
-        multi_parameter_attributes = nested_parameter_attributes = nil
+        association_attributes = {}
+        regular_attributes = {}
+        multi_parameter_attributes = {}
 
         attributes.each do |k, v|
           key = k.to_s
-
-          if key.include?("(")
-            (multi_parameter_attributes ||= {})[key] = v
-          elsif v.is_a?(Hash)
-            (nested_parameter_attributes ||= {})[key] = v
+          if key.end_with?("_id") && self.class.reflect_on_association(key.chomp("_id"))
+            association_attributes[key] = v
+          elsif key.include?("(")
+            multi_parameter_attributes[key] = v
           else
-            _assign_attribute(key, v)
+            regular_attributes[key] = v
           end
         end
 
-        assign_nested_parameter_attributes(nested_parameter_attributes) if nested_parameter_attributes
-        assign_multiparameter_attributes(multi_parameter_attributes) if multi_parameter_attributes
-      end
-
-      # Assign any deferred nested attributes after the base attributes have been set.
-      def assign_nested_parameter_attributes(pairs)
-        pairs.each { |k, v| _assign_attribute(k, v) }
+        association_attributes.each { |k, v| _assign_attribute(k, v) }
+        regular_attributes.each { |k, v| _assign_attribute(k, v) }
+        assign_multiparameter_attributes(multi_parameter_attributes) unless multi_parameter_attributes.empty?
       end
 
       # Instantiates objects for all attribute classes that needs more than one constructor parameter. This is done
