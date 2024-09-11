@@ -4,24 +4,22 @@ module ActiveRecord
   module AttributeAssignment
     private
       def _assign_attributes(attributes)
-        association_attributes = {}
-        regular_attributes = {}
-        multi_parameter_attributes = {}
+        multi_parameter_attributes = regular_attributes = nil
 
         attributes.each do |k, v|
           key = k.to_s
-          if key.end_with?("_id") && self.class.reflect_on_association(key.chomp("_id"))
-            association_attributes[key] = v
+          if self.class.reflect_on_association(key) ||
+             (key.end_with?("_id") && self.class.reflect_on_association(key.chomp("_id")))
+            _assign_attribute(key, v)
           elsif key.include?("(")
-            multi_parameter_attributes[key] = v
+            (multi_parameter_attributes ||={})[key] = v
           else
-            regular_attributes[key] = v
+            (regular_attributes ||=[]) << [key, v]
           end
         end
 
-        association_attributes.each { |k, v| _assign_attribute(k, v) }
-        regular_attributes.each { |k, v| _assign_attribute(k, v) }
-        assign_multiparameter_attributes(multi_parameter_attributes) unless multi_parameter_attributes.empty?
+        regular_attributes.each { |k, v| _assign_attribute(k, v) } if regular_attributes
+        assign_multiparameter_attributes(multi_parameter_attributes) if multi_parameter_attributes
       end
 
       # Instantiates objects for all attribute classes that needs more than one constructor parameter. This is done
