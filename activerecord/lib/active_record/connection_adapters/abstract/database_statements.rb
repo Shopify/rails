@@ -604,7 +604,17 @@ module ActiveRecord
           DEFAULT_INSERT_VALUE
         end
 
+        def current_version
+          @current_version ||= ActiveRecord::Migrator.current_version
+        end
+
         def build_fixture_sql(fixtures, table_name)
+          cache_key = generate_cache_key(fixtures, table_name)
+
+          fixture_sql_cache = ActiveSupport::Cache::FileStore.new("#{Rails.root}/tmp/cache/fixture_sql")
+          cached_sql = fixture_sql_cache.read(cache_key)
+          return cached_sql if cached_sql
+
           columns = schema_cache.columns_hash(table_name).reject { |_, column| supports_virtual_columns? && column.virtual? }
 
           values_list = fixtures.map do |fixture|
@@ -643,7 +653,18 @@ module ActiveRecord
           end
 
           manager.values = manager.create_values_list(values_list)
-          visitor.compile(manager.ast)
+          sql = visitor.compile(manager.ast) # Cache this, key = based on a hash of the fixtures and table name
+
+          fixture_sql_cache.write(cache_key, sql)
+
+          sql
+        end
+
+        def generate_cache_key(fixtures, table_name)
+
+          fixture_hash = Digest::MD5.hexdigest(fixtures.to_json)
+
+          "fixture_sql:#{table_name}:#{fixture_hash}:#{@current_version}"
         end
 
         def build_fixture_statements(fixture_set)
