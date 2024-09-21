@@ -11,17 +11,22 @@ module ActiveRecord
       # Open a fixture file named +file+.  When called with a block, the block
       # is called with the filehandle and the filehandle is automatically closed
       # when the block finishes.
-      def self.open(file)
-        x = new file
+      def self.open(file, fixture_read_cache={})
+        x = new(file, fixture_read_cache)
         block_given? ? yield(x) : x
       end
 
-      def initialize(file)
+      def initialize(file, fixture_read_cache = {})
         @file = file
+        @fixture_read_cache = fixture_read_cache
       end
 
       def each(&block)
         rows.each(&block)
+      end
+
+      def current_version
+        @current_version ||= ActiveRecord::Migrator.current_version
       end
 
       def model_class
@@ -49,12 +54,30 @@ module ActiveRecord
         end
 
         def raw_rows
-          @raw_rows ||= begin
-            data = ActiveSupport::ConfigurationFile.parse(@file, context:
-              ActiveRecord::FixtureSet::RenderContext.create_subclass.new.get_binding)
-            data ? validate(data).to_a : []
-          rescue RuntimeError => error
-            raise Fixture::FormatError, error.message
+          if @file.end_with?(".yml.erb") || @fixture_read_cache.is_a?(Hash)
+            @raw_rows ||= begin
+              data = ActiveSupport::ConfigurationFile.parse(@file, context:
+                ActiveRecord::FixtureSet::RenderContext.create_subclass.new.get_binding)
+              data ? validate(data).to_a : []
+            rescue RuntimeError => error
+              raise Fixture::FormatError, error.message
+            end
+          else
+            cache_key = "#{@file}:#{@current_version}"
+            cached_read = @fixture_read_cache.read(cache_key)
+            # puts(cached_read ? "Hit: #{cache_key}" : "Miss: #{cache_key}")
+            return cached_read if cached_read
+
+            @raw_rows ||= begin
+              data = ActiveSupport::ConfigurationFile.parse(@file, context:
+                ActiveRecord::FixtureSet::RenderContext.create_subclass.new.get_binding)
+              data ? validate(data).to_a : []
+            rescue RuntimeError => error
+              raise Fixture::FormatError, error.message
+            end
+
+            @fixture_read_cache.write(cache_key, @raw_rows)
+            @raw_rows
           end
         end
 
