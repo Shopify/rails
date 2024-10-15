@@ -183,6 +183,7 @@ module ActiveSupport
           # By letting #delegate handle it, we avoid an enclosure that'll capture args.
           singleton_class.delegate name, to: :instance
 
+          p [:send, name]
           send(name, *args, &block)
         end
         ruby2_keywords(:method_missing)

@@ -265,7 +265,13 @@ class Module
           "end"
       end
     end
-    module_eval(method_def.join(";"), file, line)
+    puts '-' * 40
+    method_def.each_with_index do |line, index|
+      print (index + 1).to_s.rjust(3, ' ') + ' '
+      puts line
+    end
+    puts '-' * 40
+    module_eval(method_def.join("\n"))#, file, line)
     method_names
   end
 
