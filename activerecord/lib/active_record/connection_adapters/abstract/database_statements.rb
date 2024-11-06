@@ -513,29 +513,25 @@ module ActiveRecord
           table_deletes = tables_to_delete.map { |table| "DELETE FROM #{quote_table_name(table)}" }
           statements = table_deletes + fixture_inserts
 
-          with_multi_statements do
-            transaction(requires_new: true) do
-              disable_referential_integrity do
-                execute_batch(statements, "Fixtures Load")
-              end
+          transaction(requires_new: true) do
+            disable_referential_integrity do
+              execute_batch(statements, "Fixtures Load")
             end
           end
         end
       end
 
       def exec_fixtures_insert(*args, **kwargs)
-        with_multi_statements do
-          disable_referential_integrity do
-            with_raw_connection do |conn|
-              # Simulate something raising to verify table truncating happens correctly
-              # if args[0].match?(/author_addresses/)
-              #   puts "sending malformed SQL"
-              #   args[0] = "BAD QUERY;"
-              # end
-              internal_exec_query(*args, **kwargs)
-              # This only works for trilogy rn; will need to make work for other adapters using multi-statement client API
-              conn.next_result while conn.more_results_exist?
-            end
+        disable_referential_integrity do
+          with_raw_connection do |conn|
+            # Simulate something raising to verify table truncating happens correctly
+            # if args[0].match?(/author_addresses/)
+            #   puts "sending malformed SQL"
+            #   args[0] = "BAD QUERY;"
+            # end
+            internal_exec_query(*args, **kwargs)
+            # This only works for trilogy rn; will need to make work for other adapters using multi-statement client API
+            conn.next_result while conn.more_results_exist?
           end
         end
       end
