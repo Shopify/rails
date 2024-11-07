@@ -181,9 +181,15 @@ module ActiveRecord
 
       class InsertFixtures < FutureResult # :nodoc:
         private
-          def exec_query(connection, *args, **kwargs)
+        def exec_query(connection, *args, **kwargs)
+          # If the first arg is an array, treat it as multiple statements
+          if args.first.is_a?(Array)
+            statements = args.shift
+            connection.send(:execute_batch, statements, args.first || "Fixtures Load")
+          else
             connection.exec_fixtures_insert(*args, **kwargs)
           end
+        end
       end
   end
 end
