@@ -181,15 +181,19 @@ module ActiveRecord
 
       class InsertFixtures < FutureResult # :nodoc:
         private
-        def exec_query(connection, *args, **kwargs)
-          # If the first arg is an array, treat it as multiple statements
-          if args.first.is_a?(Array)
-            statements = args.shift
-            connection.send(:execute_batch, statements, args.first || "Fixtures Load")
-          else
-            connection.exec_fixtures_insert(*args, **kwargs)
+          def exec_query(connection, *args, **kwargs)
+            if args.first.is_a?(Array)
+              statements = args.shift
+              name = args.first || "Fixtures Load"
+
+              # Combine statements and use select with async
+              sql = statements.join(";\n")
+              # sql = connection.send(:combine_multi_statements, statements)
+              connection.send(:select, sql, name, [], async: FutureResult::SelectAll)
+            else
+              connection.exec_fixtures_insert(*args, **kwargs)
+            end
           end
-        end
       end
   end
 end
