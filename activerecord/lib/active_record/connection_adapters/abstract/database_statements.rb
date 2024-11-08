@@ -495,6 +495,15 @@ module ActiveRecord
         end
       end
 
+      def exec_fixtures_insert(statements, name)
+        disable_referential_integrity do
+          with_raw_connection do |conn|
+            execute_batch(statements, name)
+            conn.next_result while conn.more_results_exist?
+          end
+        end
+      end
+
       def empty_insert_statement_value(primary_key = nil)
         "DEFAULT VALUES"
       end
