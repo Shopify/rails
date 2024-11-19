@@ -98,7 +98,7 @@ class Class
 
       delegators = [
         "def #{name}; #{namespaced_name}; end",
-        "def #{name}=(value); self.#{namespaced_name} = value; end",
+        "def #{name}=(value); @#{name} = value; self.#{namespaced_name} = value; end",
       ]
 
       class_methods.concat(delegators)
