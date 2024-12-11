@@ -1,3 +1,39 @@
+*   Deprecate using `insert_all`/`upsert_all` with unpersisted records in associations.
+
+    Using these methods on associations containing unpersisted records will now
+    show a deprecation warning, as the unpersisted records will be lost after
+    the operation. This will become an error in Rails 8.2.
+
+    *Nick Schwaderer*
+
+*   Make column name optional for `index_exists?`.
+
+    This aligns well with `remove_index` signature as well, where
+    index name doesn't need to be derived from the column names.
+
+    *Ali Ismayiliov*
+
+*   Change the payload name of `sql.active_record` notification for eager
+    loading from "SQL" to "#{model.name} Eager Load".
+
+    *zzak*
+
+*   Enable automatically retrying idempotent `#exists?` queries on connection
+    errors.
+
+    *Hartley McGuire*, *classidied*
+
+*   Deprecate usage of unsupported methods in conjunction with `update_all`:
+
+    `update_all` will now print a deprecation message if a query includes either `WITH`,
+    `WITH RECURSIVE` or `DISTINCT` statements. Those were never supported and were ignored
+    when generating the SQL query.
+
+    An error will be raised in a future Rails release. This behaviour will be consistent
+    with `delete_all` which currently raises an error for unsupported statements.
+
+    *Edouard Chin*
+
 *   The table columns inside `schema.rb` are now sorted alphabetically.
 
     Previously they'd be sorted by creation order, which can cause merge conflicts when two
