@@ -1,3 +1,11 @@
+*   Deprecate using `insert_all`/`upsert_all` with unpersisted records in associations.
+
+    Using these methods on associations containing unpersisted records will now
+    show a deprecation warning, as the unpersisted records will be lost after
+    the operation. This will become an error in Rails 8.1.
+
+    *Nick Schwaderer*
+
 *   SQLite extensions can be configured in `config/database.yml`.
 
     The database configuration option `extensions:` allows an application to load SQLite extensions
