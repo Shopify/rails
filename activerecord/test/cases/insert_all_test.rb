@@ -16,7 +16,7 @@ class ReadonlyNameBook < Book
 end
 
 class InsertAllTest < ActiveRecord::TestCase
-  fixtures :books
+  fixtures :books, :authors
 
   def setup
     Arel::Table.engine = nil # should not rely on the global Arel::Table.engine
@@ -861,6 +861,32 @@ class InsertAllTest < ActiveRecord::TestCase
     ensure
       Book.table_name = "books"
     end
+  end
+
+  def test_insert_all_with_unpersisted_records_deprecation
+    author = Author.create!(name: "Rafael")
+    author.books.build(title: "Unpersisted Book")
+    author.books.load
+
+    assert_deprecated(ActiveRecord.deprecator) do
+      author.books.insert_all([{ title: "New Book" }])
+    end
+
+    assert_equal 1, author.books.size
+    assert_equal ["Unpersisted Book"], author.books.pluck(:title)
+  end
+
+  def test_insert_all_resets_without_unpersisted_records
+    author = Author.create!(name: "Rafael")
+    author.books.load
+
+    assert_not_deprecated(ActiveRecord.deprecator) do
+      author.books.insert_all([{ title: "New Book" }])
+    end
+
+    assert_not_predicate author.books, :loaded?
+    assert_equal 1, author.books.size
+    assert_equal ["New Book"], author.books.pluck(:title)
   end
 
   private
