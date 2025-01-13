@@ -297,7 +297,14 @@ module ActiveRecord
       # unless the parent is/was a new record itself.
       def associated_records_to_validate_or_save(association, new_record, autosave)
         if new_record || custom_validation_context?
-          association && association.target
+          target = association && association.target
+          if target && association.reflection.through_reflection
+            # We expect that new through records would eventually be
+            # autosaved by their direct parent, so we can ignore them here.
+            target.find_all(&:changed_for_autosave?)
+          else
+            target
+          end
         elsif autosave
           association.target.find_all(&:changed_for_autosave?)
         else
