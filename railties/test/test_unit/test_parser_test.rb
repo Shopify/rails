@@ -39,6 +39,11 @@ class TestParserTestFixture < ActiveSupport::TestCase
     assert_not false
   }
 
+  test "long declarative " \
+  "name" do
+    assert true
+  end
+
   # Check that extensions can provide aliases for testing methods
   def self.my_testing_alias(test_name, &)
     define_method(:"test_#{test_name}", &)
@@ -55,7 +60,6 @@ class TestParserTest < ActiveSupport::TestCase
         .map { |method| TestParserTestFixture.instance_method(method) }
         .sort_by { |method| method.source_location[1] }
         .map { |method| [method.name, *Rails::TestUnit::TestParser.definition_for(method)] }
-
     expected = [
       [:test_method, __FILE__, 9..13],
       [:test_oneline, __FILE__, 15..15],
@@ -65,7 +69,8 @@ class TestParserTest < ActiveSupport::TestCase
       [:test_declarative_oneline, __FILE__, 33..33],
       [:test_declarative_oneline_do, __FILE__, 35..35],
       [:"test_declarative_multiline_w/_braces", __FILE__, 37..40],
-      [:"test_method_alias", __FILE__, 47..47],
+      [:"test_long_declarative_name", __FILE__, 42..45],
+      [:"test_method_alias", __FILE__, 52..52],
     ]
 
     assert_equal expected, actual
