@@ -1128,13 +1128,13 @@ module ActiveRecord
       %w(insert insert_all insert! insert_all! upsert upsert_all).each do |method|
         class_eval <<~RUBY, __FILE__, __LINE__ + 1
           def #{method}(...)
-            if loaded? && @association&.target&.any? { |r| r.new_record? }
+            if @association&.target&.any? { |r| r.new_record? }
+              association_name = @association.reflection.name
               ActiveRecord.deprecator.warn(<<~MSG)
-                Using #{method} on association with unpersisted records
-                (\#{to_a.reject(&:persisted?).map(&:class).uniq.join(', ')})
+                Using #{method} on association \#{association_name} with unpersisted records
                 is deprecated. The unpersisted records will be lost after this operation.
                 Please either persist your records first or store them separately before
-                calling #{method}. This will become an error in Rails 8.1.
+                calling #{method}.
               MSG
               scope.#{method}(...)
             else
