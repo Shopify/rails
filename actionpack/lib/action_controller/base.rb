@@ -5,6 +5,7 @@
 require "action_view"
 require "action_controller/log_subscriber"
 require "action_controller/metal/params_wrapper"
+require "active_support/configurable"
 
 module ActionController
   # # Action Controller Base
@@ -231,6 +232,7 @@ module ActionController
       AbstractController::Rendering,
       AbstractController::Translation,
       AbstractController::AssetPaths,
+      ActiveSupport::Configurable,
       Helpers,
       UrlFor,
       Redirecting,
@@ -271,6 +273,7 @@ module ActionController
     include AbstractController::Rendering
     include AbstractController::Translation
     include AbstractController::AssetPaths
+    include ActiveSupport::Configurable
     include Helpers
     include UrlFor
     include Redirecting
