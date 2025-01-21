@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "tsort"
+require "active_support/core_ext/module/delegation"
 
 module Rails
   module Initializable
