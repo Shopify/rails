@@ -20,6 +20,11 @@ module ActiveRecord
               spec = { type: schema_type(column).inspect }.merge!(spec)
             end
 
+            # spec[:values] = column.sql_type
+            if column.sql_type.include?("enum")
+              spec[:values] = column.sql_type.match(/enum\((?<values>.*)\)/)[:values].split(",").map { |v| v.tr("'", "") }
+            end
+
             spec
           end
 
@@ -41,8 +46,10 @@ module ActiveRecord
             case column.sql_type
             when /\Atimestamp\b/
               :timestamp
-            when /\A(?:enum|set)\b/
+            when /\Aset\b/
               column.sql_type
+            when /\Aenum\b/
+              :enum
             else
               super
             end

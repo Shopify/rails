@@ -22,6 +22,7 @@ class MySQLEnumTest < ActiveRecord::AbstractMysqlTestCase
     EnumTest.lease_connection.create_table :enum_tests, id: false, force: true do |t|
       t.column :enum_column, "enum('text','blob','tiny','medium','long','unsigned','bigint')"
       t.column :state, "TINYINT(1)"
+      t.enum :new_enum_column, values: [:text, :blob, :tiny, :medium, :long, :unsigned, :bigint]
     end
   end
 
@@ -37,11 +38,16 @@ class MySQLEnumTest < ActiveRecord::AbstractMysqlTestCase
 
   def test_schema_dumping
     schema = dump_table_schema "enum_tests"
-    assert_match %r{t\.column "enum_column", "enum\('text','blob','tiny','medium','long','unsigned','bigint'\)"$}, schema
+    assert_match %r{t\.enum "enum_column", values: \["text", "blob", "tiny", "medium", "long", "unsigned", "bigint"\]}, schema
   end
 
   def test_enum_with_attribute
     enum_test = EnumTest.create!(state: :middle)
     assert_equal "middle", enum_test.state
+  end
+
+  def test_new_enum_column
+    schema = dump_table_schema "enum_tests"
+    assert_match %r{t\.enum "new_enum_column", values: \["text", "blob", "tiny", "medium", "long", "unsigned", "bigint"\]}, schema
   end
 end

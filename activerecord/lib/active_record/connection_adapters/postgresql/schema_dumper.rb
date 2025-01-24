@@ -16,17 +16,17 @@ module ActiveRecord
             end
           end
 
-          def types(stream)
-            types = @connection.enum_types
-            if types.any?
-              stream.puts "  # Custom types defined in this database."
-              stream.puts "  # Note that some types may not work with other database engines. Be careful if changing database."
-              types.sort.each do |name, values|
-                stream.puts "  create_enum #{name.inspect}, #{values.inspect}"
-              end
-              stream.puts
-            end
-          end
+          # def types(stream)
+          #   types = @connection.enum_types
+          #   if types.any?
+          #     stream.puts "  # Custom types defined in this database."
+          #     stream.puts "  # Note that some types may not work with other database engines. Be careful if changing database."
+          #     types.sort.each do |name, values|
+          #       stream.puts "  create_enum #{name.inspect}, #{values.inspect}"
+          #     end
+          #     stream.puts
+          #   end
+          # end
 
           def schemas(stream)
             schema_names = @connection.schema_names - ["public"]
@@ -80,7 +80,12 @@ module ActiveRecord
               spec = { type: schema_type(column).inspect }.merge!(spec)
             end
 
-            spec[:enum_type] = column.sql_type.inspect if column.enum?
+            if column.enum?
+              # puts "!!!values: #{@connection.enum_types.find{ |k, v| k == column.sql_type }.inspect}"
+              spec[:enum_type] = column.sql_type.inspect unless column.name == column.sql_type
+              enum_type = @connection.enum_types.find{ |k, v| k == column.sql_type }[1]
+              spec[:values] = enum_type.inspect
+            end
 
             spec
           end

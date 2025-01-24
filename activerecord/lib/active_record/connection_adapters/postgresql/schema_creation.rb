@@ -7,6 +7,13 @@ module ActiveRecord
         private
           delegate :quoted_include_columns_for_index, to: :@conn
 
+          def visit_TableDefinition(o)
+            # creating for if values and enum_type are provided
+
+            enum_types_sql = o.columns.select { |c| c.type == :enum && c.options[:values] }.map { |c| "CREATE TYPE #{c.options[:enum_type] || c.name} AS ENUM (#{c.options[:values].map { |v| "'#{v}'" }.join(",")})" }.join(";")
+            enum_types_sql << ";" << super
+          end
+
           def visit_AlterTable(o)
             sql = super
             sql << o.constraint_validations.map { |fk| visit_ValidateConstraint fk }.join(" ")

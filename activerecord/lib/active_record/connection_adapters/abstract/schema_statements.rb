@@ -1383,7 +1383,7 @@ module ActiveRecord
         end
       end
 
-      def type_to_sql(type, limit: nil, precision: nil, scale: nil, **) # :nodoc:
+      def type_to_sql(name,type, limit: nil, precision: nil, scale: nil, **) # :nodoc:
         type = type.to_sym if type
         if native = native_database_types[type]
           column_type_sql = (native.is_a?(Hash) ? native[:name] : native).dup

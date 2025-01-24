@@ -550,6 +550,7 @@ module ActiveRecord
       private
         # Lowest level way to execute a query. Doesn't check for illegal writes, doesn't annotate queries, yields a native result object.
         def raw_execute(sql, name = nil, binds = [], prepare: false, async: false, allow_retry: false, materialize_transactions: true, batch: false)
+          # p "raw_execute: #{sql}"
           type_casted_binds = type_casted_binds(binds)
           log(sql, name, binds, type_casted_binds, async: async) do |notification_payload|
             with_raw_connection(allow_retry: allow_retry, materialize_transactions: materialize_transactions) do |conn|

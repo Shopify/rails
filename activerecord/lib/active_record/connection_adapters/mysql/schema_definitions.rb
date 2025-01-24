@@ -45,7 +45,7 @@ module ActiveRecord
 
         define_column_methods :blob, :tinyblob, :mediumblob, :longblob,
           :tinytext, :mediumtext, :longtext, :unsigned_integer, :unsigned_bigint,
-          :unsigned_float, :unsigned_decimal
+          :unsigned_float, :unsigned_decimal, :enum
 
         deprecate :unsigned_float, :unsigned_decimal, deprecator: ActiveRecord.deprecator
       end
@@ -73,6 +73,8 @@ module ActiveRecord
           when /\Aunsigned_(?<type>.+)\z/
             type = $~[:type].to_sym
             options[:unsigned] = true
+          when :enum
+            type = "enum(#{options[:values].map{ |v| "'#{v}'" }.join(",")})"
           end
 
           super
@@ -80,7 +82,7 @@ module ActiveRecord
 
         private
           def valid_column_definition_options
-            super + [:auto_increment, :charset, :as, :size, :unsigned, :first, :after, :type, :stored]
+            super + [:auto_increment, :charset, :as, :size, :unsigned, :first, :after, :type, :stored, :values]
           end
 
           def aliased_types(name, fallback)
