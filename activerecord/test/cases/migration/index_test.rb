@@ -321,18 +321,18 @@ module ActiveRecord
         assert_not connection.index_exists?("testings", "last_name", nulls_not_distinct: true)
       end
 
-      if ActiveRecord::Base.lease_connection.supports_index_visibility?
+      if ActiveRecord::Base.lease_connection.supports_disabling_use_of_index_for_queries?
         def test_index_visibility_through_add_index
-          connection.add_index(:testings, :foo, visible: false)
+          connection.add_index(:testings, :foo, enabled: false)
 
-          assert connection.index_exists?(:testings, :foo, visible: false)
+          assert connection.index_exists?(:testings, :foo, enabled: false)
         end
 
-        def test_index_visibility_through_alter_index
+        def test_index_disabling_through_disable_index
           connection.add_index(:testings, :foo)
-          connection.alter_index(:testings, "index_testings_on_foo", visible: false)
+          connection.disable_index(:testings, "index_testings_on_foo")
 
-          assert connection.index_exists?(:testings, :foo, visible: false)
+          assert connection.index_exists?(:testings, :foo, enabled: false)
         end
       end
 
