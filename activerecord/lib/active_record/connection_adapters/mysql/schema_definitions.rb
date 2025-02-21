@@ -52,17 +52,11 @@ module ActiveRecord
 
       # = Active Record MySQL Adapter \Index Definition
       class IndexDefinition < ActiveRecord::ConnectionAdapters::IndexDefinition
-        attr_reader :enabled
+        attr_accessor :enabled
 
         def initialize(*args, **kwargs)
           @enabled = kwargs.key?(:enabled) ? kwargs.delete(:enabled) : true
           super
-        end
-
-        def enabled=(value)
-          return if value.nil?
-
-          @enabled = value
         end
 
         def defined_for?(columns = nil, name: nil, unique: nil, valid: nil, include: nil, nulls_not_distinct: nil, enabled: nil, **options)

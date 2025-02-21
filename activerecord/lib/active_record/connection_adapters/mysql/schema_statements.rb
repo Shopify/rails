@@ -85,7 +85,7 @@ module ActiveRecord
 
         def add_index_options(table_name, column_name, name: nil, if_not_exists: false, internal: false, **options) # :nodoc:
           index, algorithm, if_not_exists = super
-          index.enabled = options[:enabled]
+          index.enabled = options[:enabled] unless options[:enabled].nil?
           [index, algorithm, if_not_exists]
         end
 
@@ -251,7 +251,7 @@ module ActiveRecord
 
           def valid_index_options
             index_options = super
-            index_options << :enabled if supports_enabling_indexes?
+            index_options << :enabled if supports_disabling_indexes?
             index_options
           end
 
