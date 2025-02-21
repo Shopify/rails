@@ -558,7 +558,6 @@ module ActiveRecord
       def supports_disabling_indexes?
         false
       end
-      alias_method :supports_enabling_indexes?, :supports_disabling_indexes?
 
       def return_value_after_insert?(column) # :nodoc:
         column.auto_populated?

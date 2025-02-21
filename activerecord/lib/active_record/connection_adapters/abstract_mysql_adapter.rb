@@ -187,7 +187,6 @@ module ActiveRecord
           database_version >= "8.0.0"
         end
       end
-      alias_method :supports_enabling_indexes?, :supports_disabling_indexes?
 
       def get_advisory_lock(lock_name, timeout = 0) # :nodoc:
         query_value("SELECT GET_LOCK(#{quote(lock_name.to_s)}, #{timeout})") == 1
@@ -469,7 +468,7 @@ module ActiveRecord
       end
 
       def enable_index(table_name, index_name) # :nodoc:
-        raise NotImplementedError unless supports_enabling_indexes?
+        raise NotImplementedError unless supports_disabling_indexes?
 
         query = <<~SQL
           ALTER TABLE #{quote_table_name(table_name)} ALTER INDEX #{index_name} #{mariadb? ? "NOT IGNORED" : "VISIBLE"}
