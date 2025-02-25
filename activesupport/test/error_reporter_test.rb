@@ -364,52 +364,39 @@ class ErrorReporterTest < ActiveSupport::TestCase
     assert_equal expected, log.string.lines.first.chomp
   end
 
-  test "report includes metadata from metadata provider" do
-    metadata_provider = -> (_) { { foo: :bar } }
-    @reporter.with(metadata_providers: [metadata_provider]) do
-      error = ArgumentError.new("Oops")
-
-      @reporter.report(error)
-
-      assert_equal [[error, true, :warning, "application", { metadata: { foo: :bar } }]], @subscriber.events
-    end
-  end
-
-  test "metadata provider does not overwrite explicitly passed metadata" do
-    metadata_provider = -> (_) { { foo: :bar } }
-    @reporter.with(metadata_providers: [metadata_provider]) do
-      error = ArgumentError.new("Oops")
-
-      @reporter.report(error, context: { metadata: :baz })
-
-      assert_equal [[error, true, :warning, "application", { metadata: :baz }]], @subscriber.events
-    end
-  end
-
-  class MetadataProvider
-    def call(_)
-      { bar: :baz }
-    end
-  end
-
-  test "can have multiple metadata providers" do
-    reporter = ActiveSupport::ErrorReporter.new
-    reporter.subscribe(@subscriber)
-    reporter.add_metadata_provider(-> (_) { { foo: :bar } })
-    reporter.add_metadata_provider(MetadataProvider.new)
+  test "error context middleware can mutate context hash" do
+    middleware = -> (_, context) { context[:foo] = :bar }
 
     error = ArgumentError.new("Oops")
-    reporter.report(error)
 
-    assert_equal [[error, true, :warning, "application", { metadata: { foo: :bar, bar: :baz } }]], @subscriber.events
+    @reporter.context_middlewares.use(middleware)
+    @reporter.report(error)
+
+    assert_equal [[error, true, :warning, "application", { foo: :bar }]], @subscriber.events
   end
 
-  test "last provider to write a key wins" do
-    @reporter.with(metadata_providers: [-> (_) { { foo: :bar } }, -> (_) { { foo: :baz } }]) do
-      error = ArgumentError.new("Oops")
-      @reporter.report(error)
-
-      assert_equal [[error, true, :warning, "application", { metadata: { foo: :baz } }]], @subscriber.events
+  class MyErrorContextMiddleware
+    def call(_, context)
+      context[:bar] = :baz
     end
+  end
+
+  test "can have multiple error context middlewares" do
+    @reporter.context_middlewares.use(-> (_, context) { context[:foo] = :bar })
+    @reporter.context_middlewares.use(MyErrorContextMiddleware.new)
+
+    error = ArgumentError.new("Oops")
+    @reporter.report(error)
+
+    assert_equal [[error, true, :warning, "application", { foo: :bar, bar: :baz }]], @subscriber.events
+  end
+
+  test "last error context middleware to update a key wins" do
+    @reporter.context_middlewares.use(-> (_, context) { context[:foo] = :bar })
+    @reporter.context_middlewares.use(-> (_, context) { context[:foo] = :baz })
+    error = ArgumentError.new("Oops")
+    @reporter.report(error)
+
+    assert_equal [[error, true, :warning, "application", { foo: :baz }]], @subscriber.events
   end
 end

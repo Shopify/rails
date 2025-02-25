@@ -1,8 +1,8 @@
-*   Introduce ActiveSupport::ErrorReport#metadata_providers
+*   Introduce ActiveSupport::ErrorReporter#context_middlewares
 
-    When reporting an error, the metadata provider will be called with the reported error
-    and the returned metadata hash will be included in the `context` that is sent to each of
-    the subscribers.
+    When reporting an error, the error context middleware will be called with the reported error
+    and base execution context. The stack may mutate the context hash. The mutated context will
+    then be passed to error subscribers.
 
     *Andrew Novoselac*, *Sam Schmidt*
 
