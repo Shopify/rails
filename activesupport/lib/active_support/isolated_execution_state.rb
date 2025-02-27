@@ -50,6 +50,11 @@ module ActiveSupport
         state.delete(key)
       end
 
+      def dup
+        new_state = state.transform_values(&:deep_dup)
+        self.state = new_state
+      end
+
       def clear
         state.clear
       end
@@ -66,6 +71,15 @@ module ActiveSupport
       end
 
       private
+        def state=(new_state)
+          case isolation_level
+          when :fiber_storage
+            scope[:active_support_execution_state] = new_state
+          else
+            context.active_support_execution_state = new_state
+          end
+        end
+
         def state
           case isolation_level
           when :fiber_storage

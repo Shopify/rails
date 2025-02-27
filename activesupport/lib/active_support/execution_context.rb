@@ -10,7 +10,7 @@ module ActiveSupport
 
       # Updates the execution context. If a block is given, it resets the provided keys to their
       # previous value once the block exits.
-      def set(**options)
+      def set(copy: false, **options)
         options.symbolize_keys!
         keys = options.keys
 
@@ -18,14 +18,18 @@ module ActiveSupport
 
         previous_context = keys.zip(store.values_at(*keys)).to_h
 
-        store.merge!(options)
+        if copy
+          dup_execution_state[:active_support_execution_context] = store.merge(options)
+        else
+          store.merge!(options)
+        end
         @after_change_callbacks.each(&:call)
 
         if block_given?
           begin
             yield
           ensure
-            store.merge!(previous_context)
+            self.store.merge!(previous_context)
             @after_change_callbacks.each(&:call)
           end
         end
@@ -45,6 +49,10 @@ module ActiveSupport
       end
 
       private
+        def dup_execution_state
+          IsolatedExecutionState.dup
+        end
+
         def store
           IsolatedExecutionState[:active_support_execution_context] ||= {}
         end
