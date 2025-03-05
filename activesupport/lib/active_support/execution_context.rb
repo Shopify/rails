@@ -18,21 +18,24 @@ module ActiveSupport
 
         previous_context = keys.zip(store.values_at(*keys)).to_h
 
-        store.merge!(options)
-        @after_change_callbacks.each(&:call)
+        current_store = store.merge(options)
+        IsolatedExecutionState[:active_support_execution_context] = current_store
 
         if block_given?
           begin
             yield
           ensure
-            store.merge!(previous_context)
+            current_store = self.store.merge(previous_context)
+            IsolatedExecutionState[:active_support_execution_context] = current_store
+
             @after_change_callbacks.each(&:call)
           end
         end
       end
 
       def []=(key, value)
-        store[key.to_sym] = value
+        current_store = store.merge(key.to_sym => value)
+        IsolatedExecutionState[:active_support_execution_context] = current_store
         @after_change_callbacks.each(&:call)
       end
 

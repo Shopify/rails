@@ -33,9 +33,49 @@ class ExecutionContextTest < ActiveSupport::TestCase
     end
   end
 
+  test "#set when underlying isolation level is :fiber_storage provides inheritable context" do
+    previous_isolation_level = ActiveSupport::IsolatedExecutionState.isolation_level
+    ActiveSupport::IsolatedExecutionState.isolation_level = :fiber_storage
+
+    ActiveSupport::ExecutionContext.set(foo: "bar") do
+      assert_equal "bar", ActiveSupport::ExecutionContext.to_h[:foo]
+
+      Fiber.new do
+        assert_equal "bar", ActiveSupport::ExecutionContext.to_h[:foo]
+
+        ActiveSupport::ExecutionContext.set(foo: "baz")
+        assert_equal "baz", ActiveSupport::ExecutionContext.to_h[:foo]
+      end.resume
+
+      assert_equal "bar", ActiveSupport::ExecutionContext.to_h[:foo]
+    end
+  ensure
+    ActiveSupport::IsolatedExecutionState.isolation_level = previous_isolation_level
+  end
+
   test "#[]= coerce keys to symbol" do
     ActiveSupport::ExecutionContext["symbol_key"] = "symbolized"
     assert_equal "symbolized", ActiveSupport::ExecutionContext.to_h[:symbol_key]
+  end
+
+  test "#[]= underlying isolation level is :fiber_storage provides inheritable context" do
+    previous_isolation_level = ActiveSupport::IsolatedExecutionState.isolation_level
+    ActiveSupport::IsolatedExecutionState.isolation_level = :fiber_storage
+
+    ActiveSupport::ExecutionContext[:foo] = "bar"
+    assert_equal "bar", ActiveSupport::ExecutionContext.to_h[:foo]
+
+    Fiber.new do
+      assert_equal "bar", ActiveSupport::ExecutionContext.to_h[:foo]
+
+      ActiveSupport::ExecutionContext[:foo] = "baz"
+      assert_equal "baz", ActiveSupport::ExecutionContext.to_h[:foo]
+    end.resume
+
+    assert_equal "bar", ActiveSupport::ExecutionContext.to_h[:foo]
+  ensure
+    ActiveSupport::IsolatedExecutionState.isolation_level = previous_isolation_level
+
   end
 
   test "#to_h returns a copy of the context" do
