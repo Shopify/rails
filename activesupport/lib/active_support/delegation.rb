@@ -96,7 +96,9 @@ module ActiveSupport
                   "..."
                 else
                   defn = parameters.filter_map { |type, arg| arg if type == :req }
-                  defn << "&"
+                  if parameters.any? { |param_type, _| param_type == :block }
+                    defn << "&"
+                  end
                   defn.join(", ")
                 end
               else
