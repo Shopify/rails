@@ -494,6 +494,44 @@ module ActiveRecord
       end
     end
 
+    class FakeTransaction < Transaction
+      def initialize(connection, parent_transaction, **options)
+        super(connection, **options)
+
+        parent_transaction.state.add_child(@state)
+
+        if isolation_level
+          raise ActiveRecord::TransactionIsolationError, "cannot set transaction isolation in a nested transaction"
+        end
+      end
+
+      def materialize!
+        super
+      end
+
+      def restart
+        return unless materialized?
+
+        @instrumenter.finish(:restart)
+        @instrumenter.start
+
+        @parent.restart
+      end
+
+      def rollback
+        @state.rollback!
+        @instrumenter.finish(:rollback) if materialized?
+      end
+
+      def commit
+        @state.commit!
+        @instrumenter.finish(:commit) if materialized?
+      end
+
+      def full_rollback?; false; end
+    end
+
+
     class TransactionManager # :nodoc:
       def initialize(connection)
         @stack = []
@@ -516,6 +554,14 @@ module ActiveRecord
               )
             elsif current_transaction.restartable?
               RestartParentTransaction.new(
+                @connection,
+                current_transaction,
+                isolation: isolation,
+                joinable: joinable,
+                run_commit_callbacks: run_commit_callbacks
+              )
+             elsif !@connection.supports_savepoints?
+              FakeTransaction.new(
                 @connection,
                 current_transaction,
                 isolation: isolation,
