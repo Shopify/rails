@@ -175,14 +175,13 @@ module ActiveRecord
               return ActiveRecord::Result.empty
             end
 
+            types = {}
             fields = result.fields
-            types = Array.new(fields.size)
-            fields.size.times do |index|
-              ftype = result.ftype(index)
-              fmod  = result.fmod(index)
-              types[index] = get_oid_type(ftype, fmod, fields[index])
+            fields.each_with_index do |fname, i|
+              ftype = result.ftype i
+              fmod  = result.fmod i
+              types[fname] = types[i] = get_oid_type(ftype, fmod, fname)
             end
-
             ar_result = ActiveRecord::Result.new(fields, result.values, types.freeze)
             result.clear
             ar_result
