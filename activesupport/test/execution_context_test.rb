@@ -33,9 +33,9 @@ class ExecutionContextTest < ActiveSupport::TestCase
     end
   end
 
-  test "#set when underlying isolation level is :fiber_storage provides inheritable context" do
-    previous_isolation_level = ActiveSupport::IsolatedExecutionState.isolation_level
-    ActiveSupport::IsolatedExecutionState.isolation_level = :fiber_storage
+  test "#set when underlying storage mechanism is :fiber_storage provides inheritable context" do
+    previous_storage = ActiveSupport::IsolatedExecutionState.storage
+    ActiveSupport::IsolatedExecutionState.storage = :fiber_storage
 
     ActiveSupport::ExecutionContext.set(foo: "bar") do
       assert_equal "bar", ActiveSupport::ExecutionContext.to_h[:foo]
@@ -50,7 +50,7 @@ class ExecutionContextTest < ActiveSupport::TestCase
       assert_equal "bar", ActiveSupport::ExecutionContext.to_h[:foo]
     end
   ensure
-    ActiveSupport::IsolatedExecutionState.isolation_level = previous_isolation_level
+    ActiveSupport::IsolatedExecutionState.storage = previous_storage
   end
 
   test "#[]= coerce keys to symbol" do
@@ -58,9 +58,9 @@ class ExecutionContextTest < ActiveSupport::TestCase
     assert_equal "symbolized", ActiveSupport::ExecutionContext.to_h[:symbol_key]
   end
 
-  test "#[]= underlying isolation level is :fiber_storage provides inheritable context" do
-    previous_isolation_level = ActiveSupport::IsolatedExecutionState.isolation_level
-    ActiveSupport::IsolatedExecutionState.isolation_level = :fiber_storage
+  test "#[]= underlying underlying storage mechanism is :fiber_storage provides inheritable context" do
+    previous_storage = ActiveSupport::IsolatedExecutionState.storage
+    ActiveSupport::IsolatedExecutionState.storage = :fiber_storage
 
     ActiveSupport::ExecutionContext[:foo] = "bar"
     assert_equal "bar", ActiveSupport::ExecutionContext.to_h[:foo]
@@ -74,8 +74,7 @@ class ExecutionContextTest < ActiveSupport::TestCase
 
     assert_equal "bar", ActiveSupport::ExecutionContext.to_h[:foo]
   ensure
-    ActiveSupport::IsolatedExecutionState.isolation_level = previous_isolation_level
-
+    ActiveSupport::IsolatedExecutionState.storage = previous_storage
   end
 
   test "#to_h returns a copy of the context" do

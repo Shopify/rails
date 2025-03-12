@@ -3,18 +3,19 @@
 module ActiveSupport
   module IsolatedExecutionState # :nodoc:
     @isolation_level = nil
+    @storage = :accessor
 
     Thread.attr_accessor :active_support_execution_state
     Fiber.attr_accessor :active_support_execution_state
 
     class << self
-      attr_reader :isolation_level, :scope
+      attr_reader :isolation_level, :scope, :storage
 
       def isolation_level=(level)
         return if level == @isolation_level
 
-        unless %i(thread fiber fiber_storage).include?(level)
-          raise ArgumentError, "isolation_level must be `:thread`, `:fiber` or `:fiber_storage`, got: `#{level.inspect}`"
+        unless %i(thread fiber).include?(level)
+          raise ArgumentError, "isolation_level must be `:thread` or `:fiber`, got: `#{level.inspect}`"
         end
 
         clear if @isolation_level
@@ -22,10 +23,22 @@ module ActiveSupport
         @scope =
           case level
           when :thread; Thread
-          when :fiber, :fiber_storage; Fiber
+          when :fiber; Fiber
           end
 
         @isolation_level = level
+      end
+
+      def storage=(mechanism)
+        return if mechanism == @storage
+
+        unless %i(accessor fiber_storage).include?(mechanism)
+          raise ArgumentError, "storage must be `:accessor` or `:fiber_storage`, got: `#{mechanism.inspect}`"
+        end
+
+        clear if @storage
+
+        @storage = mechanism
       end
 
       def unique_id
@@ -37,10 +50,10 @@ module ActiveSupport
       end
 
       def []=(key, value)
-        if isolation_level == :fiber_storage
+        if storage == :fiber_storage
           new_state = state.dup
           new_state[key] = value
-          scope[:active_support_execution_state] = new_state
+          Fiber[:active_support_execution_state] = new_state
         else
           state[key] = value
         end
@@ -71,15 +84,16 @@ module ActiveSupport
 
       private
         def state
-          case isolation_level
+          case storage
           when :fiber_storage
-            scope[:active_support_execution_state] ||= {}
-          else
+            Fiber[:active_support_execution_state] ||= {}
+          else # :accessor
             context.active_support_execution_state ||= {}
           end
         end
     end
 
     self.isolation_level = :thread
+    self.storage = :accessor
   end
 end
