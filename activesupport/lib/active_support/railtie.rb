@@ -18,6 +18,10 @@ module ActiveSupport
         if level = app.config.active_support.delete(:isolation_level)
           ActiveSupport::IsolatedExecutionState.isolation_level = level
         end
+
+        if storage = app.config.active_support.delete(:execution_state_storage)
+          ActiveSupport::IsolatedExecutionState.storage = storage
+        end
       end
     end
 
