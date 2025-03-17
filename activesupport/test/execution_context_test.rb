@@ -44,4 +44,50 @@ class ExecutionContextTest < ActiveSupport::TestCase
     context[:foo] = 43
     assert_equal 42, ActiveSupport::ExecutionContext.to_h[:foo]
   end
+
+  test "#set with :fiber_storage based IsolatedExecutionState" do
+    execution_context = ActiveSupport::ExecutionContext.new(ActiveSupport::FiberStorageIsolatedExecutionState.new)
+
+    execution_context.set(foo: "bar") do
+      assert_equal "bar", execution_context.to_h[:foo]
+
+      Fiber.new do
+        assert_equal "bar", execution_context.to_h[:foo]
+
+        execution_context.set(foo: "baz")
+        assert_equal "baz", execution_context.to_h[:foo]
+      end.resume
+
+      assert_equal "bar", execution_context.to_h[:foo]
+    end
+  end
+
+  test "#[]= with :fiber_storage based IsolatedExecutionState" do
+    execution_context = ActiveSupport::ExecutionContext.new(ActiveSupport::FiberStorageIsolatedExecutionState.new)
+
+    execution_context[:foo] = "bar"
+    assert_equal "bar", execution_context.to_h[:foo]
+
+    Fiber.new do
+      assert_equal "bar", execution_context.to_h[:foo]
+
+      execution_context.set(foo: "baz")
+      assert_equal "baz", execution_context.to_h[:foo]
+    end.resume
+
+    assert_equal "bar", execution_context.to_h[:foo]
+  end
+
+  test "#clear with :fiber_storage based IsolatedExecutionState" do
+    execution_context = ActiveSupport::ExecutionContext.new(ActiveSupport::FiberStorageIsolatedExecutionState.new)
+
+    execution_context[:foo] = "bar"
+
+    Fiber.new do
+      execution_context.clear
+      assert_empty execution_context.to_h
+    end.resume
+
+    assert_equal "bar", execution_context.to_h[:foo]
+  end
 end
