@@ -10,8 +10,8 @@ module ActiveSupport
       def isolation_level=(level)
         return if level == @isolation_level
 
-        unless %i(thread fiber).include?(level)
-          raise ArgumentError, "isolation_level must be `:thread` or `:fiber`, got: `#{level.inspect}`"
+        unless %i(thread fiber fiber_storage).include?(level)
+           raise ArgumentError, "isolation_level must be `:thread`, `:fiber` or `:fiber_storage`, got: `#{level.inspect}`"
         end
 
         clear if @instance
@@ -23,6 +23,7 @@ module ActiveSupport
         @instance ||= case isolation_level
         when :thread; ThreadIsolatedExecutionState.new
         when :fiber; FiberIsolatedExecutionState.new
+        when :fiber_storage; FiberStorageIsolatedExecutionState.new
         end
       end
 
@@ -85,6 +86,50 @@ module ActiveSupport
 
     def isolation_level
       :fiber
+    end
+  end
+
+  class FiberStorageIsolatedExecutionState < IsolatedExecutionState
+    def scope
+      Fiber
+    end
+
+    def isolation_level
+      :fiber_storage
+    end
+
+    def [](key)
+      if state = Fiber[:active_support_execution_state]
+        state[key]
+      end
+    end
+
+    def key?(key)
+      Fiber[:active_support_execution_state]&.key?(key)
+    end
+
+    def []=(key, value)
+      new_state = state.dup
+      new_state[key] = value
+      Fiber[:active_support_execution_state] = new_state
+    end
+
+    def delete(key)
+      new_state = state.dup
+      new_state.delete(key)
+      Fiber[:active_support_execution_state] = new_state
+    end
+
+    def clear
+      new_state = state.dup
+      new_state.clear
+      Fiber[:active_support_execution_state] = new_state
+    end
+
+    private
+
+    def state
+      Fiber[:active_support_execution_state] ||= {}
     end
   end
 end
