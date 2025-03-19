@@ -200,7 +200,7 @@ module ActiveSupport
     #   Rails.error.set_context(section: "checkout", user_id: @user.id)
     #
     def set_context(...)
-      ActiveSupport::ExecutionContext.set(...)
+      execution_context.set(...)
     end
 
     # Add a middleware to modify the error context before it is sent to subscribers.
@@ -274,6 +274,12 @@ module ActiveSupport
       nil
     end
 
+    def clear_context
+      execution_context.clear
+    end
+
+    attr_writer :execution_context
+
     private
       def ensure_backtrace(error)
         return if error.frozen? # re-raising won't add a backtrace
@@ -295,6 +301,10 @@ module ActiveSupport
         end
 
         error.backtrace.shift(count)
+      end
+
+      def execution_context
+        @execution_context ||= ExecutionContext # Default to singleton
       end
 
       class ErrorContextMiddlewareStack # :nodoc:

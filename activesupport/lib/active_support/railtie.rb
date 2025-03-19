@@ -21,6 +21,19 @@ module ActiveSupport
       end
     end
 
+    initializer "active_support.error_reporter_isolation_level" do |app|
+      config.after_initialize do
+        if level = app.config.active_support.error_reporter_isolation_level
+          isolated_execution_state = case level
+          when :thread; ThreadIsolatedExecutionState.new
+          when :fiber; FiberIsolatedExecutionState.new
+          when :fiber_storage; FiberStorageIsolatedExecutionState.new
+          end
+          ActiveSupport.error_reporter.execution_context = ActiveSupport::ExecutionContext.new(isolated_execution_state)
+        end
+      end
+    end
+
     initializer "active_support.raise_on_invalid_cache_expiration_time" do |app|
       config.after_initialize do
         if app.config.active_support.raise_on_invalid_cache_expiration_time
@@ -42,6 +55,12 @@ module ActiveSupport
       app.reloader.before_class_unload { ActiveSupport::ExecutionContext.clear }
       app.executor.to_run              { ActiveSupport::ExecutionContext.clear }
       app.executor.to_complete         { ActiveSupport::ExecutionContext.clear }
+    end
+
+    initializer "active_support.reset_error_reporter_context" do |app|
+      app.reloader.before_class_unload { ActiveSupport.error_reporter.clear_context }
+      app.executor.to_run              { ActiveSupport.error_reporter.clear_context }
+      app.executor.to_complete         { ActiveSupport.error_reporter.clear_context }
     end
 
     initializer "active_support.reset_all_current_attributes_instances" do |app|
