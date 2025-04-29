@@ -133,6 +133,7 @@ module ActiveRecord
 
       NATIVE_DATABASE_TYPES = {
         primary_key: "bigserial primary key",
+        composite_primary_key: "bigserial",
         string:      { name: "character varying" },
         text:        { name: "text" },
         integer:     { name: "integer", limit: 4 },

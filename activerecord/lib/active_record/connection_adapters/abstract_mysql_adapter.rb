@@ -30,6 +30,7 @@ module ActiveRecord
 
       NATIVE_DATABASE_TYPES = {
         primary_key: "bigint auto_increment PRIMARY KEY",
+        composite_primary_key: "bigint auto_increment",
         string:      { name: "varchar", limit: 255 },
         text:        { name: "text" },
         integer:     { name: "int", limit: 4 },

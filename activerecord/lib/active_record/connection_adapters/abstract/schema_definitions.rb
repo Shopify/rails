@@ -406,6 +406,7 @@ module ActiveRecord
 
           if pk.is_a?(Array)
             primary_keys(pk)
+            column("id", :composite_primary_key, **options) if pk.include?("id")
           else
             primary_key(pk, id, **options)
           end

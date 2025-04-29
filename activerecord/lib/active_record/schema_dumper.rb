@@ -194,7 +194,12 @@ module ActiveRecord
           # then dump all non-primary key columns
           columns.sort_by(&:name).each do |column|
             raise StandardError, "Unknown type '#{column.sql_type}' for column '#{column.name}'" unless @connection.valid_type?(column.type)
-            next if column.name == pk
+            case pk
+            when String
+              next if column.name == pk
+            when Array
+              next if pk.include?(column.name) && column.name == "id"
+            end
 
             type, colspec = column_spec(column)
             if type.is_a?(Symbol)
