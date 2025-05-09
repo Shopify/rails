@@ -1,3 +1,11 @@
+*   Extract MiddlewareStack from ActionDispatch for reuse in ErrorReporter.
+
+    ErrorReporter context middleware had its own stack class. The ActionDispatch MiddlewareStack
+    doesn't contain anything specific to ActionDispatch, so ErrorReporter can reuse it and benefit
+    from the existing insert/swap logic.
+
+    *Sam Schmidt* *Juniper Alanna Berry*
+
 *   Add public API for `before_fork_hook` in parallel testing.
 
     Introduces a public API for calling the before fork hooks implemented by parallel testing.

@@ -1,3 +1,7 @@
+*   Extract MiddlewareStack to ActiveSupport for reuse in ActiveSupport::ErrorReporter
+
+    *Sam Schmidt* *Juniper Alanna Berry*
+
 *   Add assert_in_body/assert_not_in_body as the simplest way to check if a piece of text is in the response body.
 
     *DHH*
