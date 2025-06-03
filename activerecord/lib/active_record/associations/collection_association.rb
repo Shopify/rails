@@ -32,6 +32,7 @@ module ActiveRecord
 
       # Implements the reader method, e.g. foo.items for Foo.has_many :items
       def reader
+        require "debug"; debugger
         ensure_klass_exists!
 
         if stale_target?
@@ -92,6 +93,8 @@ module ActiveRecord
       end
 
       def find(*args)
+        require "debug"; debugger
+
         if options[:inverse_of] && loaded?
           args_flatten = args.flatten
           model = scope.model
@@ -125,6 +128,8 @@ module ActiveRecord
       # Add +records+ to this association. Since +<<+ flattens its argument list
       # and inserts each record, +push+ and +concat+ behave identically.
       def concat(*records)
+        require "debug"; debugger
+
         records = records.flatten
         if owner.new_record?
           skip_strict_loading { load_target }
@@ -240,6 +245,8 @@ module ActiveRecord
       # Replace this collection with +other_array+. This will perform a diff
       # and delete/add only records that have changed.
       def replace(other_array)
+        require "debug"; debugger
+
         other_array.each { |val| raise_on_type_mismatch!(val) }
         original_target = skip_strict_loading { load_target }.dup
 
@@ -375,6 +382,7 @@ module ActiveRecord
 
         # Do the relevant stuff to insert the given record into the association collection.
         def insert_record(record, validate = true, raise = false, &block)
+          puts "insert_record: #{record.inspect}"
           if raise
             record.save!(validate: validate, &block)
           else
