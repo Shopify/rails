@@ -445,7 +445,21 @@ module ActiveRecord
 
         if operation == "count"
           column_name ||= select_for_count
-          if column_name == :all
+          if distinct_on_values.any?
+            distinct_on_column_names = distinct_on_values
+            # this doesn't work since we should apply one distinct on top of another and not put it in the same grouping
+            if distinct_select?(column_name)
+              puts "DISTINCT!!! #{column_name}"
+              distinct_on_column_names << /DISTINCT\s*\(([^)]+)\)/i.match(column_name)[1]
+            elsif column_name != :all
+              distinct_on_column_names << column_name
+            end
+            column_name = Arel::Nodes::Grouping.new(
+              distinct_on_column_names.map { |col| arel_column(col) }
+            )
+            distinct = true
+            self.distinct_on_values = []
+          elsif column_name == :all
             if !distinct
               distinct = distinct_select?(select_for_count) if group_values.empty?
             elsif group_values.any? || select_values.empty? && order_values.empty?
@@ -671,6 +685,7 @@ module ActiveRecord
         # multiple columns, so we need to use subquery for this.
         operation == "count" &&
           (((column_name == :all || select_values.many?) && distinct) || has_limit_or_offset?)
+        # (((column_name == :all || select_values.many?) && distinct) || has_limit_or_offset? || distinct_on_values.any?)
       end
 
       def build_count_subquery(relation, column_name, distinct)

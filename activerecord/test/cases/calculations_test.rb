@@ -689,6 +689,17 @@ class CalculationsTest < ActiveRecord::TestCase
     assert_equal 6, Account.count(:available_credit)
   end
 
+  if current_adapter?(:PostgreSQLAdapter)
+    def test_count_with_distinct_on
+      assert_equal 4, Account.distinct_on(:credit_limit).count
+    end
+
+    # this doesn't work yet
+    def test_count_with_distinct_on_and_count_column_name
+      assert_equal 4, Account.distinct_on(:credit_limit).count(:firm_id)
+    end
+  end
+
   def test_count_with_column_and_options_parameter
     assert_equal 2, Account.where("credit_limit = 50 AND firm_id IS NOT NULL").count(:firm_id)
   end
