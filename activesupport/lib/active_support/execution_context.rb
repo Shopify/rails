@@ -19,8 +19,8 @@ module ActiveSupport
       end
 
       def pop
-        @current_attributes_instances = @stack.pop || {}
-        @store = @stack.pop || {}
+        @current_attributes_instances = @stack.pop
+        @store = @stack.pop
         self
       end
     end
@@ -94,7 +94,7 @@ module ActiveSupport
       end
 
       def clear
-        IsolatedExecutionState[:active_support_execution_context] = nil
+        IsolatedExecutionState[:active_support_execution_context] = nil unless @nestable
       end
 
       def current_attributes_instances
