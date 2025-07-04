@@ -47,6 +47,7 @@ module Rails
           end
 
           middleware.use ::ActionDispatch::Executor, app.executor
+          middleware.use ::ActionDispatch::ClearEventReporterContext
 
           middleware.use ::ActionDispatch::ServerTiming if config.server_timing
           middleware.use ::Rack::Runtime
