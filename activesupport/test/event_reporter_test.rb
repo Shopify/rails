@@ -628,6 +628,19 @@ module ActiveSupport
       assert_equal 200, parsed["tags"]["HttpRequestTag"]["http_status"]
     end
 
+    test "JSON encoder filters parameters" do
+      previous_filter_parameters = ActiveSupport.filter_parameters
+      ActiveSupport.filter_parameters = [:zomg]
+
+      @event[:payload][:zomg] = "secret"
+      json_string = EventReporter::Encoders::JSON.encode(@event)
+      parsed = ::JSON.parse(json_string)
+
+      assert_equal({ "id" => 123, "message" => "hello", "zomg" => "[FILTERED]" }, parsed["payload"])
+    ensure
+      ActiveSupport.filter_parameters = previous_filter_parameters
+    end
+
     test "MessagePack encoder encodes event to MessagePack" do
       begin
         require "msgpack"
@@ -655,6 +668,19 @@ module ActiveSupport
       assert_equal "value", parsed["payload"]["data"]
       assert_equal "GET", parsed["tags"]["HttpRequestTag"]["http_method"]
       assert_equal 200, parsed["tags"]["HttpRequestTag"]["http_status"]
+    end
+
+    test "MessagePack encoder filters parameters" do
+      previous_filter_parameters = ActiveSupport.filter_parameters
+      ActiveSupport.filter_parameters = [:zomg]
+
+      @event[:payload][:zomg] = "secret"
+      msgpack_data = EventReporter::Encoders::MessagePack.encode(@event)
+      parsed = ::MessagePack.unpack(msgpack_data)
+
+      assert_equal({ "id" => 123, "message" => "hello", "zomg" => "[FILTERED]" }, parsed["payload"])
+    ensure
+      ActiveSupport.filter_parameters = previous_filter_parameters
     end
   end
 end

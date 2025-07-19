@@ -74,6 +74,12 @@ module ActiveSupport
       app.executor.to_run              { ActiveSupport.event_reporter.clear_context }
     end
 
+    initializer "active_support.set_filter_parameters" do |app|
+      app.after_initialize do
+        ActiveSupport.filter_parameters += Rails.application.config.filter_parameters
+      end
+    end
+
     initializer "active_support.deprecation_behavior" do |app|
       if app.config.active_support.report_deprecations == false
         app.deprecators.silenced = true

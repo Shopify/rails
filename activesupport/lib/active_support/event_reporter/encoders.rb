@@ -1,6 +1,8 @@
 # typed: true
 # frozen_string_literal: true
 
+require "active_support/parameter_filter"
+
 module ActiveSupport
   class EventReporter
     # = Event Encoders
@@ -26,6 +28,18 @@ module ActiveSupport
         # @return [String] The encoded event data
         def self.encode(event)
           raise NotImplementedError, "Subclasses must implement #encode"
+        end
+
+        private
+
+        def self.transform_event(event)
+          parameter_filter = ActiveSupport::ParameterFilter.new(ActiveSupport.filter_parameters, mask: ActiveSupport::ParameterFilter::FILTERED)
+          event[:payload] = parameter_filter.filter(event[:payload].to_h)
+          event[:tags] = event[:tags].transform_values do |value|
+            value.respond_to?(:to_h) ? value.to_h : value
+          end
+
+          event
         end
       end
 
@@ -64,22 +78,14 @@ module ActiveSupport
 
       class JSON < Base
         def self.encode(event)
-          event[:payload] = event[:payload].to_h
-          event[:tags] = event[:tags].transform_values do |value|
-            value.respond_to?(:to_h) ? value.to_h : value
-          end
-          ::JSON.dump(event)
+          ::JSON.dump(transform_event(event))
         end
       end
 
       class MessagePack < Base
         def self.encode(event)
           require "msgpack"
-          event[:payload] = event[:payload].to_h
-          event[:tags] = event[:tags].transform_values do |value|
-            value.respond_to?(:to_h) ? value.to_h : value
-          end
-          ::MessagePack.pack(event)
+          ::MessagePack.pack(transform_event(event))
         rescue LoadError
           raise LoadError, "msgpack gem is required for MessagePack encoding. Add 'gem \"msgpack\"' to your Gemfile."
         end
