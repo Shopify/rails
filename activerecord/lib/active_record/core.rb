@@ -358,7 +358,6 @@ module ActiveRecord
         @inspection_filter = nil
         @filter_attributes = filter_attributes
 
-        # Sync filter_attributes to filter_parameters
         FilterAttributeHandler.sensitive_attribute_was_declared(self, filter_attributes)
       end
 

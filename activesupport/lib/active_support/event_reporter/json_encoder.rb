@@ -39,11 +39,19 @@ module ActiveSupport
     module JSONEncoder
       class << self
         def encode(event)
-          event[:payload] = event[:payload].to_h
+          unless event[:payload].is_a?(Hash)
+            event[:payload] = parameter_filter.filter(event[:payload].to_h)
+          end
+
           event[:tags] = event[:tags].transform_values do |value|
             value.respond_to?(:to_h) ? value.to_h : value
           end
           ::JSON.generate(event)
+        end
+
+        def parameter_filter # :nodoc:
+          @parameter_filter ||= ActiveSupport::ParameterFilter.new(
+            ActiveSupport.filter_parameters, mask: ActiveSupport::ParameterFilter::FILTERED)
         end
       end
     end
