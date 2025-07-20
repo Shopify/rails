@@ -231,8 +231,8 @@ module ActiveSupport
   #   #    payload: { id: 123 },
   #   #  }
   class EventReporter
-    attr_reader :subscribers
-    attr_accessor :raise_on_error
+    attr_reader :subscribers # :nodoc:
+    attr_reader :raise_on_error # :nodoc:
 
     ENCODERS = {
       json: Encoders::JSON,
@@ -272,6 +272,12 @@ module ActiveSupport
       @raise_on_error = raise_on_error
     end
 
+    # Sets whether to raise an error if a subscriber raises an error during
+    # event emission, or when unexpected arguments are passed to +notify+.
+    def raise_on_error=(value)
+      @raise_on_error = value
+    end
+
     # Registers a new event subscriber. The subscriber must respond to
     #
     #   emit(event: Hash)
@@ -293,8 +299,19 @@ module ActiveSupport
       unless subscriber.respond_to?(:emit)
         raise ArgumentError, "Event subscriber #{subscriber.class.name} must respond to #emit"
       end
-
       @subscribers << { subscriber: subscriber, filter: filter }
+    end
+
+    # Unregister an event subscriber. Accepts either a subscriber or a class.
+    #
+    #   subscriber = MyEventSubscriber.new
+    #   Rails.event.subscribe(subscriber)
+    #
+    #   Rails.event.unsubscribe(subscriber)
+    #   # or
+    #   Rails.event.unsubscribe(MyEventSubscriber)
+    def unsubscribe(subscriber)
+      @subscribers.delete_if { |s| subscriber === s }
     end
 
     # Reports an event to all registered subscribers. An event name and payload can be provided:
