@@ -3,8 +3,9 @@
 
 module ActiveSupport
   module Testing
+    # Provides test helpers for asserting on ActiveSupport::EventReporter events.
     module EventReporterAssertions
-      module EventCollector # :nodoc:
+      module EventCollector # :nodoc: all
         @subscribed = false
         @mutex = Mutex.new
 
@@ -21,6 +22,7 @@ module ActiveSupport
 
           def matches?(name, payload, tags)
             return false unless name == event_data[:name]
+
             if payload && payload.is_a?(Hash)
               return false unless payload.all? do |k, v|
                 if v.is_a?(Regexp)
@@ -30,6 +32,7 @@ module ActiveSupport
                 end
               end
             end
+
             return false unless tags.all? do |k, v|
               if v.is_a?(Regexp)
                 event_data.dig(:tags, k).to_s.match?(v)
@@ -40,6 +43,7 @@ module ActiveSupport
             true
           end
         end
+
         class << self
           def emit(event)
             event_recorders&.each do |events|

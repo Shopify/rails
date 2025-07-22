@@ -87,8 +87,25 @@ module ActiveSupport
   #   #  }
   #
   # The +notify+ API can receive either an event name and a payload hash, or an event object.
-  # If an event object is used, it will be passed through to subscribers as-is, and the name of the
+
+  # ==== Event Objects
+  #
+  # If an event object is passed to the +notify+ API, it will be passed through to subscribers as-is, and the name of the
   # object's class will be used as the event name.
+  #
+  # class UserCreatedEvent
+  #   def initialize(id:, name:)
+  #     @id = id
+  #     @name = name
+  #   end
+  #
+  #   def to_h
+  #     {
+  #       id: @id,
+  #       name: @name
+  #     }
+  #   end
+  # end
   #
   #   Rails.event.notify(UserCreatedEvent.new(id: 123, name: "John Doe"))
   #   # Emits event:
@@ -99,7 +116,8 @@ module ActiveSupport
   #   #    source_location: { filepath: "path/to/file.rb", lineno: 123, label: "UserService#create" }
   #   #  }
   #
-  # These objects should represent schematized events and be serializable.
+  # An event is any Ruby object representing a schematized event. While payload hashes allow arbitrary,
+  # implicitly-structured data, event objects are intended to enforce a particular schema.
   #
   # ==== Default Encoders
   #
@@ -249,7 +267,6 @@ module ActiveSupport
     #   source_location: Hash (The source location of the event, containing the filepath, lineno, and label)
     #
     def subscribe(subscriber)
-      return if @subscribers.include?(subscriber)
       unless subscriber.respond_to?(:emit)
         raise ArgumentError, "Event subscriber #{subscriber.class.name} must respond to #emit"
       end
