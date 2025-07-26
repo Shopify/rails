@@ -238,6 +238,11 @@ module ActiveSupport
       def encoder(format)
         encoders = {
           json: Encoders::JSON,
+        }
+
+        if format.to_s.include?("msgpack") && !defined?(ActiveSupport::EventReporter::Encoders::MessagePack)
+          require "active_support/event_reporter/encoders/message_pack"
+          encoders[:msgpack] = Encoders::MessagePack
           msgpack: Encoders::MessagePack
         }
         encoders.fetch(format.to_sym) do
