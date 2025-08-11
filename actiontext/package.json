@@ -25,14 +25,14 @@
     "@rails/activestorage": ">= 8.1.0-alpha"
   },
   "peerDependencies": {
-    "trix": "^2.0.0"
+    "trix": "^2.1.15"
   },
   "devDependencies": {
     "@rollup/plugin-commonjs": "^19.0.1",
     "@rollup/plugin-node-resolve": "^11.0.1",
     "rollup": "^2.35.1",
     "rollup-plugin-terser": "^7.0.2",
-    "trix": "^2.0.0"
+    "trix": "^2.1.15"
   },
   "scripts": {
     "build": "rollup --config rollup.config.js"

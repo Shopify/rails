@@ -217,6 +217,11 @@
   dependencies:
     "@types/node" "*"
 
+"@types/trusted-types@^2.0.7":
+  version "2.0.7"
+  resolved "https://registry.yarnpkg.com/@types/trusted-types/-/trusted-types-2.0.7.tgz#baccb07a970b91707df3a3e8ba6896c57ead2d11"
+  integrity sha512-ScaPdn1dQczgbl0QFTeTOmVHFULt394XJgOQNoyVhZ6r2vLnMLJfBPd53SB52T/3G36VI1/g2MZaX0cwDuXsfw==
+
 "@ungap/structured-clone@^1.2.0":
   version "1.2.0"
   resolved "https://registry.npmjs.org/@ungap/structured-clone/-/structured-clone-1.2.0.tgz"
@@ -861,6 +866,13 @@ dom-serialize@^2.2.1:
     ent "~2.2.0"
     extend "^3.0.0"
     void-elements "^2.0.0"
+
+dompurify@^3.2.5:
+  version "3.2.6"
+  resolved "https://registry.yarnpkg.com/dompurify/-/dompurify-3.2.6.tgz#ca040a6ad2b88e2a92dc45f38c79f84a714a1cad"
+  integrity sha512-/2GogDQlohXPZe6D6NOgQvXLPSYBqIWMnZ8zzOhn09REE4eyAzb+Hed3jhoM9OkuaJ8P6ZGTTVWQKAi8ieIzfQ==
+  optionalDependencies:
+    "@types/trusted-types" "^2.0.7"
 
 ecc-jsbn@~0.1.1:
   version "0.1.2"
@@ -2818,10 +2830,12 @@ tough-cookie@~2.4.3:
     psl "^1.1.24"
     punycode "^1.4.1"
 
-trix@^2.0.0:
-  version "2.1.7"
-  resolved "https://registry.npmjs.org/trix/-/trix-2.1.7.tgz"
-  integrity sha512-RyFmjLJfxP2nuAKqgVqJ40wk4qoYfDQtyi71q6ozkP+X4EOILe+j5ll5g/suvTyMx7BacGszNWzjnx9Vbj17sw==
+trix@^2.1.15:
+  version "2.1.15"
+  resolved "https://registry.yarnpkg.com/trix/-/trix-2.1.15.tgz#fabad796ea779a8ae96522402fbc214cbfc4015f"
+  integrity sha512-LoaXWczdTUV8+3Box92B9b1iaDVbxD14dYemZRxi3PwY+AuDm97BUJV2aHLBUFPuDABhxp0wzcbf0CxHCVmXiw==
+  dependencies:
+    dompurify "^3.2.5"
 
 tsconfig-paths@^3.14.2:
   version "3.14.2"
