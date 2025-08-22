@@ -71,9 +71,7 @@ module ActiveSupport
         # Middleware class can be inserted as a Rack handler to be local cache for the
         # duration of request.
         def middleware
-          @middleware ||= Middleware.new(
-            "ActiveSupport::Cache::Strategy::LocalCache",
-            local_cache_key)
+          @middleware ||= Middleware.new("ActiveSupport::Cache::Strategy::LocalCache", self)
         end
 
         def clear(options = nil) # :nodoc:
@@ -142,6 +140,10 @@ module ActiveSupport
           results
         end
 
+        def local_cache_key
+          @local_cache_key ||= "#{self.class.name.underscore}_local_cache_#{object_id}".gsub(/[\/-]/, "_").to_sym
+        end
+
         private
           def read_serialized_entry(key, raw: false, **options)
             if cache = local_cache
@@ -208,10 +210,6 @@ module ActiveSupport
             else
               cache.delete_entry(name)
             end
-          end
-
-          def local_cache_key
-            @local_cache_key ||= "#{self.class.name.underscore}_local_cache_#{object_id}".gsub(/[\/-]/, "_").to_sym
           end
 
           def local_cache
