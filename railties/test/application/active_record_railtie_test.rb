@@ -34,7 +34,7 @@ module ApplicationTests
 
     test "filter_attributes include filter_parameters" do
       app_file "config/initializers/parameter_filter.rb", <<~RUBY
-        Rails.application.config.filter_parameters += [ :special_param ]
+        Rails.configuration.filter_parameters += [ :special_param ]
       RUBY
       app "development"
 
@@ -51,7 +51,7 @@ module ApplicationTests
         self.filter_attributes += [:special_attr]
       end
 
-      assert_includes Rails.application.config.filter_parameters, "message.special_attr"
+      assert_includes compiled_filter_parameters, "message.special_attr"
     end
 
     test "filter_paramenters include filter_attributes for AR::Base subclasses" do
@@ -65,7 +65,7 @@ module ApplicationTests
 
       Message.filter_attributes += [ :special_attr ]
 
-      assert_includes Rails.application.config.filter_parameters, "message.special_attr"
+      assert_includes compiled_filter_parameters, "message.special_attr"
     end
 
     test "filter_parameters are inherited from AR parent classes" do
@@ -83,10 +83,16 @@ module ApplicationTests
         self.filter_attributes += [ "digits" ]
       end
 
-      assert_includes Rails.application.config.filter_parameters, "credit_card.expires_at"
-      assert_includes Rails.application.config.filter_parameters, "credit_card.digits"
-      assert_not_includes Rails.application.config.filter_parameters, "application_record.expires_at"
-      assert_not_includes Rails.application.config.filter_parameters, "base.expires_at"
+      assert_includes compiled_filter_parameters, "credit_card.expires_at"
+      assert_includes compiled_filter_parameters, "credit_card.digits"
+      assert_not_includes compiled_filter_parameters, "application_record.expires_at"
+      assert_not_includes compiled_filter_parameters, "base.expires_at"
+    end
+
+    private
+
+    def compiled_filter_parameters
+      @compiled_filter_parameters ||= Rails.application.filters.compile(attributes: true)
     end
   end
 end

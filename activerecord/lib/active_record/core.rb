@@ -102,6 +102,8 @@ module ActiveRecord
 
       class_attribute :shard_selector, instance_accessor: false, default: nil
 
+      class_attribute :filters, instance_writer: false, default: ActiveSupport::FilterCollection.new
+
       ##
       # :singleton-method:
       #
@@ -126,8 +128,6 @@ module ActiveRecord
           end
         end
       end
-
-      self.filter_attributes = []
 
       def self.connection_handler
         ActiveSupport::IsolatedExecutionState[:active_record_connection_handler] || default_connection_handler
@@ -346,19 +346,17 @@ module ActiveRecord
 
       # Returns columns which shouldn't be exposed while calling +#inspect+.
       def filter_attributes
-        if @filter_attributes.nil?
-          superclass.filter_attributes
-        else
-          @filter_attributes
-        end
+        filters.attributes_for(self)
       end
 
       # Specifies columns which shouldn't be exposed while calling +#inspect+.
       def filter_attributes=(filter_attributes)
         @inspection_filter = nil
-        @filter_attributes = filter_attributes
-
-        FilterAttributeHandler.sensitive_attribute_was_declared(self, filter_attributes)
+        filters.define_attributes_for(
+          self,
+          abstract: self == Base || abstract_class?,
+          attributes: filter_attributes,
+        )
       end
 
       def inspection_filter # :nodoc:
@@ -367,7 +365,7 @@ module ActiveRecord
         else
           @inspection_filter ||= begin
             mask = InspectionMask.new(ActiveSupport::ParameterFilter::FILTERED)
-            ActiveSupport::ParameterFilter.new(@filter_attributes, mask: mask)
+            ActiveSupport::ParameterFilter.new(filter_attributes, mask: mask)
           end
         end
       end

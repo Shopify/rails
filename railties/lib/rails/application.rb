@@ -318,7 +318,7 @@ module Rails
     # will be used by middlewares and engines to configure themselves.
     def env_config
       @app_env_config ||= super.merge(
-          "action_dispatch.parameter_filter" => filter_parameters,
+          "action_dispatch.parameter_filter" => precompiled_filter_parameters,
           "action_dispatch.redirect_filter" => config.filter_redirect,
           "action_dispatch.secret_key_base" => secret_key_base,
           "action_dispatch.show_exceptions" => config.action_dispatch.show_exceptions,
@@ -556,6 +556,10 @@ module Rails
       Rails.autoloaders.each(&:eager_load)
     end
 
+    def filters # :nodoc:
+      @filters ||= ActiveSupport::FilterCollection.new(parameters: config.filter_parameters)
+    end
+
   protected
     alias :build_middleware_stack :app
 
@@ -651,13 +655,8 @@ module Rails
         protection.respond_to?(:call) ? protection : proc { protection }
       end
 
-      def filter_parameters
-        if config.precompile_filter_parameters
-          config.filter_parameters.replace(
-            ActiveSupport::ParameterFilter.precompile_filters(config.filter_parameters)
-          )
-        end
-        config.filter_parameters
+      def precompiled_filter_parameters
+        filters.compile(regexes: config.precompile_filter_parameters, attributes: true)
       end
   end
 end

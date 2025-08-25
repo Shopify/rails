@@ -325,14 +325,10 @@ To keep using the current cache store, you can turn off cache versioning entirel
       end
     end
 
-    initializer "active_record.set_filter_attributes" do
+    initializer "active_record.set_filter_parameters" do |app|
       ActiveSupport.on_load(:active_record) do
-        self.filter_attributes += Rails.application.config.filter_parameters
+        self.filters = app.filters
       end
-    end
-
-    initializer "active_record.filter_attributes_as_log_parameters" do |app|
-      ActiveRecord::FilterAttributeHandler.new(app).enable
     end
 
     initializer "active_record.configure_message_verifiers" do |app|
