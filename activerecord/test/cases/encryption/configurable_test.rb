@@ -86,8 +86,10 @@ class ActiveRecord::Encryption::ConfigurableTest < ActiveRecord::EncryptionTestC
 
   private
     def with_auto_filtered_parameters(application)
-      auto_filtered_parameters = ActiveRecord::Encryption::AutoFilteredParameters.new(application)
+      old_value = ActiveRecord::Encryption.config.add_to_filter_parameters
+      ActiveRecord::Encryption.config.add_to_filter_parameters = true
       yield
-      auto_filtered_parameters.enable
+    ensure
+      ActiveRecord::Encryption.config.add_to_filter_parameters = old_value
     end
 end

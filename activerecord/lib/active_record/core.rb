@@ -127,6 +127,15 @@ module ActiveRecord
         end
       end
 
+      def self.filter_attributes
+        @@filter_attributes
+      end
+
+      def self.filter_attributes=(attributes)
+        @inspection_mask = nil
+        @@filter_attributes = attributes
+      end
+
       self.filter_attributes = []
 
       def self.connection_handler
@@ -344,31 +353,10 @@ module ActiveRecord
         end
       end
 
-      # Returns columns which shouldn't be exposed while calling +#inspect+.
-      def filter_attributes
-        if @filter_attributes.nil?
-          superclass.filter_attributes
-        else
-          @filter_attributes
-        end
-      end
-
-      # Specifies columns which shouldn't be exposed while calling +#inspect+.
-      def filter_attributes=(filter_attributes)
-        @inspection_filter = nil
-        @filter_attributes = filter_attributes
-
-        FilterAttributeHandler.sensitive_attribute_was_declared(self, filter_attributes)
-      end
-
       def inspection_filter # :nodoc:
-        if @filter_attributes.nil?
-          superclass.inspection_filter
-        else
-          @inspection_filter ||= begin
-            mask = InspectionMask.new(ActiveSupport::ParameterFilter::FILTERED)
-            ActiveSupport::ParameterFilter.new(@filter_attributes, mask: mask)
-          end
+        @inspection_filter ||= begin
+          mask = InspectionMask.new(ActiveSupport::ParameterFilter::FILTERED)
+          ActiveSupport::ParameterFilter.new(filter_attributes, mask: mask)
         end
       end
 

@@ -71,30 +71,6 @@ class FilterAttributesTest < ActiveRecord::TestCase
     assert_equal account, Marshal.load(Marshal.dump(account))
   end
 
-  test "filter_attributes could be overwritten by models" do
-    Admin::Account.all.each do |account|
-      assert_includes account.inspect, "name: [FILTERED]"
-      assert_equal 1, account.inspect.scan("[FILTERED]").length
-    end
-
-    begin
-      Admin::Account.filter_attributes = []
-
-      # Above changes should not impact other models
-      Admin::User.all.each do |user|
-        assert_includes user.inspect, "name: [FILTERED]"
-        assert_equal 1, user.inspect.scan("[FILTERED]").length
-      end
-
-      Admin::Account.all.each do |account|
-        assert_not_includes account.inspect, "name: [FILTERED]"
-        assert_equal 0, account.inspect.scan("[FILTERED]").length
-      end
-    ensure
-      Admin::Account.instance_variable_set(:@filter_attributes, nil)
-    end
-  end
-
   test "filter_attributes should not filter nil value" do
     account = Admin::Account.new
 

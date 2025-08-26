@@ -84,6 +84,13 @@ module ActiveRecord
           def encrypt_attribute(name, key_provider: nil, key: nil, deterministic: false, support_unencrypted_data: nil, downcase: false, ignore_case: false, previous: [], compress: true, compressor: nil, **context_properties)
             encrypted_attributes << name.to_sym
 
+            if ActiveRecord::Encryption.config.add_to_filter_parameters
+              filter = [("#{model_name.element}" if self.name), name.to_s].compact.join(".")
+              unless excluded_from_filter_parameters?(filter)
+                filter_attributes << filter unless filter_attributes.include?(filter)
+              end
+            end
+
             decorate_attributes([name]) do |name, cast_type|
               scheme = scheme_for key_provider: key_provider, key: key, deterministic: deterministic, support_unencrypted_data: support_unencrypted_data, \
                 downcase: downcase, ignore_case: ignore_case, previous: previous, compress: compress, compressor: compressor, **context_properties
@@ -93,6 +100,10 @@ module ActiveRecord
 
             preserve_original_encrypted(name) if ignore_case
             ActiveRecord::Encryption.encrypted_attribute_was_declared(self, name)
+          end
+
+          def excluded_from_filter_parameters?(filter_parameter)
+            ActiveRecord::Encryption.config.excluded_from_filter_parameters.find { |excluded_filter| excluded_filter.to_s == filter_parameter }
           end
 
           def preserve_original_encrypted(name)
