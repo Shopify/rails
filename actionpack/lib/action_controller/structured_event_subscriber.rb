@@ -100,8 +100,6 @@ module ActionController
 
     private
       def fragment_cache(method_name, event)
-        return unless ActionController::Base.enable_fragment_cache_logging
-
         key = ActiveSupport::Cache.expand_cache_key(event.payload[:key] || event.payload[:path])
 
         emit_event("action_controller.fragment_cache",
