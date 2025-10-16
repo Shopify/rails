@@ -128,6 +128,13 @@ module Rails
       @block = block
     end
 
+    def freeze
+      raise "can't freeze uninitialized application" unless initialized?
+      @reloaders = []
+      @routes_reloader = nil
+      super
+    end
+
     # Returns true if the application is initialized.
     def initialized?
       @initialized
