@@ -19,16 +19,16 @@ Rails.application.routes.draw do
     route_for(ActiveStorage.resolve_model_to_route, representation, options)
   end
 
-  resolve("ActiveStorage::Variant") { |variant, options| route_for(ActiveStorage.resolve_model_to_route, variant, options) }
-  resolve("ActiveStorage::VariantWithRecord") { |variant, options| route_for(ActiveStorage.resolve_model_to_route, variant, options) }
-  resolve("ActiveStorage::Preview") { |preview, options| route_for(ActiveStorage.resolve_model_to_route, preview, options) }
+  resolve("ActiveStorage::Variant", &Ractor.shareable_proc { |variant, options| route_for(ActiveStorage.resolve_model_to_route, variant, options) })
+  resolve("ActiveStorage::VariantWithRecord", &Ractor.shareable_proc { |variant, options| route_for(ActiveStorage.resolve_model_to_route, variant, options) })
+  resolve("ActiveStorage::Preview", &Ractor.shareable_proc { |preview, options| route_for(ActiveStorage.resolve_model_to_route, preview, options) })
 
   direct :rails_blob do |blob, options|
     route_for(ActiveStorage.resolve_model_to_route, blob, options)
   end
 
-  resolve("ActiveStorage::Blob")       { |blob, options| route_for(ActiveStorage.resolve_model_to_route, blob, options) }
-  resolve("ActiveStorage::Attachment") { |attachment, options| route_for(ActiveStorage.resolve_model_to_route, attachment.blob, options) }
+  resolve("ActiveStorage::Blob", &Ractor.shareable_proc       { |blob, options| route_for(ActiveStorage.resolve_model_to_route, blob, options) })
+  resolve("ActiveStorage::Attachment", &Ractor.shareable_proc { |attachment, options| route_for(ActiveStorage.resolve_model_to_route, attachment.blob, options) })
 
   direct :rails_storage_proxy do |model, options|
     expires_in = options.delete(:expires_in) { ActiveStorage.urls_expire_in }

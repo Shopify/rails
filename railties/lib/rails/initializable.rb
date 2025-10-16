@@ -47,6 +47,12 @@ module Rails
         concat(initializers) if initializers
       end
 
+      def freeze
+        @order.default = Set.new
+        @resolve.default = Set.new
+        super
+      end
+
       def to_a
         @collection
       end
@@ -103,6 +109,7 @@ module Rails
         initializer.run(*args) if initializer.belongs_to?(group)
       end
       @ran = true
+      @initializers = nil
     end
 
     def initializers

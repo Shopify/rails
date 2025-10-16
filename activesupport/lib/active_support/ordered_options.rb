@@ -100,6 +100,12 @@ module ActiveSupport
       end
     end
 
+    def freeze
+      replace(to_h)
+      @parent = nil
+      super
+    end
+
     def to_h
       @parent.merge(self)
     end

@@ -485,6 +485,13 @@ module ActionDispatch
         @finalized = true
       end
 
+      def freeze
+        raise "can only freeze RouteSet if finalized" unless @finalized
+        @prepend.clear
+        @append.clear
+        super
+      end
+
       def clear!
         @finalized = false
         named_routes.clear
@@ -686,6 +693,13 @@ module ActionDispatch
           @name = name
           @defaults = defaults
           @block = block
+        end
+
+        def freeze
+          @name.freeze
+          @defaults.freeze
+          @block.freeze
+          super
         end
 
         def call(t, args, only_path = false)
