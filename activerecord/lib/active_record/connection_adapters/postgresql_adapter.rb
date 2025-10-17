@@ -420,7 +420,9 @@ module ActiveRecord
       end
 
       def set_standard_conforming_strings
-        internal_execute("SET standard_conforming_strings = on", "SCHEMA")
+        if @raw_connection.parameter_status("standard_conforming_strings") != "on"
+          internal_execute("SET standard_conforming_strings = on", "SCHEMA")
+        end
       end
 
       def supports_ddl_transactions?
@@ -993,7 +995,9 @@ module ActiveRecord
           variables = @config.fetch(:variables, {}).stringify_keys
 
           # Set interval output format to ISO 8601 for ease of parsing by ActiveSupport::Duration.parse
-          internal_execute("SET intervalstyle = iso_8601", "SCHEMA")
+          if @raw_connection.parameter_status("IntervalStyle") != "iso_8601"
+            internal_execute("SET intervalstyle = iso_8601", "SCHEMA")
+          end
 
           # SET statements from :variables config hash
           # https://www.postgresql.org/docs/current/static/sql-set.html
@@ -1023,7 +1027,11 @@ module ActiveRecord
           # If using Active Record's time zone support configure the connection
           # to return TIMESTAMP WITH ZONE types in UTC.
           if default_timezone == :utc
-            raw_execute("SET SESSION timezone TO 'UTC'", "SCHEMA")
+            tz = @raw_connection.parameter_status("TimeZone")
+
+            unless tz == "UTC" || tz == "Etc/UTC"
+              raw_execute("SET SESSION timezone TO 'UTC'", "SCHEMA")
+            end
           else
             raw_execute("SET SESSION timezone TO DEFAULT", "SCHEMA")
           end
