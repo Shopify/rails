@@ -78,7 +78,7 @@ module ActionDispatch
 
       @redirect = redirect
 
-      @exclude = @redirect && @redirect[:exclude] || proc { !@redirect }
+      @exclude = @redirect[:exclude] if @redirect
       @secure_cookies = secure_cookies
 
       @hsts_header = build_hsts_header(normalize_hsts_options(hsts))
@@ -91,10 +91,10 @@ module ActionDispatch
       if request.ssl?
         @app.call(env).tap do |status, headers, body|
           set_hsts_header! headers
-          flag_cookies_as_secure! headers if @secure_cookies && !@exclude.call(request)
+          flag_cookies_as_secure! headers if @secure_cookies && !@exclude&.call(request)
         end
       else
-        return redirect_to_https request unless @exclude.call(request)
+        return redirect_to_https request if @redirect && !@exclude&.call(request)
         @app.call(env)
       end
     end
