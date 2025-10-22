@@ -85,6 +85,16 @@ module ActionDispatch
       @ssl_default_redirect_status = ssl_default_redirect_status
     end
 
+    def freeze
+      @app.freeze
+      @redirect.freeze
+      @exclude.freeze
+      @secure_cookies.freeze
+      @hsts_header.freeze
+      @ssl_default_redirect_status.freeze
+      super
+    end
+
     def call(env)
       request = Request.new env
 

@@ -11,6 +11,14 @@ module ActiveSupport
         @on_rotation = on_rotation
       end
 
+      def freeze
+        @args.freeze
+        @options.freeze
+        @rotations.map!(&:freeze).freeze
+        @on_rotation.freeze
+        super
+      end
+
       def rotate(*args, **options)
         fall_back_to build_rotation(*args, **options)
       end

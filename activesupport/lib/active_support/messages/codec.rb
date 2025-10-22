@@ -19,6 +19,13 @@ module ActiveSupport
         @force_legacy_metadata_serializer = options[:force_legacy_metadata_serializer]
       end
 
+      def freeze
+        @serializer.freeze
+        @url_safe.freeze
+        @force_legacy_metadata_serializer.freeze
+        super
+      end
+
       private
         attr_reader :serializer
 

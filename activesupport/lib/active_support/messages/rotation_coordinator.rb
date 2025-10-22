@@ -15,6 +15,14 @@ module ActiveSupport
         @codecs = {}
       end
 
+      def freeze
+        @secret_generator = nil # don't build new codecs when frozen
+        @rotate_options.each(&:freeze).freeze
+        @on_rotation.freeze
+        @codecs.each { |key, value| key.freeze; value.freeze }.freeze
+        super
+      end
+
       def [](salt)
         @codecs[salt] ||= build_with_rotations(salt)
       end

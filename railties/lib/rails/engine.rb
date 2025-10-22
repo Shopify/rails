@@ -448,6 +448,12 @@ module Rails
       super
     end
 
+    def freeze
+      app.freeze
+      env_config.freeze
+      super
+    end
+
     # Load console and invoke the registered hooks.
     # Check Rails::Railtie.console for more info.
     def load_console(app = self)

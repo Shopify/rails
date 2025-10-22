@@ -28,6 +28,13 @@ module ActionDispatch
       @env_header = "HTTP_#{header.upcase.tr("-", "_")}"
     end
 
+    def freeze
+      @app.freeze
+      @header.freeze
+      @env_header.freeze
+      super
+    end
+
     def call(env)
       req = ActionDispatch::Request.new env
       req.request_id = make_request_id(req.get_header(@env_header))

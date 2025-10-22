@@ -28,6 +28,12 @@ module Rails
       @once.inflector = Inflector
     end
 
+    def freeze
+      @main.freeze
+      @once.freeze
+      super
+    end
+
     def each
       yield main
       yield once

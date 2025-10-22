@@ -52,6 +52,19 @@ module Rails
         @eager_load_paths = []
       end
 
+      def freeze
+        @root.freeze
+        @generators.freeze
+        @middleware.freeze
+        @javascript_path.freeze
+        @route_set_class = nil
+        @default_scope&.freeze
+        @autoload_paths.freeze
+        @autoload_once_paths.freeze
+        @eager_load_paths.freeze
+        super
+      end
+
       # Holds generators configuration:
       #
       #   config.generators do |g|

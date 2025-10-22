@@ -128,10 +128,19 @@ module Rails
       @block = block
     end
 
+    def ractor_shareable
+      Ractor.make_shareable self
+    end
+
     def freeze
+      return self if frozen?
       raise "can't freeze uninitialized application" unless initialized?
       @reloaders = []
       @routes_reloader = nil
+      @key_generators.transform_values! { |caching| caching.key_generator.freeze }.freeze # FIXME: keep some kind of caching
+      @message_verifiers.freeze
+      @deprecators.freeze
+      @autoloaders.freeze
       super
     end
 
