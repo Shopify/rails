@@ -519,6 +519,8 @@ module Rails
           config.middleware = build_middleware.merge_into(stack)
           config.middleware.build(endpoint)
         end
+        @app_build_lock = nil
+        @app
       }
     end
 
