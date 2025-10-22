@@ -88,6 +88,13 @@ module ActionDispatch
       end
     end
 
+    def freeze
+      @app.freeze
+      @check_ip.freeze
+      @proxies.map!(&:freeze).freeze
+      super
+    end
+
     # Since the IP address may not be needed, we store the object here without
     # calculating the IP to keep from slowing down the majority of requests. For
     # those requests that do need to know the IP, the GetIp#calculate_ip method will

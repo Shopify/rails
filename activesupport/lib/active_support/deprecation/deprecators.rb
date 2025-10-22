@@ -12,6 +12,12 @@ module ActiveSupport
         @deprecators = {}
       end
 
+      def freeze
+        @options.freeze
+        @deprecators.each {|key, value| key.freeze; value.freeze }.freeze
+        super
+      end
+
       # Returns a deprecator added to this collection via #[]=.
       def [](name)
         @deprecators[name]

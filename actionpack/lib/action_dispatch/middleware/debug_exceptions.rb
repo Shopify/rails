@@ -27,6 +27,14 @@ module ActionDispatch
       @interceptors    = interceptors
     end
 
+    def freeze
+      @app.freeze
+      @routes_app.freeze
+      @response_format.freeze
+      @interceptors.freeze
+      super
+    end
+
     def call(env)
       _, headers, body = response = @app.call(env)
 

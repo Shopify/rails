@@ -58,6 +58,9 @@ module ActiveSupport
       @cache_keys = Concurrent::Map.new
     end
 
+    # Returns the wrapped KeyGenerator.
+    attr_reader :key_generator
+
     # Returns a derived key suitable for use.
     def generate_key(*args)
       @cache_keys[args.join("|")] ||= @key_generator.generate_key(*args)
