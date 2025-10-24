@@ -134,6 +134,8 @@ module Rails
     end
 
     def ractor_shareable
+      Rails.backtrace_cleaner.remove_silencers! # FIXME
+      Rails.backtrace_cleaner.remove_filters! # FIXME
       Ractor.make_shareable self
     end
 
