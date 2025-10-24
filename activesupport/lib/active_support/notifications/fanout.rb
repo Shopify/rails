@@ -61,6 +61,23 @@ module ActiveSupport
         @groups_for = Concurrent::Map.new
       end
 
+      # FIXME: we should have a different notifier instead
+      def freeze
+        @mutex = nil
+        @string_subscribers = @string_subscribers.each.to_h { |k, v| [k.freeze, v.freeze] }
+        @string_subscribers.default = [].freeze
+        @string_subscribers.freeze
+        @other_subscribers.each(&:freeze)
+        @all_listeners_for = @all_listeners_for.each.to_h { |k, v| [k.freeze, v.freeze] }
+        @all_listeners_for.default = [].freeze
+        @all_listeners_for.freeze
+        @groups_for = @groups_for.each.to_h { |k, v| [k.freeze, v.freeze] }
+        @groups_for.default = [].freeze
+        @groups_for.singleton_class.alias_method :compute_if_absent, :fetch
+        @groups_for.freeze
+        super
+      end
+
       def inspect # :nodoc:
         total_patterns = @string_subscribers.size + @other_subscribers.size
         "#<#{self.class} (#{total_patterns} patterns)>"

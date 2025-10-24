@@ -81,6 +81,11 @@ module ActiveSupport
 
       attr_writer :logger
 
+      def freeze
+        logger
+        super
+      end
+
       def attach_to(...) # :nodoc:
         result = super
         set_event_levels

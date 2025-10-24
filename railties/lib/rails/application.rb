@@ -134,6 +134,9 @@ module Rails
       protection = coerce_same_site_protection(config.action_dispatch.cookies_same_site_protection)
       config.action_dispatch.cookies_same_site_protection = Ractor.shareable_proc(&protection)
       Ractor.make_shareable ::Rack::MethodOverride::ALLOWED_METHODS
+      # can't call make_shareable on Modules because they're already shareable
+      ::ActiveSupport::LogSubscriber.freeze
+      Ractor.make_shareable ::ActiveSupport::Notifications.instrumenter
       Ractor.make_shareable self
     end
 
