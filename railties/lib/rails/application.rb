@@ -131,6 +131,9 @@ module Rails
     def ractor_shareable
       Rails.backtrace_cleaner.remove_silencers! # FIXME
       Rails.backtrace_cleaner.remove_filters! # FIXME
+      protection = coerce_same_site_protection(config.action_dispatch.cookies_same_site_protection)
+      config.action_dispatch.cookies_same_site_protection = Ractor.shareable_proc(&protection)
+      Ractor.make_shareable ::Rack::MethodOverride::ALLOWED_METHODS
       Ractor.make_shareable self
     end
 
