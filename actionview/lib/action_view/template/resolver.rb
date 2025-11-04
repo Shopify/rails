@@ -98,6 +98,13 @@ module ActionView
       super()
     end
 
+    def freeze
+      @unbound_templates = @unbound_templates.each.to_h { |k, v| [k.freeze, v.freeze] }.freeze
+      @path_parser.freeze
+      @path.freeze
+      super
+    end
+
     def clear_cache
       @unbound_templates.clear
       @path_parser = PathParser.new
