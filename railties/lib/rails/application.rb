@@ -137,6 +137,7 @@ module Rails
       # can't call make_shareable on Modules because they're already shareable
       ::ActiveSupport::LogSubscriber.freeze
       Ractor.make_shareable ::ActiveSupport::Notifications.instrumenter
+      ::ActionView::PathRegistry.freeze
       Ractor.make_shareable self
     end
 

@@ -11,6 +11,14 @@ module ActionView # :nodoc:
       attr_reader :file_system_resolver_hooks
     end
 
+    def self.freeze
+      @view_paths_by_class.each { |k, v| [k.freeze, v.freeze] }.freeze
+      @file_system_resolvers.each { |k, v| [k.freeze, v.freeze] }.freeze
+      @file_system_resolver_mutex = nil
+      @file_system_resolver_hooks.each(&:freeze).freeze
+      super
+    end
+
     def self.get_view_paths(klass)
       @view_paths_by_class[klass] || get_view_paths(klass.superclass)
     end
