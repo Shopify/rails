@@ -12,6 +12,11 @@ module ActionView
     class PathParser # :nodoc:
       ParsedPath = Struct.new(:path, :details)
 
+      def freeze
+        path_regex
+        super
+      end
+
       def build_path_regex
         handlers = Regexp.union(Template::Handlers.extensions.map(&:to_s))
         formats = Regexp.union(Template::Types.symbols.map(&:to_s))
@@ -33,9 +38,12 @@ module ActionView
         }x
       end
 
-      def parse(path)
+      def path_regex
         @regex ||= build_path_regex
-        match = @regex.match(path)
+      end
+
+      def parse(path)
+        match = path_regex.match(path)
         path = TemplatePath.build(match[:action], match[:prefix] || "", !!match[:partial])
         details = TemplateDetails.new(
           match[:locale]&.to_sym,
