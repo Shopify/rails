@@ -37,9 +37,10 @@ module ActionDispatch
       "ActionController::MissingExactTemplate" => "missing_exact_template",
     )
 
-    cattr_accessor :wrapper_exceptions, default: [
+    singleton_class.attr_reader :wrapper_exceptions
+    @wrapper_exceptions = [
       "ActionView::Template::Error"
-    ]
+    ].freeze
 
     cattr_accessor :silent_exceptions, default: [
       "ActionController::RoutingError",
@@ -104,7 +105,7 @@ module ActionDispatch
     end
 
     def unwrapped_exception
-      if wrapper_exceptions.include?(@exception_class_name)
+      if self.class.wrapper_exceptions.include?(@exception_class_name)
         @exception.cause
       else
         @exception
