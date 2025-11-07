@@ -143,6 +143,7 @@ module Rails
       ::ActiveSupport::LogSubscriber.freeze
       Ractor.make_shareable ::ActiveSupport::Notifications.instrumenter
       ::ActionView::PathRegistry.freeze
+      ActionDispatch::ExceptionWrapper.freeze
       Ractor.make_shareable self
     end
 

@@ -9,7 +9,8 @@ require "rack/utils"
 
 module ActionDispatch
   class ExceptionWrapper
-    cattr_accessor :rescue_responses, default: Hash.new(:internal_server_error).merge!(
+    singleton_class.attr_reader :rescue_responses
+    @rescue_responses = Hash.new(:internal_server_error).merge!(
       "ActionController::RoutingError"                     => :not_found,
       "AbstractController::ActionNotFound"                 => :not_found,
       "ActionController::MethodNotAllowed"                 => :method_not_allowed,
@@ -46,6 +47,11 @@ module ActionDispatch
       "ActionController::RoutingError",
       "ActionDispatch::Http::MimeNegotiation::InvalidType"
     ]
+
+    def self.freeze
+      @rescue_responses.freeze
+      super
+    end
 
     attr_reader :backtrace_cleaner, :wrapped_causes, :exception_class_name, :exception
 
@@ -180,7 +186,7 @@ module ActionDispatch
     end
 
     def self.status_code_for_exception(class_name)
-      ActionDispatch::Response.rack_status_code(@@rescue_responses[class_name])
+      ActionDispatch::Response.rack_status_code(rescue_responses[class_name])
     end
 
     def show?(request)
@@ -199,7 +205,7 @@ module ActionDispatch
     end
 
     def rescue_response?
-      @@rescue_responses.key?(exception.class.name)
+      self.class.rescue_responses.key?(exception.class.name)
     end
 
     def source_extracts
