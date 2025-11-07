@@ -140,6 +140,7 @@ module Rails
       ::ActionView::PathRegistry.freeze
       ActionDispatch::ExceptionWrapper.freeze
       ActionDispatch::ParamBuilder.freeze
+      Mime.freeze
       Ractor.make_shareable self
     end
 
