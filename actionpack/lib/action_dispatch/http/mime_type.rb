@@ -48,6 +48,11 @@ module Mime
   LOOKUP           = {}
 
   class << self
+    def freeze
+      LOOKUP.each_value(&:freeze).freeze
+      super
+    end
+
     def [](type)
       return type if type.is_a?(Type)
       Type.lookup_by_extension(type)
@@ -268,6 +273,12 @@ module Mime
       @symbol, @synonyms = symbol, synonyms
       @string = string
       @hash = [@string, @synonyms, @symbol].hash
+    end
+
+    def freeze
+      @string.freeze
+      @synonyms.each(&:freeze).freeze
+      super
     end
 
     def to_s
