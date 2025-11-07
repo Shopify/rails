@@ -16,11 +16,16 @@ module ActionDispatch
       @param_depth_limit = param_depth_limit
     end
 
-    cattr_accessor :default
+    singleton_class.attr_accessor :default
     self.default = make_default(100)
 
     class << self
       delegate :from_query_string, :from_pairs, :from_hash, to: :default
+
+      def freeze
+        default.freeze
+        super
+      end
 
       def ignore_leading_brackets
         ActionDispatch.deprecator.warn <<~MSG

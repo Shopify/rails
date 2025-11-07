@@ -144,6 +144,7 @@ module Rails
       Ractor.make_shareable ::ActiveSupport::Notifications.instrumenter
       ::ActionView::PathRegistry.freeze
       ActionDispatch::ExceptionWrapper.freeze
+      ActionDispatch::ParamBuilder.freeze
       Ractor.make_shareable self
     end
 
