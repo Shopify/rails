@@ -67,10 +67,15 @@ module ActiveSupport
 
     included do
       extend ActiveSupport::DescendantsTracker
-      class_attribute :__callbacks, instance_writer: false, instance_predicate: false, default: {}
+      singleton_class.attr_writer :__callbacks
+      self.__callbacks = {}
     end
 
     CALLBACK_FILTER_TYPES = [:before, :after, :around].freeze
+
+    def __callbacks
+      self.class.__callbacks
+    end
 
     # Runs the callbacks for the given event.
     #
@@ -676,6 +681,10 @@ module ActiveSupport
       end
 
       module ClassMethods
+        def __callbacks
+          @__callbacks || superclass.__callbacks
+        end
+
         def normalize_callback_params(filters, block) # :nodoc:
           type = CALLBACK_FILTER_TYPES.include?(filters.first) ? filters.shift : :before
           options = filters.extract_options!
