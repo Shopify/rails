@@ -587,6 +587,18 @@ module ActiveSupport
           @mutex = Mutex.new
         end
 
+        def freeze
+          return self if frozen?
+          compile(nil)
+          @config.each_value(&:freeze).freeze
+          @chain.each(&:freeze).freeze
+          @all_callbacks.freeze
+          CALLBACK_FILTER_TYPES.each { compile it }
+          @single_callbacks.each_value(&:freeze).freeze
+          @mutex = nil
+          super
+        end
+
         def each(&block); @chain.each(&block); end
         def index(o);     @chain.index(o); end
         def empty?;       @chain.empty?; end
@@ -681,6 +693,11 @@ module ActiveSupport
       end
 
       module ClassMethods
+        def freeze
+          @__callbacks&.each_value(&:freeze).freeze
+          super
+        end
+
         def __callbacks
           @__callbacks || superclass.__callbacks
         end

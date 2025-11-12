@@ -146,6 +146,7 @@ module Rails
       ActionDispatch::ExceptionWrapper.freeze
       ActionDispatch::ParamBuilder.freeze
       Mime.freeze
+      ActionDispatch::Callbacks.freeze
       Ractor.make_shareable self
     end
 
