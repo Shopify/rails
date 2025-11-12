@@ -147,6 +147,7 @@ module Rails
       ActionDispatch::ParamBuilder.freeze
       Mime.freeze
       ActionDispatch::Callbacks.freeze
+      ActiveSupport::Inflector::Inflections.freeze
       Ractor.make_shareable self
     end
 

@@ -42,6 +42,12 @@ module ActiveSupport
           @pattern = nil
         end
 
+        def freeze
+          @members.each(&:freeze).freeze
+          @pattern.freeze
+          super
+        end
+
         def delete(entry)
           @members.delete(entry)
           @pattern = nil
@@ -80,6 +86,12 @@ module ActiveSupport
         @__instance__[locale] ||= new
       end
 
+      def self.freeze
+        @__instance__ = @__instance__.each.to_h { |k, v| [k.freeze, v.freeze] }.freeze
+        @__en_instance__.freeze
+        super
+      end
+
       def self.instance_or_fallback(locale)
         return @__en_instance__ ||= new if locale == :en
 
@@ -97,6 +109,15 @@ module ActiveSupport
       def initialize
         @plurals, @singulars, @uncountables, @humans, @acronyms = [], [], Uncountables.new, [], {}
         define_acronym_regex_patterns
+      end
+
+      def freeze
+        @plurals.each { |plural| plural.each(&:freeze).freeze }.freeze
+        @singulars.each { |singular| singular.each(&:freeze).freeze }.freeze
+        @humans.each { |human| human.each(&:freeze).freeze }.freeze
+        @uncountables.freeze
+        @acronyms.each_value(&:freeze).freeze
+        super
       end
 
       # Private, for the test suite.
