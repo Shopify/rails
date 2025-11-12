@@ -192,6 +192,12 @@ module ActionDispatch # :nodoc:
       default.respond_to?(:merge) ? default.merge(original) : original
     end
 
+    def self.freeze
+      @default_charset.freeze
+      @default_headers.freeze
+      super
+    end
+
     # The underlying body, as a streamable object.
     attr_reader :stream
 
