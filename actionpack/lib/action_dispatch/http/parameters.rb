@@ -46,6 +46,16 @@ module ActionDispatch
         def parameter_parsers=(parsers)
           @parameter_parsers = parsers.transform_keys { |key| key.respond_to?(:symbol) ? key.symbol : key }
         end
+
+        def ractor_shareable
+          @parameter_parsers.transform_values! { |parameter_parser| Ractor.shareable_proc(&parameter_parser) }
+          freeze
+        end
+
+        def freeze
+          @parameter_parsers.each_value(&:freeze).freeze
+          super
+        end
       end
 
       # Returns both GET and POST parameters in a single hash.
