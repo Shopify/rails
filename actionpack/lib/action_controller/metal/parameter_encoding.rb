@@ -13,6 +13,15 @@ module ActionController
         klass.setup_param_encode
       end
 
+      def freeze
+        if @_parameter_encodings
+          @_parameter_encodings.each_value(&:freeze)
+          @_parameter_encodings.default_proc = nil
+          @_parameter_encodings.freeze
+        end
+        super
+      end
+
       def setup_param_encode # :nodoc:
         @_parameter_encodings = Hash.new { |h, k| h[k] = {} }
       end
