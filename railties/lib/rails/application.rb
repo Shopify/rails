@@ -143,6 +143,7 @@ module Rails
       Mime.freeze
       ActionDispatch::Callbacks.freeze
       ActiveSupport::Inflector::Inflections.freeze
+      ActionDispatch::Response.freeze
       ActionDispatch::Request.ractor_shareable
       Ractor.make_shareable self
     end
