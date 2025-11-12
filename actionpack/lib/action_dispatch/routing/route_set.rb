@@ -489,6 +489,12 @@ module ActionDispatch
         raise "can only freeze RouteSet if finalized" unless @finalized
         @prepend.clear
         @append.clear
+        request = ActionDispatch::Request.new({})
+        set.each do |route|
+          next unless controller = route.defaults[:controller]
+          controller_class = request.controller_class_for(controller)
+          controller_class.freeze unless controller_class.frozen?
+        end
         super
       end
 
