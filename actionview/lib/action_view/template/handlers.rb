@@ -9,58 +9,64 @@ module ActionView # :nodoc:
       autoload :Html, "action_view/template/handlers/html"
       autoload :Builder, "action_view/template/handlers/builder"
 
-      def self.extended(base)
-        base.register_default_template_handler :raw, Raw.new
-        base.register_template_handler :erb, ERB.new
-        base.register_template_handler :html, Html.new
-        base.register_template_handler :builder, Builder.new
-        base.register_template_handler :ruby, lambda { |_, source| source }
-      end
-
-      @@template_handlers = {}
-      @@default_template_handlers = nil
+      @template_handlers = {}
+      @default_template_handlers = nil
 
       def self.extensions
-        @@template_extensions ||= @@template_handlers.keys
+        @template_extensions ||= @template_handlers.keys
       end
 
       # Register an object that knows how to handle template files with the given
       # extensions. This can be used to implement new template types.
       # The handler must respond to +:call+, which will be passed the template
       # and should return the rendered template as a String.
-      def register_template_handler(*extensions, handler)
+      def self.register_template_handler(*extensions, handler)
         raise(ArgumentError, "Extension is required") if extensions.empty?
         extensions.each do |extension|
-          @@template_handlers[extension.to_sym] = handler
+          @template_handlers[extension.to_sym] = handler
         end
-        @@template_extensions = nil
+        @template_extensions = nil
+      end
+
+      def register_template_handler(...)
+        ::ActionView::Template::Handlers.register_template_handler(...)
       end
 
       # Opposite to register_template_handler.
-      def unregister_template_handler(*extensions)
+      def self.unregister_template_handler(*extensions)
         extensions.each do |extension|
-          handler = @@template_handlers.delete extension.to_sym
-          @@default_template_handlers = nil if @@default_template_handlers == handler
+          handler = @template_handlers.delete extension.to_sym
+          @default_template_handlers = nil if @default_template_handlers == handler
         end
-        @@template_extensions = nil
+        @template_extensions = nil
       end
 
-      def template_handler_extensions
-        @@template_handlers.keys.map(&:to_s).sort
+      def self.template_handler_extensions
+        @template_handlers.keys.map(&:to_s).sort
       end
 
-      def registered_template_handler(extension)
-        extension && @@template_handlers[extension.to_sym]
+      def self.registered_template_handler(extension)
+        extension && @template_handlers[extension.to_sym]
       end
 
-      def register_default_template_handler(extension, klass)
+      def self.register_default_template_handler(extension, klass)
         register_template_handler(extension, klass)
-        @@default_template_handlers = klass
+        @default_template_handlers = klass
       end
 
-      def handler_for_extension(extension)
-        registered_template_handler(extension) || @@default_template_handlers
+      def self.handler_for_extension(extension)
+        registered_template_handler(extension) || @default_template_handlers
       end
+
+      def handler_for_extension(...)
+        ::ActionView::Template::Handlers.handler_for_extension(...)
+      end
+
+      register_default_template_handler :raw, Raw.new
+      register_template_handler :erb, ERB.new
+      register_template_handler :html, Html.new
+      register_template_handler :builder, Builder.new
+      register_template_handler :ruby, lambda { |_, source| source }
     end
   end
 end
