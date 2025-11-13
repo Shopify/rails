@@ -18,6 +18,11 @@ module ActiveSupport
     def rescue_handlers = self.class.rescue_handlers
 
     module ClassMethods
+      def freeze
+        @rescue_handlers&.each(&:freeze).freeze
+        super
+      end
+
       attr_writer :rescue_handlers
 
       def rescue_handlers
@@ -71,13 +76,13 @@ module ActiveSupport
           key = if klass.is_a?(Module) && klass.respond_to?(:===)
             klass.name
           elsif klass.is_a?(String)
-            klass
+            -klass
           else
             raise ArgumentError, "#{klass.inspect} must be an Exception class or a String referencing an Exception class"
           end
 
           # Put the new handler at the end because the list is read in reverse.
-          self.rescue_handlers += [[key, with]]
+          self.rescue_handlers += [[key, with].freeze]
         end
       end
 
