@@ -35,8 +35,18 @@ module ActionView
       METHOD
     end
 
+    def self.ractor_shareable
+      Accessors::DEFAULT_PROCS.each do |name, detail_proc|
+        shareable_proc = Ractor.shareable_proc(&detail_proc)
+        Accessors::DEFAULT_PROCS[name] = shareable_proc
+        Accessors.define_method(:"default_#{name}", &shareable_proc)
+      end
+      freeze
+    end
+
     def self.freeze
       registered_details.each(&:freeze).freeze
+      Accessors::DEFAULT_PROCS.each_value(&:freeze).freeze
       super
     end
 
