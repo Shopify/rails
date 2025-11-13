@@ -35,6 +35,16 @@ module ActiveSupport
     @nestable = false
 
     class << self
+      def ractor_shareable
+        @after_change_callbacks.map! { |callback| Ractor.shareable_proc(&callback) }
+        freeze
+      end
+
+      def freeze
+        @after_change_callbacks.freeze
+        super
+      end
+
       attr_accessor :nestable
 
       def after_change(&block)
