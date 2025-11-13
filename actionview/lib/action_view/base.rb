@@ -187,6 +187,11 @@ module ActionView # :nodoc:
     cattr_accessor :remove_hidden_field_autocomplete, default: false
 
     class << self
+      def freeze
+        @default_formats.each(&:freeze).freeze
+        super
+      end
+
       delegate :erb_trim_mode=, to: "ActionView::Template::Handlers::ERB"
 
       def cache_template_loading
