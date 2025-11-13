@@ -35,6 +35,11 @@ module ActionView
       METHOD
     end
 
+    def self.freeze
+      registered_details.each(&:freeze).freeze
+      super
+    end
+
     # Holds accessors for the registered details.
     module Accessors # :nodoc:
       DEFAULT_PROCS = {}
