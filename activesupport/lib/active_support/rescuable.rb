@@ -12,10 +12,18 @@ module ActiveSupport
     extend Concern
 
     included do
-      class_attribute :rescue_handlers, default: []
+      self.rescue_handlers = []
     end
 
+    def rescue_handlers = self.class.rescue_handlers
+
     module ClassMethods
+      attr_writer :rescue_handlers
+
+      def rescue_handlers
+        @rescue_handlers || superclass.rescue_handlers
+      end
+
       # Registers exception classes with a handler to be called by <tt>rescue_with_handler</tt>.
       #
       # <tt>rescue_from</tt> receives a series of exception classes or class
