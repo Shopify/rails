@@ -152,6 +152,7 @@ module Rails
       ActionDispatch::Request.ractor_shareable
       ActionView::LookupContext.ractor_shareable
       ActionView::Base.freeze
+      ActionView::Template::Handlers.freeze
       Ractor.make_shareable self
     end
 
