@@ -78,6 +78,11 @@ module ActionDispatch
       yield(self) if block_given?
     end
 
+    def freeze
+      @middlewares.each(&:freeze).freeze
+      super
+    end
+
     def each(&block)
       @middlewares.each(&block)
     end

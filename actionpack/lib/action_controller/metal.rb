@@ -289,6 +289,11 @@ module ActionController
     self.middleware_stack = ActionController::MiddlewareStack.new
 
     class << self
+      def freeze
+        @middleware_stack.freeze
+        super
+      end
+
       # Pushes the given Rack middleware and its arguments to the bottom of the
       # middleware stack.
       def use(...)
