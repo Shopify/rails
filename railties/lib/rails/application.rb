@@ -150,6 +150,7 @@ module Rails
       ActiveSupport::Inflector::Inflections.freeze
       ActionDispatch::Response.freeze
       ActionDispatch::Request.ractor_shareable
+      ActionView::LookupContext.freeze
       Ractor.make_shareable self
     end
 
