@@ -285,7 +285,8 @@ module ActionController
       @_request.reset_session
     end
 
-    class_attribute :middleware_stack, default: ActionController::MiddlewareStack.new
+    singleton_class.attr_accessor :middleware_stack
+    self.middleware_stack = ActionController::MiddlewareStack.new
 
     class << self
       # Pushes the given Rack middleware and its arguments to the bottom of the
