@@ -12,6 +12,11 @@ module ActionView # :nodoc:
       @template_handlers = {}
       @default_template_handlers = nil
 
+      def self.freeze
+        @template_extensions.each(&:freeze).freeze
+        super
+      end
+
       def self.extensions
         @template_extensions ||= @template_handlers.keys
       end
