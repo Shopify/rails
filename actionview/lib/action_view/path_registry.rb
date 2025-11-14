@@ -12,7 +12,7 @@ module ActionView # :nodoc:
     end
 
     def self.freeze
-      @view_paths_by_class.each { |k, v| [k.freeze, v.freeze] }.freeze
+      @view_paths_by_class.each { |k, v| [k, v.freeze] }.freeze # controller class frozen later
       @file_system_resolvers.each { |k, v| [k.freeze, v.freeze] }.freeze
       @file_system_resolver_mutex = nil
       @file_system_resolver_hooks.each(&:freeze).freeze
