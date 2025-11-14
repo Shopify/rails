@@ -14,6 +14,7 @@ module ActionController
       end
 
       def freeze
+        return self if frozen?
         if @_parameter_encodings
           @_parameter_encodings.each_value(&:freeze)
           @_parameter_encodings.default_proc = nil
