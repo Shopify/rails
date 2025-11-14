@@ -159,6 +159,7 @@ module Rails
       ActionView::Base.freeze
       ActionView::Template::Handlers.freeze
       ActiveSupport::ExecutionContext.ractor_shareable
+      super
     end
 
     def freeze
