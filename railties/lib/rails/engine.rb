@@ -449,6 +449,7 @@ module Rails
     end
 
     def ractor_shareable
+      routes.ractor_shareable
       freeze
     end
 
