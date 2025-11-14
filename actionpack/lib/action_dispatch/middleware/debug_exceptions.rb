@@ -144,6 +144,12 @@ module ActionDispatch
       end
 
       def log_error(request, wrapper)
+        e = wrapper.exception
+        begin
+          puts "#{e.class}: #{e.message}"
+          puts e.backtrace
+          puts
+        end while e = e.cause
         logger = logger(request)
 
         return unless logger

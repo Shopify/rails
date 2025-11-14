@@ -175,6 +175,17 @@ module ActiveSupport
           end
           attr_reader :user_callback, :user_conditions, :halted_lambda, :filter, :name
 
+          # Returns a new instance since they're frozen
+          def ractor_shareable
+            Before.new(
+              Ractor.shareable_proc(&@user_callback),
+              @user_conditions.map { |user_condition| Ractor.shareable_proc(&user_condition) },
+              { terminator: Ractor.shareable_proc(&@halted_lambda) },
+              Ractor.shareable_proc(&@filter),
+              @name,
+            )
+          end
+
           def call(env)
             target = env.target
             value  = env.value
@@ -204,6 +215,15 @@ module ActiveSupport
             freeze
           end
 
+          # Returns a new instance since they're frozen
+          def ractor_shareable
+            After.new(
+              Ractor.shareable_proc(&@user_callback),
+              @user_conditions.map { |user_condition| Ractor.shareable_proc(&user_condition) },
+              { skip_after_callbacks_if_terminated: @halting },
+            )
+          end
+
           def call(env)
             target = env.target
             value  = env.value
@@ -225,6 +245,13 @@ module ActiveSupport
           def initialize(user_callback, user_conditions)
             @user_callback, @user_conditions = user_callback, user_conditions
             freeze
+          end
+
+          def ractor_shareable
+            Around.new(
+              @user_callback,
+              @user_conditions.map { |user_condition| Ractor.shareable_proc(&user_condition) },
+            )
           end
 
           def apply(callback_sequence)
@@ -257,6 +284,15 @@ module ActiveSupport
           @unless  = check_conditionals(options[:unless])
 
           compiled
+        end
+
+        def ractor_shareable
+          return self if frozen?
+          @filter = Ractor.shareable_proc(&@filter)
+          # @if = @if.map { |condition| Ractor.shareable_proc(&condition) }
+          # @unless = @unless.map { |condition| Ractor.shareable_proc(&condition) }
+          @compiled = @compiled.ractor_shareable
+          freeze
         end
 
         def merge_conditional_options(chain, if_option:, unless_option:)
@@ -531,6 +567,21 @@ module ActiveSupport
           @after = nil
         end
 
+        def ractor_shareable
+          return self if frozen?
+          @nested&.ractor_shareable
+          @before&.map!(&:ractor_shareable)
+          @after&.map!(&:ractor_shareable)
+          freeze
+        end
+
+        def freeze
+          @nested.freeze
+          @before&.each(&:freeze).freeze
+          @after&.each(&:freeze).freeze
+          super
+        end
+
         def before(before)
           @before ||= []
           @before.unshift(before)
@@ -585,6 +636,18 @@ module ActiveSupport
           @all_callbacks = nil
           @single_callbacks = {}
           @mutex = Mutex.new
+        end
+
+        def ractor_shareable
+          compile(nil)
+          unless @config.frozen?
+            @config[:terminator] = Ractor.shareable_proc(&@config[:terminator])
+          end
+          @chain.each(&:ractor_shareable)
+          @all_callbacks.ractor_shareable
+          CALLBACK_FILTER_TYPES.each { compile it }
+          @single_callbacks.each_value(&:ractor_shareable)
+          freeze
         end
 
         def freeze
@@ -693,9 +756,16 @@ module ActiveSupport
       end
 
       module ClassMethods
+        def ractor_shareable
+          superclass.ractor_shareable
+          @__callbacks&.each_value(&:ractor_shareable)
+          super
+        end
+
         def freeze
           @__callbacks&.each_value(&:freeze).freeze
           super
+          self
         end
 
         def __callbacks
