@@ -128,6 +128,11 @@ module Rails
       @block = block
     end
 
+    def ractor_shareable!
+      ractor_shareable
+      Ractor.make_shareable(self)
+    end
+
     def ractor_shareable
       Rails.backtrace_cleaner.remove_silencers! # FIXME
       Rails.backtrace_cleaner.remove_filters! # FIXME
@@ -149,7 +154,6 @@ module Rails
       ActionView::Base.freeze
       ActionView::Template::Handlers.freeze
       ActiveSupport::ExecutionContext.ractor_shareable
-      Ractor.make_shareable self
     end
 
     def freeze
