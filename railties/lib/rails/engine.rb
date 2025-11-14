@@ -448,6 +448,10 @@ module Rails
       super
     end
 
+    def ractor_shareable
+      freeze
+    end
+
     def freeze
       app.freeze
       env_config.freeze
