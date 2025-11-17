@@ -58,6 +58,7 @@ module Mime
     def freeze
       SET.freeze
       LOOKUP.each_value(&:freeze).freeze
+      EXTENSION_LOOKUP.each_value(&:freeze).freeze
       super
     end
 
