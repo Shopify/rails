@@ -40,7 +40,8 @@ module ActionController
     end
 
     included do
-      class_attribute :_renderers, default: Set.new.freeze
+      singleton_class.attr_accessor :_renderers
+      self._renderers = Set.new.freeze
       class_attribute :escape_json_responses, instance_writer: false, instance_accessor: false, default: true
 
       singleton_class.prepend DeprecatedEscapeJsonResponses
@@ -144,7 +145,11 @@ module ActionController
         self._renderers = renderers.freeze
       end
       alias use_renderer use_renderers
+
+      def inherited(subclass) = subclass._renderers = _renderers
     end
+
+    def _renderers = self.class._renderers
 
     # Called by `render` in AbstractController::Rendering which sets the return
     # value as the `response_body`.
