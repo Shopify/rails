@@ -149,7 +149,7 @@ module ActiveSupport
       if defined?(::JSON::Coder) && Gem::Version.new(::JSON::VERSION) >= Gem::Version.new("2.15.2")
         class JSONGemCoderEncoder # :nodoc:
           JSON_NATIVE_TYPES = [Hash, Array, Float, String, Symbol, Integer, NilClass, TrueClass, FalseClass, ::JSON::Fragment].freeze
-          CODER = ::JSON::Coder.new do |value, is_key|
+          as_json = ->(value, is_key) do
             json_value = value.as_json
             # Keep compatibility by calling to_s on non-String keys
             next json_value.to_s if is_key
@@ -166,7 +166,8 @@ module ActiveSupport
             end
             json_value
           end
-
+          as_json = Ractor.shareable_lambda(&as_json) if defined?(Ractor.shareable_lambda)
+          CODER = ::JSON::Coder.new(&as_json).freeze
 
           def initialize(options = nil)
             if options
@@ -228,8 +229,8 @@ module ActiveSupport
 
         def json_encoder=(encoder)
           @json_encoder = encoder
-          @encoder_without_options = encoder.new
-          @encoder_without_escape = encoder.new(escape: false)
+          @encoder_without_options = encoder.new.freeze
+          @encoder_without_escape = encoder.new(escape: false).freeze
         end
 
         def encode_without_options(value) # :nodoc:
@@ -238,6 +239,13 @@ module ActiveSupport
 
         def encode_without_escape(value) # :nodoc:
           @encoder_without_escape.encode(value)
+        end
+
+        def freeze
+          @json_encoder.freeze
+          @encoder_without_options.freeze
+          @encoder_without_escape.freeze
+          super
         end
       end
 
