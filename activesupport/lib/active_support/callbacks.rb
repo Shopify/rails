@@ -179,7 +179,7 @@ module ActiveSupport
           def ractor_shareable
             Before.new(
               Ractor.shareable_proc(&@user_callback),
-              @user_conditions.map { |user_condition| Ractor.shareable_proc(&user_condition) },
+              @user_conditions.map { |user_condition| Ractor.shareable_proc(&user_condition) }.freeze,
               { terminator: Ractor.shareable_proc(&@halted_lambda) },
               Ractor.shareable_proc(&@filter),
               @name,
@@ -222,6 +222,12 @@ module ActiveSupport
               @user_conditions.map { |user_condition| Ractor.shareable_proc(&user_condition) },
               { skip_after_callbacks_if_terminated: @halting },
             )
+          end
+
+          def freeze
+            @user_callback.freeze
+            @user_conditions.each(&:freeze).freeze
+            super
           end
 
           def call(env)
@@ -381,6 +387,8 @@ module ActiveSupport
             @method_name = method
           end
 
+          def ractor_shareable = freeze
+
           # Return the parts needed to make this call, with the given
           # input values.
           #
@@ -399,14 +407,16 @@ module ActiveSupport
           end
 
           def make_lambda
+            method_name = @method_name
             lambda do |target, value, &block|
-              target.send(@method_name, &block)
+              target.send(method_name, &block)
             end
           end
 
           def inverted_lambda
+            method_name = @method_name
             lambda do |target, value, &block|
-              !target.send(@method_name, &block)
+              !target.send(method_name, &block)
             end
           end
         end
@@ -422,14 +432,18 @@ module ActiveSupport
           end
 
           def make_lambda
+            override_target = @override_target
+            method_name = @method_name
             lambda do |target, value, &block|
-              (@override_target || target).send(@method_name, target, &block)
+              (override_target || target).send(method_name, target, &block)
             end
           end
 
           def inverted_lambda
+            override_target = @override_target
+            method_name = @method_name
             lambda do |target, value, &block|
-              !(@override_target || target).send(@method_name, target, &block)
+              !(override_target || target).send(method_name, target, &block)
             end
           end
         end
@@ -444,14 +458,16 @@ module ActiveSupport
           end
 
           def make_lambda
+            override_block = @override_block
             lambda do |target, value, &block|
-              target.instance_exec(&@override_block)
+              target.instance_exec(&override_block)
             end
           end
 
           def inverted_lambda
+            override_block = @override_block
             lambda do |target, value, &block|
-              !target.instance_exec(&@override_block)
+              !target.instance_exec(&override_block)
             end
           end
         end
@@ -466,14 +482,16 @@ module ActiveSupport
           end
 
           def make_lambda
+            override_block = @override_block
             lambda do |target, value, &block|
-              target.instance_exec(target, &@override_block)
+              target.instance_exec(target, &override_block)
             end
           end
 
           def inverted_lambda
+            override_block = @override_block
             lambda do |target, value, &block|
-              !target.instance_exec(target, &@override_block)
+              !target.instance_exec(target, &override_block)
             end
           end
         end
@@ -483,22 +501,30 @@ module ActiveSupport
             @override_block = block
           end
 
+          def ractor_shareable
+            return self if frozen?
+            @override_block = Ractor.shareable_proc(&@override_block)
+            freeze
+          end
+
           def expand(target, value, block)
             raise ArgumentError unless block
             [target, @override_block || block, :instance_exec, target, block]
           end
 
           def make_lambda
+            override_block = @override_block
             lambda do |target, value, &block|
               raise ArgumentError unless block
-              target.instance_exec(target, block, &@override_block)
+              target.instance_exec(target, block, &override_block)
             end
           end
 
           def inverted_lambda
+            override_block = @override_block
             lambda do |target, value, &block|
               raise ArgumentError unless block
-              !target.instance_exec(target, block, &@override_block)
+              !target.instance_exec(target, block, &override_block)
             end
           end
         end
@@ -513,14 +539,16 @@ module ActiveSupport
           end
 
           def make_lambda
+            override_target = @override_target
             lambda do |target, value, &block|
-              (@override_target || target).call(target, value, &block)
+              (override_target || target).call(target, value, &block)
             end
           end
 
           def inverted_lambda
+            override_target = @override_target
             lambda do |target, value, &block|
-              !(@override_target || target).call(target, value, &block)
+              !(override_target || target).call(target, value, &block)
             end
           end
         end
@@ -570,6 +598,8 @@ module ActiveSupport
         def ractor_shareable
           return self if frozen?
           @nested&.ractor_shareable
+          @call_template&.ractor_shareable
+          @user_conditions&.each(&:ractor_shareable)
           @before&.map!(&:ractor_shareable)
           @after&.map!(&:ractor_shareable)
           freeze
@@ -577,6 +607,8 @@ module ActiveSupport
 
         def freeze
           @nested.freeze
+          @call_template&.freeze
+          @user_conditions&.each(&:freeze).freeze
           @before&.each(&:freeze).freeze
           @after&.each(&:freeze).freeze
           super
