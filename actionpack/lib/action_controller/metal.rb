@@ -285,10 +285,12 @@ module ActionController
       @_request.reset_session
     end
 
-    singleton_class.attr_accessor :middleware_stack
+    singleton_class.attr_writer :middleware_stack
     self.middleware_stack = ActionController::MiddlewareStack.new
 
     class << self
+      def middleware_stack = @middleware_stack || superclass.middleware_stack
+
       def freeze
         @middleware_stack.freeze
         super
