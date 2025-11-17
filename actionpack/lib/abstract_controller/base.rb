@@ -75,6 +75,11 @@ module AbstractController
         freeze
       end
 
+      def freeze
+        @config&.each_value(&:freeze).freeze
+        super
+      end
+
       # A list of all internal methods for a controller. This finds the first abstract
       # superclass of a controller, and gets a list of all public instance methods on
       # that abstract class. Public instance methods of a controller would normally be
