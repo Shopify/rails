@@ -146,6 +146,11 @@ module ActionController
       end
       alias use_renderer use_renderers
 
+      def freeze
+        RENDERERS.freeze
+        super
+      end
+
       def inherited(subclass) = subclass._renderers = _renderers
     end
 
