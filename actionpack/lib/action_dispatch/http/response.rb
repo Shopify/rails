@@ -97,7 +97,7 @@ module ActionDispatch # :nodoc:
 
     CONTENT_TYPE = "Content-Type"
     SET_COOKIE   = "Set-Cookie"
-    NO_CONTENT_CODES = [100, 101, 102, 103, 204, 205, 304]
+    NO_CONTENT_CODES = [100, 101, 102, 103, 204, 205, 304].freeze
 
     singleton_class.attr_accessor :default_charset
     @default_charset = "utf-8"
@@ -120,7 +120,7 @@ module ActionDispatch # :nodoc:
         @str_body = nil
       end
 
-      BODY_METHODS = { to_ary: true }
+      BODY_METHODS = { to_ary: true }.freeze
 
       def respond_to?(method, include_private = false)
         if BODY_METHODS.key?(method)
@@ -489,7 +489,7 @@ module ActionDispatch # :nodoc:
 
   private
     ContentTypeHeader = Struct.new :mime_type, :charset
-    NullContentTypeHeader = ContentTypeHeader.new nil, nil
+    NullContentTypeHeader = ContentTypeHeader.new(nil, nil).freeze
 
     CONTENT_TYPE_PARSER = /
       \A
@@ -564,7 +564,7 @@ module ActionDispatch # :nodoc:
         @response.body
       end
 
-      BODY_METHODS = { to_ary: true, each: true, call: true, to_path: true }
+      BODY_METHODS = { to_ary: true, each: true, call: true, to_path: true }.freeze
 
       def respond_to?(method, include_private = false)
         if BODY_METHODS.key?(method)
