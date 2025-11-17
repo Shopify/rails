@@ -174,6 +174,11 @@ class OrderedOptionsTest < ActiveSupport::TestCase
     assert_equal({ one: "first value", two: "second value", three: "third value" }, object.to_h)
   end
 
+  def test_inheritable_options_to_h_nil_parent
+    inheritable_options = ActiveSupport::InheritableOptions.new
+    assert_equal({}, inheritable_options.to_h)
+  end
+
   def test_ordered_options_dup
     object = ActiveSupport::OrderedOptions.new
     object.one = "first value"
