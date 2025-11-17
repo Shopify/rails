@@ -46,10 +46,13 @@ module AbstractController
     # Returns the formats that can be processed by the controller.
     attr_internal :formats
 
-    class_attribute :config, instance_predicate: false, default: ActiveSupport::OrderedOptions.new
+    singleton_class.attr_writer :config
+    self.config = ActiveSupport::OrderedOptions.new
     extend ActiveSupport::DescendantsTracker
 
     class << self
+      def config = @config || superclass.config
+
       attr_reader :abstract
       alias_method :abstract?, :abstract
 
