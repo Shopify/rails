@@ -161,7 +161,7 @@ module ActionController
       nil
     end
 
-    add :json do |json, options|
+    add :json, &Ractor.shareable_proc(&-> (json, options) do
       json_options = options.except(:callback, :content_type, :status)
       json_options[:escape] ||= false if options[:callback].blank?
       json = json.to_json(json_options) unless json.kind_of?(String)
@@ -176,7 +176,7 @@ module ActionController
         self.content_type = :json if media_type.nil?
         json
       end
-    end
+    end)
 
     add :js do |js, options|
       self.content_type = :js if media_type.nil?
