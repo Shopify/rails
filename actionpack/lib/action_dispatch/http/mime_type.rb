@@ -16,6 +16,13 @@ module Mime
       @symbols_set = Set.new
     end
 
+    def freeze
+      @mimes.each(&:freeze).freeze
+      @symbols.freeze
+      @symbols_set.freeze
+      super
+    end
+
     def each(&block)
       @mimes.each(&block)
     end
@@ -49,6 +56,7 @@ module Mime
 
   class << self
     def freeze
+      SET.freeze
       LOOKUP.each_value(&:freeze).freeze
       super
     end
