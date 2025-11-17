@@ -350,7 +350,6 @@ module Rails
           self.yjit = !Rails.env.local?
 
           if respond_to?(:action_controller)
-            action_controller.escape_json_responses = false
             action_controller.action_on_path_relative_redirect = :raise
           end
 

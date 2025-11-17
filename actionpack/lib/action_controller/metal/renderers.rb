@@ -27,24 +27,9 @@ module ActionController
     # Default values are `:json`, `:js`, `:xml`.
     RENDERERS = Set.new
 
-    module DeprecatedEscapeJsonResponses # :nodoc:
-      def escape_json_responses=(value)
-        if value
-          ActionController.deprecator.warn(<<~MSG.squish)
-            Setting action_controller.escape_json_responses = true is deprecated and will have no effect in Rails 8.2.
-            Set it to `false`, or remove the config.
-          MSG
-        end
-        super
-      end
-    end
-
     included do
       singleton_class.attr_accessor :_renderers
       self._renderers = Set.new.freeze
-      class_attribute :escape_json_responses, instance_writer: false, instance_accessor: false, default: true
-
-      singleton_class.prepend DeprecatedEscapeJsonResponses
     end
 
     # Used in ActionController::Base and ActionController::API to include all
@@ -178,7 +163,7 @@ module ActionController
 
     add :json do |json, options|
       json_options = options.except(:callback, :content_type, :status)
-      json_options[:escape] ||= false if !self.class.escape_json_responses? && options[:callback].blank?
+      json_options[:escape] ||= false if options[:callback].blank?
       json = json.to_json(json_options) unless json.kind_of?(String)
 
       if options[:callback].present?
