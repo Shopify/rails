@@ -102,7 +102,7 @@ module ActiveSupport
 
     def freeze
       replace(to_h)
-      @parent = nil
+      @parent = {}.freeze
       super
     end
 
