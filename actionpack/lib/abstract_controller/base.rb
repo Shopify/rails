@@ -76,6 +76,7 @@ module AbstractController
       end
 
       def freeze
+        return self if frozen?
         @config&.each_value(&:freeze).freeze
         super
       end
