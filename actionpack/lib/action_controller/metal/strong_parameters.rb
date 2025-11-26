@@ -61,7 +61,7 @@ module ActionController
 
     def initialize(params) # :nodoc:
       @params = params
-      super("found unpermitted parameter#{'s' if params.size > 1 }: #{params.map { |e| ":#{e}" }.join(", ")}")
+      # super("found unpermitted parameter#{'s' if params.size > 1 }: #{params.map { |e| ":#{e}" }.join(", ")}")
     end
   end
 
@@ -160,9 +160,11 @@ module ActionController
   class Parameters
     include ActiveSupport::DeepMergeable
 
-    cattr_accessor :permit_all_parameters, instance_accessor: false, default: false
+    singleton_class.attr_accessor :permit_all_parameters
+    @permit_all_parameters = false
 
-    cattr_accessor :action_on_unpermitted_parameters, instance_accessor: false
+    singleton_class.attr_accessor :action_on_unpermitted_parameters
+    @action_on_unpermitted_parameters = false
 
     ##
     # :method: deep_merge
