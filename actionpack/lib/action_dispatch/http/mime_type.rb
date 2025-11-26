@@ -380,7 +380,7 @@ module Mime
   # ALL isn't a real MIME type, so we don't register it for lookup with the other
   # concrete types. It's a wildcard match that we use for `respond_to` negotiation
   # internals.
-  ALL = AllType.instance
+  ALL = AllType.instance.freeze
 
   class NullType
     include Singleton
