@@ -105,6 +105,25 @@ module ActiveModel
       assert_same post, data.attributes["post_model"]
     end
 
+    test "assigning aliased attributes" do
+      data = ModelForAttributesTest.new(
+        post_model: Post.new(name: "Nikita")
+      )
+
+      assert_equal "Nikita", data.post_model.title
+      assert_equal data.post_model.title, data.post_model.name
+    end
+
+    test "reading aliased attributes" do
+      post = Post.new(name: "Nikita")
+      data = ModelForAttributesTest.new(
+        post_model: post
+      )
+
+      assert_equal post.attributes, data.attributes["post_model"].attributes
+      assert_same post, data.attributes["post_model"]
+    end
+
     test "reading attribute names" do
       names = [
         "integer_field",

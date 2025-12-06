@@ -46,6 +46,12 @@ module ActiveModel
         assert @type.valid_value?(model_hash)
       end
 
+      test "#valid_value? returns true if the value is a hash that contains only aliased required keys" do
+        model_hash = { name: "Greeting" }
+
+        assert @type.valid_value?(model_hash)
+      end
+
       test "#valid_value? returns false if value is a hash but with not-supported keys" do
         model_hash = { title: "Greeting", body: "Hello!", what_am_i: "I'm not supposed to be here" }
 

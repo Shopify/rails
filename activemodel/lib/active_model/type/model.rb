@@ -41,6 +41,8 @@ module ActiveModel
         attr_reader :serializer
 
         def valid_hash?(value)
+          value = value.transform_keys { |key| klass.attribute_alias(key) || key }
+
           value.keys.map(&:to_s).difference(klass.attribute_names).none?
         end
 
