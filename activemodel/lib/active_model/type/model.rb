@@ -50,6 +50,8 @@ module ActiveModel
 
         def cast_value(value)
           case value
+          when klass
+            value
           when Hash
             klass.new(value)
           else

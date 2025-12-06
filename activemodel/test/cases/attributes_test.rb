@@ -102,6 +102,7 @@ module ActiveModel
 
       assert_equal expected_attributes, data.attributes.except("post_model")
       assert_equal post.attributes, data.attributes["post_model"].attributes
+      assert_same post, data.attributes["post_model"]
     end
 
     test "reading attribute names" do
