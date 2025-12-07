@@ -8,6 +8,7 @@ require "active_record/type/date"
 require "active_record/type/date_time"
 require "active_record/type/decimal_without_scale"
 require "active_record/type/json"
+require "active_record/type/model"
 require "active_record/type/time"
 require "active_record/type/text"
 require "active_record/type/unsigned_integer"
@@ -75,6 +76,7 @@ module ActiveRecord
     register(:float, Type::Float, override: false)
     register(:integer, Type::Integer, override: false)
     register(:immutable_string, Type::ImmutableString, override: false)
+    register(:model, Type::Model, override: false)
     register(:json, Type::Json, override: false)
     register(:string, Type::String, override: false)
     register(:text, Type::Text, override: false)
