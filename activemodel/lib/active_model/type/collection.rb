@@ -48,6 +48,8 @@ module ActiveModel
       end
 
       def deserialize(value)
+        return nil if value.nil?
+
         serializer.decode(value).map { |el| @type_object.deserialize(el) }
       end
 
@@ -66,6 +68,8 @@ module ActiveModel
       end
 
       def valid_value?(value)
+        return true if value.nil?
+
         value.is_a?(Array) && value.all? { |el| @type_object.valid_value?(el) }
       end
 
