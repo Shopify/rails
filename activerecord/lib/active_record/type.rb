@@ -59,6 +59,7 @@ module ActiveRecord
     BigInteger = ActiveModel::Type::BigInteger
     Binary = ActiveModel::Type::Binary
     Boolean = ActiveModel::Type::Boolean
+    Collection = ActiveModel::Type::Collection
     Decimal = ActiveModel::Type::Decimal
     Float = ActiveModel::Type::Float
     Integer = ActiveModel::Type::Integer
@@ -69,6 +70,7 @@ module ActiveRecord
     register(:big_integer, Type::BigInteger, override: false)
     register(:binary, Type::Binary, override: false)
     register(:boolean, Type::Boolean, override: false)
+    register(:collection, Type::Collection, override: false)
     register(:date, Type::Date, override: false)
     register(:datetime, Type::DateTime, override: false)
     register(:decimal, Type::Decimal, override: false)
