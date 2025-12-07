@@ -17,7 +17,7 @@ module ActiveModel
         assert_equal "Hello!", model.body
       end
 
-      test "#cast returns a new model instance from the given model instance" do
+      test "#cast returns the same model instance from the given model instance" do
         model = Post.new(title: "Greeting", body: "Hello!")
 
         new_model = @type.cast(model)
@@ -25,7 +25,7 @@ module ActiveModel
         assert_equal "Greeting", new_model.title
         assert_equal "Hello!", new_model.body
 
-        assert_not_same model, new_model
+        assert_same model, new_model
       end
 
       test "#valid_value? returns true if the value is an object of the same class as the type" do
@@ -42,6 +42,12 @@ module ActiveModel
 
       test "#valid_value? returns true if the value is a hash that contains only required keys" do
         model_hash = { title: "Greeting" }
+
+        assert @type.valid_value?(model_hash)
+      end
+
+      test "#valid_value? returns true if the value is a hash that contains only aliased required keys" do
+        model_hash = { name: "Greeting" }
 
         assert @type.valid_value?(model_hash)
       end

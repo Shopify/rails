@@ -6,4 +6,6 @@ class Post
 
   attribute :title, :string
   attribute :body, :string
+
+  alias_attribute :name, :title
 end
