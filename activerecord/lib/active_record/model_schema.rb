@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "monitor"
+require "active_record/model_schema/schema"
 
 module ActiveRecord
   module ModelSchema
@@ -201,6 +202,28 @@ module ActiveRecord
     end
 
     module ClassMethods
+      # Returns the current schema context key from the connection configuration.
+      # Defaults to "default" if no connection is available or no context is configured.
+      def current_schema_context_key # :nodoc:
+        return "default" unless connected?
+        connection_db_config.schema_context_key
+      rescue
+        "default"
+      end
+
+      # Returns the Schema instance for the current schema context.
+      # Each context has its own Schema instance that caches schema-dependent state.
+      def model_schema # :nodoc:
+        context_key = current_schema_context_key
+        @model_schemas ||= {}
+        @model_schemas[context_key] ||= Schema.new(self, context_key)
+      end
+
+      # Returns all Schema instances for this model (across all contexts).
+      def model_schemas # :nodoc:
+        @model_schemas ||= {}
+      end
+
       # Guesses the table name (in forced lower-case) based on the name of the class in the
       # inheritance hierarchy descending directly from ActiveRecord::Base. So if the hierarchy
       # looks like: Reply < Message < ActiveRecord::Base, then Message is used
@@ -434,29 +457,19 @@ module ActiveRecord
       end
 
       def attributes_builder # :nodoc:
-        @attributes_builder ||= begin
-          defaults = _default_attributes.except(*(column_names - [primary_key]))
-          ActiveModel::AttributeSet::Builder.new(attribute_types, defaults)
-        end
+        model_schema.attributes_builder
       end
 
       def columns_hash # :nodoc:
-        load_schema unless @columns_hash
-        @columns_hash
+        model_schema.columns_hash
       end
 
       def columns
-        @columns ||= columns_hash.values.freeze
+        model_schema.columns
       end
 
       def _returning_columns_for_insert(connection) # :nodoc:
-        @_returning_columns_for_insert ||= begin
-          auto_populated_columns = columns.filter_map do |c|
-            c.name if connection.return_value_after_insert?(c)
-          end
-
-          auto_populated_columns.empty? ? Array(primary_key) : auto_populated_columns
-        end
+        model_schema._returning_columns_for_insert(connection)
       end
 
       # Returns the column object for the named attribute.
@@ -473,37 +486,28 @@ module ActiveRecord
       #   person.column_for_attribute(:nothing)
       #   # => #<ActiveRecord::ConnectionAdapters::NullColumn:0xXXX @name=nil, @sql_type=nil, @cast_type=#<Type::Value>, ...>
       def column_for_attribute(name)
-        name = name.to_s
-        columns_hash.fetch(name) do
-          ConnectionAdapters::NullColumn.new(name)
-        end
+        model_schema.column_for_attribute(name)
       end
 
       # Returns a hash where the keys are column names and the values are
       # default values when instantiating the Active Record object for this table.
       def column_defaults
-        load_schema
-        @column_defaults ||= _default_attributes.deep_dup.to_hash.freeze
+        model_schema.column_defaults
       end
 
       # Returns an array of column names as strings.
       def column_names
-        @column_names ||= columns.map(&:name).freeze
+        model_schema.column_names
       end
 
       def symbol_column_to_string(name_symbol) # :nodoc:
-        @symbol_column_to_string_name_hash ||= column_names.index_by(&:to_sym)
-        @symbol_column_to_string_name_hash[name_symbol]
+        model_schema.symbol_column_to_string(name_symbol)
       end
 
       # Returns an array of column objects where the primary id, all columns ending in "_id" or "_count",
       # and columns used for single table inheritance have been removed.
       def content_columns
-        @content_columns ||= columns.reject do |c|
-          c.name == primary_key ||
-          c.name == inheritance_column ||
-          c.name.end_with?("_id", "_count")
-        end.freeze
+        model_schema.content_columns
       end
 
       # Resets all the cached information about columns, which will cause them
@@ -537,43 +541,26 @@ module ActiveRecord
         ([self] + descendants).each(&:undefine_attribute_methods)
         schema_cache.clear_data_source_cache!(table_name)
 
-        reload_schema_from_cache
+        # Reset all Schema instances across all contexts
+        model_schemas.each_value(&:reload_schema_from_cache)
         initialize_find_by_cache
       end
 
       # Load the model's schema information either from the schema cache
       # or directly from the database.
       def load_schema
-        return if schema_loaded?
-        @load_schema_monitor.synchronize do
-          return if schema_loaded?
-
-          load_schema!
-
-          @schema_loaded = true
-        rescue
-          reload_schema_from_cache # If the schema loading failed half way through, we must reset the state.
-          raise
-        end
+        model_schema.load_schema
       end
 
       protected
         def initialize_load_schema_monitor
-          @load_schema_monitor = Monitor.new
+          # No longer needed - each Schema has its own monitor
         end
 
         def reload_schema_from_cache(recursive = true)
-          @_returning_columns_for_insert = nil
-          @arel_table = nil
-          @column_names = nil
-          @symbol_column_to_string_name_hash = nil
-          @content_columns = nil
-          @column_defaults = nil
-          @attributes_builder = nil
-          @columns = nil
-          @columns_hash = nil
-          @schema_loaded = false
-          @attribute_names = nil
+          # Reset all Schema instances
+          model_schemas.each_value(&:reload_schema_from_cache)
+
           if recursive
             subclasses.each do |descendant|
               descendant.send(:reload_schema_from_cache)
@@ -585,7 +572,8 @@ module ActiveRecord
         def inherited(child_class)
           super
           child_class.initialize_load_schema_monitor
-          child_class.reload_schema_from_cache(false)
+          # Child class will create its own Schema instances on demand
+          child_class.instance_variable_set(:@model_schemas, {})
           child_class.class_eval do
             @ignored_columns = nil
             @only_columns = nil
@@ -593,23 +581,11 @@ module ActiveRecord
         end
 
         def schema_loaded?
-          @schema_loaded
+          model_schema.send(:schema_loaded?)
         end
 
         def load_schema!
-          unless table_name
-            raise ActiveRecord::TableNotSpecified, "#{self} has no table configured. Set one with #{self}.table_name="
-          end
-
-          columns_hash = schema_cache.columns_hash(table_name)
-          if only_columns.present?
-            columns_hash = columns_hash.slice(*only_columns)
-          elsif ignored_columns.present?
-            columns_hash = columns_hash.except(*ignored_columns)
-          end
-          @columns_hash = columns_hash.freeze
-
-          _default_attributes # Precompute to cache DB-dependent attribute types
+          model_schema.send(:load_schema!)
         end
 
         # Guesses the table name, but does not decorate it with prefix and suffix information.

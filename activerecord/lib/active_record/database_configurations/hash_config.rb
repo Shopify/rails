@@ -195,6 +195,13 @@ module ActiveRecord
         configuration_hash.fetch(:use_metadata_table, true)
       end
 
+      # The schema context key groups connections that share a schema shape.
+      # Multiple pools (read replicas, shards) can share the same key, meaning
+      # they share cached schema information. Defaults to "default".
+      def schema_context_key # :nodoc:
+        configuration_hash.fetch(:schema_context, "default").to_s
+      end
+
       private
         def schema_file_type(format)
           case format.to_sym
