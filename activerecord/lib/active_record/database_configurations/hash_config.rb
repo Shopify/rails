@@ -217,6 +217,10 @@ module ActiveRecord
         configuration_hash.fetch(:dump_schema_migrations, ActiveRecord.dump_schema_migrations)
       end
 
+      def schema_context # :nodoc:
+        configuration_hash.fetch(:schema_context, "default").to_s
+      end
+
       private
         def schema_file_type(format)
           case format.to_sym
