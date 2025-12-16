@@ -103,9 +103,17 @@ module ActionView
       end
 
       def self.view_context_class
+        return @view_context_class if @view_context_class
+
         @view_context_mutex.synchronize do
           @view_context_class ||= ActionView::Base.with_empty_template_cache
         end
+      end
+
+      def self.freeze
+        view_context_class
+        @view_context_mutex = nil
+        super
       end
     end
 
@@ -247,7 +255,7 @@ module ActionView
     def initialize(view_paths, details = {}, prefixes = [])
       @details_key = nil
       @digest_cache = nil
-      @cache = true
+      @cache = false
       @prefixes = prefixes
 
       @details = initialize_details({}, details)

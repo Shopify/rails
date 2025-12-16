@@ -12,8 +12,14 @@ module ActionView # :nodoc:
       @template_handlers = {}
       @default_template_handlers = nil
 
+      def self.ractor_shareable
+        @template_handlers[:ruby] = Ractor.shareable_proc(&@template_handlers[:ruby])
+        freeze
+      end
+
       def self.freeze
         @template_extensions.each(&:freeze).freeze
+        @template_handlers.each_value(&:freeze).freeze
         super
       end
 
