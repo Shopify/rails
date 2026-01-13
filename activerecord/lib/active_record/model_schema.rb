@@ -472,6 +472,12 @@ module ActiveRecord
         model_schema._returning_columns_for_insert(connection)
       end
 
+      # Override ActiveModel::AttributeRegistration to use per-context schema caching.
+      # This ensures attribute_types are cached per-schema-context rather than at the class level.
+      def attribute_types # :nodoc:
+        model_schema.attribute_types
+      end
+
       # Returns the column object for the named attribute.
       # Returns an ActiveRecord::ConnectionAdapters::NullColumn if the
       # named attribute does not exist.
