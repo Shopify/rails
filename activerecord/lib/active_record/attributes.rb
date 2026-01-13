@@ -250,18 +250,6 @@ module ActiveRecord
         define_default_attribute(name, default, cast_type, from_user: user_provided_default)
       end
 
-      def _default_attributes # :nodoc:
-        @default_attributes ||= begin
-          attributes_hash = columns_hash.transform_values do |column|
-            ActiveModel::Attribute.from_database(column.name, column.default, type_for_column(column))
-          end
-
-          attribute_set = ActiveModel::AttributeSet.new(attributes_hash)
-          apply_pending_attribute_modifications(attribute_set)
-          attribute_set
-        end
-      end
-
       ##
       # :method: type_for_attribute
       # :call-seq: type_for_attribute(attribute_name, &block)
