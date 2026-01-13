@@ -93,15 +93,22 @@ module ActiveRecord
       end
 
       # Returns the default attributes for this schema context
-      # This is complex because it needs to integrate with the model's attribute system
-      # which handles pending attribute modifications (custom types, defaults, etc.)
-      # So we delegate back to the model class which has the full implementation
+      def _default_attributes
+        @default_attributes ||= begin
+          attributes_hash = columns_hash.transform_values do |column|
+            ActiveModel::Attribute.from_database(column.name, column.default, model_class.send(:type_for_column, column))
+          end
+
+          attribute_set = ActiveModel::AttributeSet.new(attributes_hash)
+          model_class.send(:apply_pending_attribute_modifications, attribute_set)
+          attribute_set
+        end
+      end
+
+      # Returns the attributes builder for this schema context
       def attributes_builder
-        # Note: This will call back to the model class's _default_attributes
-        # which will call columns_hash, which delegates back to us
-        # This ensures pending attribute modifications are properly applied
         @attributes_builder ||= begin
-          defaults = model_class._default_attributes.except(*(column_names - [primary_key].flatten))
+          defaults = _default_attributes.except(*(column_names - [primary_key].flatten))
           ActiveModel::AttributeSet::Builder.new(attribute_types, defaults)
         end
       end
@@ -109,7 +116,7 @@ module ActiveRecord
       # Returns column defaults hash
       def column_defaults
         load_schema
-        @column_defaults ||= model_class._default_attributes.deep_dup.to_hash.freeze
+        @column_defaults ||= _default_attributes.deep_dup.to_hash.freeze
       end
 
       # Returns columns for insert returning
@@ -125,7 +132,7 @@ module ActiveRecord
 
       # Returns attribute types hash
       def attribute_types
-        @attribute_types ||= model_class._default_attributes.cast_types
+        @attribute_types ||= _default_attributes.cast_types
       end
 
       # Returns content columns (non-meta columns)
@@ -203,8 +210,7 @@ module ActiveRecord
           @columns_hash = columns_hash.freeze
 
           # Precompute default attributes to cache DB-dependent attribute types
-          # This calls back to the model class which handles pending modifications
-          model_class._default_attributes
+          _default_attributes
         end
 
         def schema_cache

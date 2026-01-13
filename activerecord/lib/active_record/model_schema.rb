@@ -460,6 +460,10 @@ module ActiveRecord
         model_schema.attributes_builder
       end
 
+      def _default_attributes # :nodoc:
+        model_schema._default_attributes
+      end
+
       def columns_hash # :nodoc:
         model_schema.columns_hash
       end
