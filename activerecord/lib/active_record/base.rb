@@ -299,6 +299,7 @@ module ActiveRecord # :nodoc:
     include Core
     include Persistence
     include ReadonlyAttributes
+    include ModelSchema
     include Inheritance
     include Scoping
     include Sanitization
@@ -307,7 +308,6 @@ module ActiveRecord # :nodoc:
     include Validations
     include CounterCache
     include Attributes
-    include ModelSchema
     include Locking::Optimistic
     include Locking::Pessimistic
     include Encryption::EncryptableRecord

@@ -474,10 +474,6 @@ module ActiveRecord
         model_schema.attributes_builder
       end
 
-      def _default_attributes # :nodoc:
-        model_schema._default_attributes
-      end
-
       def columns_hash # :nodoc:
         model_schema.columns_hash
       end
@@ -488,12 +484,6 @@ module ActiveRecord
 
       def _returning_columns_for_insert(connection) # :nodoc:
         model_schema._returning_columns_for_insert(connection)
-      end
-
-      # Override ActiveModel::AttributeRegistration to use per-context schema caching.
-      # This ensures attribute_types are cached per-schema-context rather than at the class level.
-      def attribute_types # :nodoc:
-        model_schema.attribute_types
       end
 
       # Returns the column object for the named attribute.
