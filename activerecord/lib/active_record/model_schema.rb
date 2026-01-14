@@ -460,10 +460,6 @@ module ActiveRecord
         model_schema.attributes_builder
       end
 
-      def _default_attributes # :nodoc:
-        model_schema._default_attributes
-      end
-
       def columns_hash # :nodoc:
         model_schema.columns_hash
       end
@@ -478,10 +474,6 @@ module ActiveRecord
 
       def yaml_encoder # :nodoc:
         model_schema.yaml_encoder
-      end
-
-      def attribute_types # :nodoc:
-        model_schema.attribute_types
       end
 
       # Returns the column object for the named attribute.
