@@ -250,6 +250,14 @@ module ActiveRecord
         define_default_attribute(name, default, cast_type, from_user: user_provided_default)
       end
 
+      def _default_attributes # :nodoc:
+        model_schema._default_attributes
+      end
+
+      def attribute_types # :nodoc:
+        model_schema.attribute_types
+      end
+
       ##
       # :method: type_for_attribute
       # :call-seq: type_for_attribute(attribute_name, &block)
