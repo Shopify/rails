@@ -172,11 +172,18 @@ module ActiveRecord
         @columns = nil
         @columns_hash = nil
         @schema_loaded = false
-        @attribute_names = nil
         @attribute_types = nil
         @default_attributes = nil
         @primary_key = nil
         @composite_primary_key = nil
+      end
+
+      # Set the table name and clear cached state that depends on it
+      def table_name=(value)
+        @table_name = nil
+        @arel_table = nil
+        @predicate_builder = nil
+        @sequence_name = nil
       end
 
       # Load schema information from the schema cache
@@ -185,7 +192,7 @@ module ActiveRecord
         @load_schema_monitor.synchronize do
           return if schema_loaded?
 
-          load_schema!
+          model_class.send(:load_schema!)
           @schema_loaded = true
         rescue
           reload_schema_from_cache
