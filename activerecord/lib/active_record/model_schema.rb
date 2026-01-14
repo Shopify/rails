@@ -301,10 +301,8 @@ module ActiveRecord
           reset_column_information if connected?
         end
 
-        @table_name        = value
-        @arel_table        = nil
-        @sequence_name     = nil unless @explicit_sequence_name
-        @predicate_builder = nil
+        @table_name = value
+        model_schemas.each_value { |schema| schema.table_name = value }
       end
 
       # Returns a quoted version of the table name.
@@ -541,8 +539,7 @@ module ActiveRecord
         ([self] + descendants).each(&:undefine_attribute_methods)
         schema_cache.clear_data_source_cache!(table_name)
 
-        # Reset all Schema instances across all contexts
-        model_schemas.each_value(&:reload_schema_from_cache)
+        reload_schema_from_cache
         initialize_find_by_cache
       end
 
@@ -558,6 +555,8 @@ module ActiveRecord
         end
 
         def reload_schema_from_cache(recursive = true)
+          @attribute_names = nil
+
           # Reset all Schema instances
           model_schemas.each_value(&:reload_schema_from_cache)
 
