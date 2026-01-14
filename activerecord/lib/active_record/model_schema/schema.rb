@@ -108,7 +108,7 @@ module ActiveRecord
       # Returns the attributes builder for this schema context
       def attributes_builder
         @attributes_builder ||= begin
-          defaults = _default_attributes.except(*(column_names - [primary_key].flatten))
+          defaults = _default_attributes.except(*(column_names - [primary_key]))
           ActiveModel::AttributeSet::Builder.new(attribute_types, defaults)
         end
       end
@@ -132,14 +132,15 @@ module ActiveRecord
 
       # Returns attribute types hash
       def attribute_types
-        @attribute_types ||= _default_attributes.cast_types
+        @attribute_types ||= _default_attributes.cast_types.tap do |hash|
+          hash.default = ActiveModel::Type.default_value
+        end
       end
 
       # Returns content columns (non-meta columns)
       def content_columns
         @content_columns ||= columns.reject do |c|
-          pk = primary_key.is_a?(Array) ? primary_key : [primary_key]
-          pk.include?(c.name) ||
+          c.name == primary_key ||
           c.name == model_class.inheritance_column ||
           c.name.end_with?("_id", "_count")
         end.freeze
@@ -173,6 +174,7 @@ module ActiveRecord
         @schema_loaded = false
         @attribute_names = nil
         @attribute_types = nil
+        @default_attributes = nil
         @primary_key = nil
         @composite_primary_key = nil
       end
