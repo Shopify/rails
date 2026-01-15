@@ -421,8 +421,6 @@ module ActiveRecord
           end
 
           subclass.class_eval do
-            @arel_table = nil
-            @predicate_builder = nil
             @inspection_filter = nil
             @filter_attributes ||= nil
             @generated_association_methods ||= nil

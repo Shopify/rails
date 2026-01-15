@@ -571,9 +571,8 @@ module ActiveRecord
         def inherited(child_class)
           super
           child_class.initialize_load_schema_monitor
-          # Child class will create its own Schema instances on demand
-          child_class.instance_variable_set(:@model_schemas, {})
           child_class.class_eval do
+            @model_schemas = {}
             @ignored_columns = nil
             @only_columns = nil
           end
