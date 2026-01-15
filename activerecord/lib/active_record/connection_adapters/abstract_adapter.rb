@@ -199,6 +199,7 @@ module ActiveRecord
         @verified = false
         @needs_reconnect = false
         @unfinalized_intents = []
+        @pipelining_locked = false
 
         @pool_jitter = rand * max_jitter
       end
@@ -1107,6 +1108,10 @@ module ActiveRecord
         #
         def with_raw_connection(allow_retry: false, materialize_transactions: true, pipeline_mode: nil)
           @lock.synchronize do
+            # Save pipeline state before any nested queries (connect!, materialize_transactions,
+            # verify! can all run nested queries that might change pipeline mode)
+            was_in_pipeline = pipeline_active?
+
             reconnectable = ensure_connection_ready(
               allow_retry: allow_retry,
               materialize_transactions: materialize_transactions
@@ -1116,14 +1121,25 @@ module ActiveRecord
             deadline = retry_deadline && Process.clock_gettime(Process::CLOCK_MONOTONIC) + retry_deadline
 
             begin
-              # Handle pipeline mode transitions
+              # Handle pipeline mode: explicit request, or restore original state
               if pipeline_mode == true
                 enter_pipeline_mode
               elsif pipeline_mode == false
                 exit_pipeline_mode
+              elsif !was_in_pipeline && pipeline_active?
+                # Nested queries entered pipeline mode - exit to restore state
+                exit_pipeline_mode
               end
 
-              yield @raw_connection
+              # Lock pipelining while yielding to prevent nested queries from changing mode
+              was_pipelining_locked = @pipelining_locked
+              @pipelining_locked = true
+
+              begin
+                yield @raw_connection
+              ensure
+                @pipelining_locked = was_pipelining_locked
+              end
             rescue => original_exception
               translated_exception = translate_exception_class(original_exception, nil, nil)
               invalidate_transaction(translated_exception)
