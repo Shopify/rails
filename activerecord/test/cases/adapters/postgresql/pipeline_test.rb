@@ -498,6 +498,37 @@ module ActiveRecord
 
       @connection.exit_pipeline_mode
     end
+
+    def test_pending_intents_cleared_on_connection_failure
+      pool_config = ActiveRecord::Base.connection_pool.db_config
+      test_pool = ActiveRecord::ConnectionAdapters::ConnectionPool.new(
+        ActiveRecord::ConnectionAdapters::PoolConfig.new(
+          ActiveRecord::Base,
+          pool_config,
+          :writing,
+          :default
+        )
+      )
+
+      begin
+        conn = test_pool.checkout
+        conn.materialize_transactions
+        pid = conn.select_value("SELECT pg_backend_pid()")
+
+        conn.enter_pipeline_mode
+
+        conn.send(:internal_build_intent, "SELECT 1", "TEST").execute!
+        conn.send(:internal_build_intent, "SELECT 2", "TEST").execute!
+
+        @connection.execute("SELECT pg_terminate_backend(#{pid})")
+
+        conn.exit_pipeline_mode
+
+        assert_empty conn.instance_variable_get(:@pending_intents)
+      ensure
+        test_pool.disconnect! rescue nil
+      end
+    end
   end
 
   class PostgresqlPipelineBatchSemanticsTest < ActiveRecord::PostgreSQLTestCase
