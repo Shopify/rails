@@ -1041,6 +1041,7 @@ module ActiveRecord
 
       def test_fatal_via_notice_channel_recovers_before_the_next_query
         pid = connection_id_from_server(@connection)
+        @connection.exit_pipeline_mode if @connection.pipeline_active?
         kill_connection_from_server(pid)
 
         # Force the FATAL through the notice channel rather than as a result:
@@ -1064,7 +1065,6 @@ module ActiveRecord
 
       def test_fatal_via_notice_channel_preserves_typed_cause_when_unrecoverable
         pid = connection_id_from_server(@connection)
-        kill_connection_from_server(pid)
 
         # Same notice-channel delivery as above, but reach the raw connection via
         # the #raw_connection accessor, which marks it dirty -> non-recoverable.
@@ -1072,6 +1072,7 @@ module ActiveRecord
         # -- and it must carry the captured FATAL as its cause, not the generic
         # socket error that merely tripped over the already-dead connection.
         raw = @connection.raw_connection
+        kill_connection_from_server(pid)
         raw.socket_io.wait_readable(1)
         raw.consume_input
         assert_nil raw.get_result
