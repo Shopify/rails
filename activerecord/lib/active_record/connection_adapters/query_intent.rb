@@ -325,24 +325,28 @@ module ActiveRecord
         end
 
         loop do
+          unless @raw_result_available
+            adapter.flush_pipeline
+          end
+
           @event_buffer&.flush
 
           if @error && retriable?
             action = adapter.send(:classify_retry_action, @error, reconnectable: @reconnectable)
-            break unless action
+            if action
+              consume_retry
+              reset_for_retry
 
-            consume_retry
-            reset_for_retry
+              case action
+              when :retry_query
+                adapter.send(:backoff, adapter.send(:connection_retries) - @retries_remaining)
+              when :retry_after_reconnect
+                @reconnectable = false
+              end
 
-            case action
-            when :retry_query
-              adapter.send(:backoff, adapter.send(:connection_retries) - @retries_remaining)
-            when :retry_after_reconnect
-              @reconnectable = false
+              adapter.execute_intent(self)
+              next
             end
-
-            adapter.execute_intent(self)
-            next
           end
 
           break
@@ -355,6 +359,16 @@ module ActiveRecord
           raise @error
         end
 
+        if !@session && @raw_result.respond_to?(:check)
+          begin
+            @raw_result.check
+          rescue => error
+            handle_warnings(query_completed: false)
+            @event_buffer&.flush
+            raise adapter.send(:translate_exception_class, error, processed_sql, binds)
+          end
+        end
+
         begin
           handle_warnings(query_completed: true)
         rescue => warning_error
@@ -362,6 +376,7 @@ module ActiveRecord
           @event_buffer&.flush
           raise
         end
+
 
         @event_buffer&.flush
       end

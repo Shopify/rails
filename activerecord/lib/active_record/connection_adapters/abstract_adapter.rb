@@ -921,7 +921,7 @@ module ActiveRecord
       # this client. If that is the case, generally you'll want to invalidate
       # the query cache using +ActiveRecord::Base.clear_query_cache+.
       def raw_connection
-        with_raw_connection do |conn|
+        with_raw_connection(pipeline_mode: false) do |conn|
           disable_lazy_transactions!
           @raw_connection_dirty = true
           conn
@@ -1105,7 +1105,7 @@ module ActiveRecord
         # still-yielded connection in the outer block), but we currently
         # provide no special enforcement there.
         #
-        def with_raw_connection(allow_retry: false, materialize_transactions: true)
+        def with_raw_connection(allow_retry: false, materialize_transactions: true, pipeline_mode: nil)
           @lock.synchronize do
             reconnectable = ensure_connection_ready(
               allow_retry: allow_retry,
@@ -1116,6 +1116,13 @@ module ActiveRecord
             deadline = retry_deadline && Process.clock_gettime(Process::CLOCK_MONOTONIC) + retry_deadline
 
             begin
+              # Handle pipeline mode transitions
+              if pipeline_mode == true
+                enter_pipeline_mode
+              elsif pipeline_mode == false
+                exit_pipeline_mode
+              end
+
               yield @raw_connection
             rescue => original_exception
               translated_exception = translate_exception_class(original_exception, nil, nil)

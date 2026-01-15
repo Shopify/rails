@@ -653,6 +653,7 @@ module ActiveRecord
 
       def perform_sync_attempt(intent) # :nodoc:
         begin
+          exit_pipeline_mode if pipeline_active?
           result = perform_query(@raw_connection, intent)
         rescue ::RangeError
           raise
