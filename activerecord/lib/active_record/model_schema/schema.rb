@@ -186,6 +186,16 @@ module ActiveRecord
         @sequence_name = nil
       end
 
+      def cached_find_by_statement(connection, key, &block)
+        @find_by_statement_cache ||= { true => Concurrent::Map.new, false => Concurrent::Map.new }
+        cache = @find_by_statement_cache[connection.prepared_statements]
+        cache.compute_if_absent(key) { StatementCache.create(connection, &block) }
+      end
+
+      def initialize_find_by_cache
+        @find_by_statement_cache = { true => Concurrent::Map.new, false => Concurrent::Map.new }
+      end
+
       # Load schema information from the schema cache
       def load_schema
         return if schema_loaded?
