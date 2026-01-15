@@ -181,11 +181,16 @@ module ActiveRecord
         intent2.cast_result
       end
 
-      # Third query should have pipeline aborted result
+      # Third query was server-aborted (never ran). It's resettable, so
+      # accessing its result triggers on-demand re-execution. Inside the
+      # fixture transaction, the transaction is in a failed state, so the
+      # server rejects the re-execution attempt.
       assert intent3.raw_result_available?
-      assert_raises(ActiveRecord::StatementInvalid) do
+      assert_equal :server_aborted, intent3.not_run_reason
+      error = assert_raises(ActiveRecord::StatementInvalid) do
         intent3.cast_result
       end
+      assert_match(/current transaction is aborted/, error.message)
 
       @connection.exit_pipeline_mode
     end
@@ -564,6 +569,69 @@ module ActiveRecord
 
         assert_empty conn.instance_variable_get(:@pending_intents)
       ensure
+        test_pool.disconnect! rescue nil
+      end
+    end
+
+    def test_pipeline_failure_cascades_to_subsequent_queries
+      # When a query fails in a pipeline, subsequent queries also fail.
+      # This is the conservative default - we don't know if later queries
+      # depended on earlier ones affecting server state.
+      pool_config = ActiveRecord::Base.connection_pool.db_config
+      test_pool = ActiveRecord::ConnectionAdapters::ConnectionPool.new(
+        ActiveRecord::ConnectionAdapters::PoolConfig.new(
+          ActiveRecord::Base,
+          pool_config,
+          :writing,
+          :default
+        )
+      )
+
+      begin
+        lock_holder = test_pool.checkout
+        lock_holder.connect!
+        conn = test_pool.checkout
+        conn.connect!
+
+        # Create a table and lock a row from another connection
+        lock_holder.execute("CREATE TABLE IF NOT EXISTS pipeline_lock_test (id serial PRIMARY KEY)")
+        lock_holder.execute("INSERT INTO pipeline_lock_test DEFAULT VALUES ON CONFLICT DO NOTHING")
+        lock_holder.execute("BEGIN")
+        lock_holder.execute("SELECT * FROM pipeline_lock_test FOR UPDATE")
+
+        # Set lock_timeout before entering pipeline mode
+        conn.execute("SET lock_timeout = '100ms'")
+        conn.enter_pipeline_mode
+
+        # First query will fail (lock timeout)
+        intent1 = ActiveRecord::ConnectionAdapters::QueryIntent.new(
+          adapter: conn,
+          raw_sql: "SELECT * FROM pipeline_lock_test FOR UPDATE",
+          name: "TEST",
+          allow_retry: false
+        )
+        # Second query will be aborted due to first query's failure
+        intent2 = ActiveRecord::ConnectionAdapters::QueryIntent.new(
+          adapter: conn,
+          raw_sql: "SELECT 2 AS n",
+          name: "TEST",
+          allow_retry: true
+        )
+
+        intent1.execute!
+        intent2.execute!
+
+        # First query fails
+        assert_raises(ActiveRecord::LockWaitTimeout) do
+          intent1.cast_result
+        end
+
+        # Second query was server-aborted (never ran). It's resettable,
+        # so on-demand re-execution succeeds (no enclosing transaction).
+        result2 = intent2.cast_result
+        assert_equal [[2]], result2.rows
+      ensure
+        lock_holder.execute("ROLLBACK") rescue nil
         test_pool.disconnect! rescue nil
       end
     end
