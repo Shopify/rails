@@ -162,6 +162,11 @@ module ActiveRecord
                 next
               end
 
+              if raw_result&.result_status == PG::PGRES_PIPELINE_ABORTED
+                intent.deliver_not_run(reason: :server_aborted)
+                next
+              end
+
               begin
                 raw_result&.check
               rescue => error
