@@ -70,15 +70,32 @@ module ActiveRecord
             begin
               flush_pipeline if connected?
             ensure
-              begin
-                @raw_connection.discard_results if connected?
-              rescue PG::Error
-                # Connection dead, can't discard
+              abandon_pipelined_intents
+
+              if connected?
+                begin
+                  # Drain any unconsumed results (e.g. from replay or
+                  # a failed flush) so we can cleanly exit pipeline mode.
+                  @raw_connection.pipeline_sync
+                  loop do
+                    result = @raw_connection.get_result
+                    break unless result
+                  end
+                rescue PG::Error
+                  # Connection dead, can't discard
+                end
               end
             end
 
             if connected?
-              @raw_connection.exit_pipeline_mode
+              begin
+                @raw_connection.exit_pipeline_mode
+              rescue PG::Error
+                # Pipeline still dirty (e.g. unconsumed results from a
+                # failed flush). Close the connection so it gets
+                # re-established on next use.
+                @raw_connection.close rescue nil
+              end
             end
           end
         end
