@@ -133,6 +133,10 @@ module Rails
       @block = block
     end
 
+    def ractor_shareable!
+      Ractor.make_shareable(self)
+    end
+
     # Returns true if the application is initialized.
     def initialized?
       @initialized
