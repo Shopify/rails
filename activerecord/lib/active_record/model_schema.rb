@@ -205,9 +205,8 @@ module ActiveRecord
       # Returns the current schema context key from the connection configuration.
       # Defaults to "default" if no connection is available or no context is configured.
       def current_schema_context_key # :nodoc:
-        return "default" unless connected?
         connection_db_config.schema_context_key
-      rescue
+      rescue ConnectionNotDefined
         "default"
       end
 
