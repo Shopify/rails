@@ -56,9 +56,29 @@ module ActiveRecord
             return unless pipeline_active?
 
             @pending_intents ||= []
-            @pending_intents << SyncIntent.new
 
+            # Probe the connection before recording a sync marker. Flush
+            # sends any buffered query data, then consume_input reads from
+            # the socket - either will raise on a dead connection while we
+            # still know no sync has been sent. (Flush alone isn't enough:
+            # libpq may have eagerly sent query data during send_query_params,
+            # leaving the write buffer empty. consume_input always has
+            # something to check on the read side.)
+            #
+            # If these probes succeed, we record the SyncIntent - the server
+            # may have received the queries. Then pipeline_sync sends the
+            # actual sync message. If *that* fails, the marker stays:
+            # conservatively assuming the sync might have reached the wire.
+            @raw_connection.flush
+            @raw_connection.consume_input
+            @pending_intents << SyncIntent.new
             @raw_connection.pipeline_sync
+          rescue PG::Error
+            if error = consume_available_fatal_result
+              raise error
+            else
+              raise
+            end
           end
         end
 
@@ -214,6 +234,21 @@ module ActiveRecord
         end
 
         private
+          def consume_available_fatal_result
+            while !@raw_connection.is_busy && (result = @raw_connection.get_result)
+              if result.result_status == PG::PGRES_FATAL_ERROR &&
+                  connection_terminating_severity?(result)
+                result.check
+              end
+
+              result.clear
+            end
+
+            consume_notice_receiver_fatal_error
+          rescue PG::Error => error
+            error if error.respond_to?(:result) && error.result
+          end
+
           # Classify and deliver terminal states to all pending intents after
           # a connection failure, based on sync boundaries.
           #
