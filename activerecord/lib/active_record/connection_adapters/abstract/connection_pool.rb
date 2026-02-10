@@ -521,9 +521,18 @@ module ActiveRecord
               @connections.each do |conn|
                 if conn.in_use?
                   conn.steal!
-                  checkin conn
+                  begin
+                    checkin conn
+                  rescue StandardError => error
+                    ActiveSupport.error_reporter.report(error, handled: true, source: "active_record.connection_pool")
+                  end
                 end
-                conn.disconnect!
+
+                begin
+                  conn.disconnect!
+                rescue StandardError => error
+                  ActiveSupport.error_reporter.report(error, handled: true, source: "active_record.connection_pool")
+                end
               end
               @connections = @pinned_connection ? [@pinned_connection] : []
               @leases.clear
