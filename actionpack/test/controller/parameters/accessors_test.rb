@@ -399,29 +399,16 @@ class ParametersAccessorsTest < ActiveSupport::TestCase
   end
 
   test "inspect shows both class name, parameters and permitted flag" do
-    hash = {
-      "person" => {
-        "age" => "32",
-        "name" => {
-          "first" => "David",
-          "last" => "Heinemeier Hansson"
-        },
-        "addresses" => [{ "city" => "Chicago", "state" => "Illinois" }]
-      },
-    }
-
-    assert_equal(
-      "#<ActionController::Parameters #{hash} permitted: false>",
-      @params.inspect
-    )
+    assert_match(/\A#<ActionController::Parameters:0x[0-9a-f]+ @parameters=/, @params.inspect)
+    assert_match(/@permitted=false/, @params.inspect)
   end
 
   test "inspect prints updated permitted flag in the output" do
-    assert_match(/permitted: false/, @params.inspect)
+    assert_match(/@permitted=false/, @params.inspect)
 
     @params.permit!
 
-    assert_match(/permitted: true/, @params.inspect)
+    assert_match(/@permitted=true/, @params.inspect)
   end
 
   test "#dig delegates the dig method to its values" do

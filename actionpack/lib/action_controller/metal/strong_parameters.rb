@@ -4,6 +4,7 @@
 
 require "active_support/core_ext/hash/indifferent_access"
 require "active_support/core_ext/array/wrap"
+require "active_support/inspect_backport"
 require "active_support/core_ext/string/filters"
 require "active_support/core_ext/object/to_query"
 require "active_support/deep_mergeable"
@@ -1056,9 +1057,7 @@ module ActionController
       dup
     end
 
-    def inspect
-      "#<#{self.class} #{@parameters} permitted: #{@permitted}>"
-    end
+    include ActiveSupport::InspectBackport if RUBY_VERSION < "4"
 
     def self.hook_into_yaml_loading # :nodoc:
       # Wire up YAML format compatibility with Rails 4.2 and Psych 2.0.8 and 2.0.9+.
@@ -1151,6 +1150,10 @@ module ActionController
       end
 
     private
+      def instance_variables_to_inspect
+        [:@parameters, :@permitted].freeze
+      end
+
       def new_instance_with_inherited_permitted_status(hash)
         self.class.new(hash, @logging_context).tap do |new_instance|
           new_instance.permitted = @permitted
