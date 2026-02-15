@@ -89,6 +89,9 @@ module ActiveRecord
     end
 
     def capture_sql(include_schema: false)
+      # Materialize any pending transactions so that the BEGIN statement
+      # is not captured as part of the yielded block's queries.
+      ActiveRecord::Base.lease_connection.materialize_transactions
       counter = SQLCounter.new
       ActiveSupport::Notifications.subscribed(counter, "sql.active_record") do
         yield
@@ -101,6 +104,9 @@ module ActiveRecord
     end
 
     def capture_sql_and_binds
+      # Materialize any pending transactions so that the BEGIN statement
+      # is not captured as part of the yielded block's queries.
+      ActiveRecord::Base.lease_connection.materialize_transactions
       counter = SQLCounter.new
       ActiveSupport::Notifications.subscribed(counter, "sql.active_record") do
         yield

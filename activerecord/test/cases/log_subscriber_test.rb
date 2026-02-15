@@ -51,13 +51,13 @@ class LogSubscriberTest < ActiveRecord::TestCase
 
   def setup
     super
+    ActiveRecord::Base.lease_connection.materialize_transactions
     ActiveSupport.colorize_logging = false
     @logger = ActiveSupport::LogSubscriber::TestHelper::MockLogger.new
     @old_logger = ActiveRecord::LogSubscriber.logger
     ActiveRecord::LogSubscriber.logger = @logger
     TestDebugLogSubscriber.logger = @logger
     Developer.primary_key
-    ActiveRecord::Base.lease_connection.materialize_transactions
   end
 
   def teardown

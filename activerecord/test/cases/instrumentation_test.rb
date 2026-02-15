@@ -158,6 +158,7 @@ module ActiveRecord
     end
 
     def test_payload_affected_rows
+      ActiveRecord::Base.lease_connection.materialize_transactions
       affected_row_values = []
 
       ActiveSupport::Notifications.subscribed(
