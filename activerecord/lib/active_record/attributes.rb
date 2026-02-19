@@ -251,15 +251,11 @@ module ActiveRecord
       end
 
       def _default_attributes # :nodoc:
-        @default_attributes ||= begin
-          attributes_hash = columns_hash.transform_values do |column|
-            ActiveModel::Attribute.from_database(column.name, column.default, type_for_column(column))
-          end
+        model_schema._default_attributes
+      end
 
-          attribute_set = ActiveModel::AttributeSet.new(attributes_hash)
-          apply_pending_attribute_modifications(attribute_set)
-          attribute_set
-        end
+      def attribute_types # :nodoc:
+        model_schema.attribute_types
       end
 
       ##
