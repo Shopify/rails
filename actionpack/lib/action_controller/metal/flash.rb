@@ -39,7 +39,7 @@ module ActionController # :nodoc:
             request.flash[type]
           end
           private type
-          helper_method(type) if respond_to?(:helper_method)
+          # helper_method(type) if respond_to?(:helper_method)
 
           self._flash_types += [type]
         end

@@ -25,6 +25,7 @@ module ActiveRecord
       singleton_class.attr_accessor :delegate_base_methods
 
       def relation_delegate_class(klass)
+        puts @relation_delegate_cache.inspect
         @relation_delegate_cache[klass]
       end
 
@@ -136,7 +137,7 @@ module ActiveRecord
 
     module ClassMethods # :nodoc:
       def create(model, ...)
-        relation_class_for(model).new(model, ...)
+        self.new(model, ...)
       end
 
       private

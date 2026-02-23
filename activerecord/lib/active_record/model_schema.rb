@@ -278,7 +278,7 @@ module ActiveRecord
           reset_column_information if connected?
         end
 
-        @table_name        = value
+        @table_name        = value.freeze
         @arel_table        = nil
         @sequence_name     = nil unless @explicit_sequence_name
         @predicate_builder = nil

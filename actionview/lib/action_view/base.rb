@@ -177,7 +177,8 @@ module ActionView # :nodoc:
     cattr_accessor :automatically_disable_submit_tag, default: true
 
     # Annotate rendered view with file names
-    cattr_accessor :annotate_rendered_view_with_filenames, default: false
+    singleton_class.attr_accessor :annotate_rendered_view_with_filenames
+    self.annotate_rendered_view_with_filenames = false
 
     class_attribute :_routes
     class_attribute :logger
@@ -211,13 +212,14 @@ module ActionView # :nodoc:
           # We can't implement these as self.class because subclasses will
           # share the same template cache as superclasses, so "changed?" won't work
           # correctly.
-          define_method(:compiled_method_container)           { subclass }
-          define_singleton_method(:compiled_method_container) { subclass }
-
           def inspect
             "#<ActionView::Base:#{'%#016x' % (object_id << 1)}>"
           end
         }
+
+        subclass.define_method(:compiled_method_container, &Ractor.shareable_proc { subclass })
+        subclass.define_singleton_method(:compiled_method_container, &Ractor.shareable_proc { subclass })
+        subclass
       end
 
       def changed?(other) # :nodoc:

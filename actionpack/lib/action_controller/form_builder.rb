@@ -32,7 +32,7 @@ module ActionController
     extend ActiveSupport::Concern
 
     included do
-      class_attribute :_default_form_builder, instance_accessor: false
+      singleton_class.attr_accessor :_default_form_builder
     end
 
     module ClassMethods

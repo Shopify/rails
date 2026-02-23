@@ -432,7 +432,7 @@ module ActiveSupport
           end
 
           def make_lambda
-            override_target = @override_target
+            override_target = @override_target.freeze
             method_name = @method_name
             lambda do |target, value, &block|
               (override_target || target).send(method_name, target, &block)

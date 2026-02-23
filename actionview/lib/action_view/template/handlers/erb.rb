@@ -11,18 +11,23 @@ module ActionView
 
         # Specify trim mode for the ERB compiler. Defaults to '-'.
         # See ERB documentation for suitable values.
-        class_attribute :erb_trim_mode, default: "-"
+        singleton_class.attr_accessor :erb_trim_mode
+        self.erb_trim_mode = "-"
 
         # Default implementation used.
-        class_attribute :erb_implementation, default: Erubi
+        singleton_class.attr_accessor :erb_implementation
+        self.erb_implementation = Erubi
 
         # Do not escape templates of these mime types.
-        class_attribute :escape_ignore_list, default: ["text/plain"]
+        singleton_class.attr_accessor :escape_ignore_list
+        self.escape_ignore_list = ["text/plain"].freeze
 
         # Strip trailing newlines from rendered output
-        class_attribute :strip_trailing_newlines, default: false
+        singleton_class.attr_accessor :strip_trailing_newlines
+        self.strip_trailing_newlines = false
+        delegate :strip_trailing_newlines, to: :class
 
-        ENCODING_TAG = Regexp.new("\\A(<%#{ENCODING_FLAG}-?%>)[ \\t]*")
+        ENCODING_TAG = Regexp.new("\\A(<%#{ENCODING_FLAG}-?%>)[ \\t]*").freeze
 
         LocationParsingError = Class.new(StandardError) # :nodoc:
 

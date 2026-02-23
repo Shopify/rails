@@ -35,14 +35,17 @@ module AbstractController
       define_callbacks :process_action,
                        terminator: ->(controller, result_lambda) { result_lambda.call; controller.performed? },
                        skip_after_callbacks_if_terminated: true
-      mattr_accessor :raise_on_missing_callback_actions, default: false
+      @raise_on_missing_callback_actions = false
+      singleton_class.attr_accessor :raise_on_missing_callback_actions
+      delegate :raise_on_missing_callback_actions, to: :class
+      delegate :raise_on_missing_callback_actions=, to: :class
     end
 
     class ActionFilter # :nodoc:
       def initialize(filters, conditional_key, actions)
-        @filters = filters.to_a
-        @conditional_key = conditional_key
-        @actions = Array(actions).map(&:to_s).to_set
+        @filters = filters.to_a.freeze
+        @conditional_key = conditional_key.freeze
+        @actions = Array(actions).map(&:to_s).to_set.freeze
       end
 
       def match?(controller)
@@ -71,6 +74,10 @@ module AbstractController
       alias after  match?
       alias before match?
       alias around match?
+
+      # def make_shareable
+
+      # end
     end
 
     module ClassMethods
