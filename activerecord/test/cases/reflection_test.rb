@@ -30,6 +30,7 @@ require "models/recipe"
 require "models/user_with_invalid_relation"
 require "models/hardback"
 require "models/sharded"
+require "models/step"
 require "models/admin"
 require "models/admin/user"
 require "models/user"
@@ -726,6 +727,43 @@ class ReflectionTest < ActiveRecord::TestCase
 
     assert_raises(ActiveRecord::ConfigurationError, match: belongs_to_expected_message) do
       ActiveRecord::Reflection.create(:belongs_to, :client, nil, { query_constraints: [:firm_id, :firm_name] }, Firm)
+    end
+  end
+
+  def test_context_aware_belongs_to_reflection
+    Step.clear_reflections_cache
+
+    # Default context returns default reflection with shared options
+    Step.stub(:current_schema_context_key, "default") do
+      reflection = Step.reflect_on_association(:recipe)
+      assert_equal :id, reflection.options[:primary_key]
+      assert_equal true, reflection.options[:touch]
+
+      assert_not_nil Step.reflect_on_association(:chef)
+    end
+
+    # Other context returns context-specific reflection with shared options
+    Step.stub(:current_schema_context_key, "other") do
+      reflection = Step.reflect_on_association(:recipe)
+      assert_equal [:id, :chef_id], reflection.options[:primary_key]
+      assert_equal true, reflection.options[:touch]
+
+      assert_not_nil Step.reflect_on_association(:chef)
+    end
+
+    # Switch back to default to verify caching doesn't bleed across contexts
+    Step.stub(:current_schema_context_key, "default") do
+      reflection = Step.reflect_on_association(:recipe)
+      assert_equal :id, reflection.options[:primary_key]
+    end
+
+    # Unknown context falls back to default
+    Step.stub(:current_schema_context_key, "unknown") do
+      reflection = Step.reflect_on_association(:recipe)
+      assert_equal :id, reflection.options[:primary_key]
+      assert_equal true, reflection.options[:touch]
+
+      assert_not_nil Step.reflect_on_association(:chef)
     end
   end
 
