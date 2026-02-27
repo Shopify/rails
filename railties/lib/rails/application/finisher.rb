@@ -177,7 +177,9 @@ module Rails
           ActiveSupport.run_load_hooks(:after_routes_loaded, self)
         end
 
-        reloader.execute_unless_loaded if !app.routes.is_a?(Engine::LazyRouteSet) || app.config.eager_load
+        app.config.before_eager_load do
+          reloader.execute_unless_loaded
+        end
       end
 
       # Set clearing dependencies after the finisher hook to ensure paths

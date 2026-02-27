@@ -13,7 +13,7 @@ module ActionCable
     config.action_cable.precompile_assets = true
 
     guard_load_hooks(
-      :action_cable_channel, :action_cable_connection,
+      :action_cable, :action_cable_channel, :action_cable_connection,
       :action_cable_test_case, :action_cable_connection_test_case,
     )
 

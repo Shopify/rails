@@ -594,7 +594,7 @@ module Rails
     end
 
     initializer :make_routes_lazy, before: :bootstrap_hook do |app|
-      config.route_set_class = LazyRouteSet if Rails.env.local?
+      config.route_set_class = LazyRouteSet unless app.config.eager_load
     end
 
     initializer :add_routing_paths do |app|
