@@ -82,9 +82,8 @@ module ActiveRecord
       end
 
       def normalized_reflections # :nodoc:
-        context_key = current_schema_context_key
         @__reflections ||= {}
-        @__reflections[context_key] ||= begin
+        @__reflections[current_schema_context_key] ||= begin
           ref = {}
 
           _reflections_in_context.each do |name, reflection|
@@ -132,7 +131,8 @@ module ActiveRecord
       end
 
       def _reflections_in_context # :nodoc:
-        _reflections.transform_values { |contexts| contexts[current_schema_context_key] || contexts[default_schema_context_key] }
+        @_reflections_in_context ||= {}
+        @_reflections_in_context[current_schema_context_key] ||= _reflections.transform_values { |contexts| contexts[current_schema_context_key] || contexts[default_schema_context_key] }
       end
 
       # Returns an array of AssociationReflection objects for all associations which have <tt>:autosave</tt> enabled.
@@ -144,6 +144,7 @@ module ActiveRecord
 
       def clear_reflections_cache # :nodoc:
         @__reflections = {}
+        @_reflections_in_context = nil
       end
 
       private
