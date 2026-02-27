@@ -63,7 +63,7 @@ module ActiveRecord
           counter_association = counter_association.to_sym
           foreign_key  = has_many_association.foreign_key.to_s
           child_class  = has_many_association.klass
-          reflection   = child_class._reflections.values.find { |e| e.belongs_to? && e.foreign_key.to_s == foreign_key && e.options[:counter_cache].present? }
+          reflection   = child_class._reflections_in_context.values.find { |e| e.belongs_to? && e.foreign_key.to_s == foreign_key && e.options[:counter_cache].present? }
           counter_name = reflection.counter_cache_column
 
           counts =
@@ -211,8 +211,8 @@ module ActiveRecord
       def load_schema! # :nodoc:
         super
 
-        association_names = _reflections.filter_map do |name, reflection|
-          next unless reflection.belongs_to? && reflection.counter_cache_column
+        association_names = _reflections_in_context.filter_map do |name, reflection|
+          next unless reflection&.belongs_to? && reflection.counter_cache_column
 
           name.to_sym
         end

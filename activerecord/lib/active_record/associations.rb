@@ -1822,8 +1822,16 @@ module ActiveRecord
         #   belongs_to :account, strict_loading: true
         #   belongs_to :note, query_constraints: [:organization_id, :note_id]
         def belongs_to(name, scope = nil, **options)
+          contexts = options.delete(:context)
+
           reflection = Builder::BelongsTo.build(self, name, scope, options)
           Reflection.add_reflection(self, name, reflection)
+
+          contexts&.each do |context, context_options|
+            # Other contexts only need the reflection not redefine the methods
+            reflection = Builder::BelongsTo.create_reflection(self, name, scope, options.merge(context_options))
+            Reflection.add_reflection(self, name, reflection, context: context)
+          end
         end
 
         # Specifies a many-to-many relationship with another class. This associates two classes via an
@@ -2040,7 +2048,8 @@ module ActiveRecord
           end
 
           has_many name, scope, **hm_options, &extension
-          _reflections[name].parent_reflection = habtm_reflection
+          # hack to get fixtures loading before I implement it properly
+          _reflections[name]["default"].parent_reflection = habtm_reflection
         end
       end
   end

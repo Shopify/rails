@@ -207,6 +207,10 @@ module ActiveRecord
       def current_schema_context_key # :nodoc:
         connection_db_config.schema_context_key
       rescue ConnectionNotDefined
+        default_schema_context_key
+      end
+
+      def default_schema_context_key # :nodoc:
         "default"
       end
 

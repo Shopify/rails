@@ -313,7 +313,8 @@ module ActiveRecord
         return false if @_nested_records_changed_for_autosave_already_called
         begin
           @_nested_records_changed_for_autosave_already_called = true
-          self.class._reflections.values.any? do |reflection|
+          self.class._reflections_in_context.values.any? do |reflection|
+            next unless reflection
             if reflection.options[:autosave]
               association = association_instance_get(reflection.name)
               association && Array.wrap(association.target).any?(&:changed_for_autosave?)

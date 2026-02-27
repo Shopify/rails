@@ -147,7 +147,7 @@ module ActiveRecord
 
         def resolve_sti_reflections
           # If STI is used, find the correct subclass for association reflection
-          reflection_class._reflections.each_value do |association|
+          reflection_class._reflections_in_context.each_value do |association|
             case association.macro
             when :belongs_to
               # Do not replace association name with association foreign key if they are named the same

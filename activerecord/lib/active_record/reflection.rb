@@ -20,10 +20,12 @@ module ActiveRecord
         options[:through] ? ThroughReflection.new(reflection) : reflection
       end
 
-      def add_reflection(ar, name, reflection)
+      def add_reflection(ar, name, reflection, context: nil)
         ar.clear_reflections_cache
         name = name.to_sym
-        ar._reflections = ar._reflections.except(name).merge!(name => reflection)
+        context = (context || ar.default_schema_context_key).to_s
+        existing = ar._reflections[name] || {}
+        ar._reflections = ar._reflections.except(name).merge!(name => existing.merge(context => reflection))
       end
 
       def add_aggregate_reflection(ar, name, reflection)
@@ -80,10 +82,11 @@ module ActiveRecord
       end
 
       def normalized_reflections # :nodoc:
-        @__reflections ||= begin
+        @__reflections ||= {}
+        @__reflections[current_schema_context_key] ||= begin
           ref = {}
 
-          _reflections.each do |name, reflection|
+          _reflections_in_context.each do |name, reflection|
             parent_reflection = reflection.parent_reflection
 
             if parent_reflection
@@ -124,7 +127,12 @@ module ActiveRecord
       end
 
       def _reflect_on_association(association) # :nodoc:
-        _reflections[association.to_sym]
+        _reflections_in_context[association.to_sym]
+      end
+
+      def _reflections_in_context # :nodoc:
+        @_reflections_in_context ||= {}
+        @_reflections_in_context[current_schema_context_key] ||= _reflections.transform_values { |contexts| contexts[current_schema_context_key] || contexts[default_schema_context_key] }
       end
 
       # Returns an array of AssociationReflection objects for all associations which have <tt>:autosave</tt> enabled.
@@ -135,14 +143,15 @@ module ActiveRecord
       end
 
       def clear_reflections_cache # :nodoc:
-        @__reflections = nil
+        @__reflections = {}
+        @_reflections_in_context = nil
       end
 
       private
         def inherited(subclass)
           super
           subclass.class_eval do
-            @__reflections = nil
+            @__reflections = {}
           end
         end
     end
