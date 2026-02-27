@@ -1824,20 +1824,13 @@ module ActiveRecord
         def belongs_to(name, scope = nil, **options)
           contexts = options.delete(:context)
 
-          if contexts
-            default_options = contexts.delete(default_schema_context_key) || {}
+          reflection = Builder::BelongsTo.build(self, name, scope, options)
+          Reflection.add_reflection(self, name, reflection)
 
-            reflection = Builder::BelongsTo.build(self, name, scope, options.merge(default_options))
-            Reflection.add_reflection(self, name, reflection)
-
-            contexts.each do |context, context_options|
-              # Other contexts only need the reflection not redefine the methods
-              reflection = Builder::BelongsTo.create_reflection(self, name, scope, options.merge(context_options))
-              Reflection.add_reflection(self, name, reflection, context: context)
-            end
-          else
-            reflection = Builder::BelongsTo.build(self, name, scope, options)
-            Reflection.add_reflection(self, name, reflection)
+          contexts&.each do |context, context_options|
+            # Other contexts only need the reflection not redefine the methods
+            reflection = Builder::BelongsTo.create_reflection(self, name, scope, options.merge(context_options))
+            Reflection.add_reflection(self, name, reflection, context: context)
           end
         end
 
