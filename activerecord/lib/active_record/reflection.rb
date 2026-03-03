@@ -558,8 +558,9 @@ module ActiveRecord
       # otherwise it will differ from `foreign_key` if association has `_query_constraints` option or it can be derived
       def query_constraints_foreign_key
         @query_constraints_foreign_key ||= if options[:query_constraints]
-         qc = Array(options[:query_constraints]).map { |fk| fk.to_s.freeze }
-         [*qc, *foreign_key].freeze
+          qc = Array(options[:query_constraints]).map { |fk| fk.to_s.freeze }
+          fk = Array(foreign_key)
+          (qc + fk).uniq.freeze
         else
           foreign_key
         end
@@ -599,7 +600,13 @@ module ActiveRecord
       end
 
       def active_record_query_constraints_primary_key
-        if active_record.has_query_constraints? || options[:query_constraints]
+        if options[:query_constraints]
+          @active_record_query_constraints_primary_key ||= derive_query_constraints_primary_key(
+            query_constraints_foreign_key: query_constraints_foreign_key,
+            foreign_key: foreign_key,
+            primary_key: active_record_primary_key
+          )
+        elsif active_record.has_query_constraints?
           @active_record_query_constraints_primary_key ||= active_record.query_constraints_list
         else
           active_record_primary_key
@@ -785,6 +792,32 @@ module ActiveRecord
       end
 
       private
+        def derive_query_constraints_primary_key(query_constraints_foreign_key:, foreign_key:, primary_key:)
+          query_constraints_foreign_key = Array(query_constraints_foreign_key)
+          foreign_key = Array(foreign_key)
+          primary_key = Array(primary_key)
+
+          if foreign_key.length != primary_key.length
+            raise ArgumentError, <<~MSG.squish
+              Association #{active_record}##{name} could not derive query primary key from
+              query constraints `#{query_constraints_foreign_key}` because foreign key `#{foreign_key}`
+              and primary key `#{primary_key}` have different lengths.
+            MSG
+          end
+
+          if (foreign_key - query_constraints_foreign_key).any?
+            raise ArgumentError, <<~MSG.squish
+              Association #{active_record}##{name} could not derive query primary key from
+              query constraints `#{query_constraints_foreign_key}` because foreign key `#{foreign_key}`
+              is not fully included in the query constraints.
+            MSG
+          end
+
+          foreign_key_to_primary_key = foreign_key.zip(primary_key).to_h
+
+          query_constraints_foreign_key.map { |key| foreign_key_to_primary_key[key] || key }.freeze
+        end
+
         # Attempts to find the inverse association name automatically.
         # If it cannot find a suitable inverse association name, it returns
         # +nil+.
@@ -965,7 +998,15 @@ module ActiveRecord
       end
 
       def association_query_constraints_primary_key(klass = nil)
-        if (klass || self.klass).has_query_constraints? || options[:query_constraints]
+        if options[:query_constraints]
+          derive_query_constraints_primary_key(
+            query_constraints_foreign_key: query_constraints_foreign_key,
+            foreign_key: foreign_key,
+            primary_key: association_primary_key(klass)
+          )
+        elsif options[:foreign_key] || options[:primary_key]
+          association_primary_key(klass)
+        elsif (klass || self.klass).has_query_constraints?
           @association_query_constraints_primary_key ||= (klass || self.klass).query_constraints_list
         else
           association_primary_key(klass)

@@ -2139,4 +2139,19 @@ class BelongsToWithDecoupledQueryConstraintsTest < ActiveRecord::TestCase
     assert_equal 123_456, comment.blog_id
     assert_equal comment.blog_post_id, blog_post.id
   end
+
+  def test_belongs_to_with_query_constraints_uses_derived_target_query_keys
+    comment = sharded_comments(:great_comment_blog_post_one)
+    expected_blog_post = sharded_blog_posts(:great_post_blog_one)
+
+    sql = capture_sql do
+      loaded_blog_post = comment.blog_post_with_revision
+      assert_equal expected_blog_post.id, loaded_blog_post.id
+      assert_equal expected_blog_post.blog_id, loaded_blog_post.blog_id
+    end.first
+
+    assert_match(/#{Regexp.escape(Sharded::BlogPost.lease_connection.quote_table_name("sharded_blog_posts.blog_id"))} =/, sql)
+    assert_match(/#{Regexp.escape(Sharded::BlogPost.lease_connection.quote_table_name("sharded_blog_posts.id"))} =/, sql)
+    assert_no_match(/#{Regexp.escape(Sharded::BlogPost.lease_connection.quote_table_name("sharded_blog_posts.revision"))} =/, sql)
+  end
 end

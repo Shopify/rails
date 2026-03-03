@@ -684,6 +684,42 @@ class ReflectionTest < ActiveRecord::TestCase
     assert_equal "id", actual
   end
 
+  def test_belongs_to_query_constraints_derives_query_constraints_primary_key
+    reflection = Sharded::Comment.reflect_on_association(:blog_post_with_revision)
+
+    assert_equal ["blog_id", "id"], reflection.association_query_constraints_primary_key
+  end
+
+  def test_has_many_query_constraints_derives_query_constraints_primary_key
+    reflection = Sharded::BlogPostWithRevision.reflect_on_association(:comments)
+
+    assert_equal ["blog_id", "id"], reflection.active_record_query_constraints_primary_key
+  end
+
+  def test_query_constraints_derivation_requires_matching_foreign_key_and_primary_key_lengths
+    reflection = ActiveRecord::Reflection.create(
+      :belongs_to,
+      :blog_post,
+      nil,
+      {
+        class_name: "Sharded::BlogPost",
+        foreign_key: [:blog_id, :blog_post_id],
+        primary_key: [:blog_id, :revision, :id],
+        query_constraints: [:blog_id, :blog_post_id]
+      },
+      Sharded::Comment
+    )
+
+    error = assert_raises(ArgumentError) { reflection.association_query_constraints_primary_key }
+
+    assert_equal(
+      "Association Sharded::Comment#blog_post could not derive query primary key from " \
+      "query constraints `[\"blog_id\", \"blog_post_id\"]` because foreign key `[\"blog_id\", \"blog_post_id\"]` " \
+      "and primary key `[\"blog_id\", \"revision\", \"id\"]` have different lengths.",
+      error.message
+    )
+  end
+
   def test_through_reflection_association_primary_key_with_composite_key
     reflection = Sharded::Blog.reflect_on_association(:comments_via_posts)
     actual = reflection.association_primary_key
@@ -700,33 +736,14 @@ class ReflectionTest < ActiveRecord::TestCase
     assert_equal ["blog_id", "blog_post_id"], blog_post_foreign_key
   end
 
-  def test_using_query_constraints_warns_about_changing_behavior
-    has_many_expected_message = <<~MSG.squish
-      Setting `query_constraints:` option on `Firm.has_many :clients` is not allowed.
-      To get the same behavior, use the `foreign_key` option instead.
-    MSG
+  def test_using_query_constraints_is_allowed
+    has_many = ActiveRecord::Reflection.create(:has_many, :clients, nil, { query_constraints: [:firm_id, :firm_name] }, Firm)
+    has_one = ActiveRecord::Reflection.create(:has_one, :account, nil, { query_constraints: [:firm_id, :firm_name] }, Firm)
+    belongs_to = ActiveRecord::Reflection.create(:belongs_to, :client, nil, { query_constraints: [:firm_id, :firm_name] }, Firm)
 
-    assert_raises(ActiveRecord::ConfigurationError, match: has_many_expected_message) do
-      ActiveRecord::Reflection.create(:has_many, :clients, nil, { query_constraints: [:firm_id, :firm_name] }, Firm)
-    end
-
-    has_one_expected_message = <<~MSG.squish
-      Setting `query_constraints:` option on `Firm.has_one :account` is not allowed.
-      To get the same behavior, use the `foreign_key` option instead.
-    MSG
-
-    assert_raises(ActiveRecord::ConfigurationError, match: has_one_expected_message) do
-      ActiveRecord::Reflection.create(:has_one, :account, nil, { query_constraints: [:firm_id, :firm_name] }, Firm)
-    end
-
-    belongs_to_expected_message = <<~MSG.squish
-      Setting `query_constraints:` option on `Firm.belongs_to :client` is not allowed.
-      To get the same behavior, use the `foreign_key` option instead.
-    MSG
-
-    assert_raises(ActiveRecord::ConfigurationError, match: belongs_to_expected_message) do
-      ActiveRecord::Reflection.create(:belongs_to, :client, nil, { query_constraints: [:firm_id, :firm_name] }, Firm)
-    end
+    assert_equal ["firm_id", "firm_name"], has_many.query_constraints_foreign_key
+    assert_equal ["firm_id", "firm_name"], has_one.query_constraints_foreign_key
+    assert_equal ["firm_id", "firm_name"], belongs_to.query_constraints_foreign_key
   end
 
   private

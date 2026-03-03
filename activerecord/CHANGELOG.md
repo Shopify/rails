@@ -1,3 +1,14 @@
+*   Derive association query-time key mapping from `query_constraints`.
+
+    Associations now derive query-time owner/target key mapping by substituting each
+    `foreign_key` column present in `query_constraints` with its corresponding `primary_key`
+    column.
+
+    This helps when assignment keys (`primary_key` / `foreign_key`) and query constraint keys
+    have different shapes, without requiring a separate association option.
+
+    *Nikita Vasilevsky*
+
 *   Avoid issuing a `ROLLBACK` statement following `TransactionRollbackError` during `COMMIT`.
 
     This prevents the unnecessary "WARNING: there is no transaction in progress" log spilled to stderr directly from libpq.
