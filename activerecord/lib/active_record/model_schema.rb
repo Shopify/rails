@@ -558,16 +558,38 @@ module ActiveRecord
 
       # Load the model's schema information either from the schema cache
       # or directly from the database.
+      #
+      # This separates two concerns:
+      # 1. Adapter-specific: populating the current Schema context's columns_hash
+      #    and default_attributes (runs per context, since different adapters may
+      #    return different column types).
+      # 2. Model-specific: the load_schema! super chain (counter_cache, encryption,
+      #    etc.) that mutates model-class-level state (runs once, since it's the
+      #    same regardless of adapter).
       def load_schema
-        model_schema.load_schema
+        return if schema_loaded?
+        @load_schema_monitor.synchronize do
+          return if schema_loaded?
+
+          model_schema.load_schema!
+
+          unless @model_schema_loaded
+            load_schema!
+            @model_schema_loaded = true
+          end
+        rescue
+          reload_schema_from_cache # If the schema loading failed half way through, we must reset the state.
+          raise
+        end
       end
 
       protected
         def initialize_load_schema_monitor
-          # No longer needed - each Schema has its own monitor
+          @load_schema_monitor = Monitor.new
         end
 
         def reload_schema_from_cache(recursive = true)
+          @model_schema_loaded = false
           @attribute_names = nil
 
           # Reset all Schema instances
@@ -592,11 +614,17 @@ module ActiveRecord
         end
 
         def schema_loaded?
-          model_schema.send(:schema_loaded?)
+          model_schema.instance_variable_get(:@schema_loaded)
         end
 
         def load_schema!
-          model_schema.send(:load_schema!)
+          # Base implementation is a no-op. The adapter-specific schema loading
+          # (columns_hash, default_attributes) is handled by model_schema.load_schema!
+          # which is called directly from load_schema before this super chain.
+          #
+          # This method exists as the hook point for the super chain — overrides
+          # in CounterCache, EncryptableRecord, etc. call super and then do
+          # model-class-level setup that should only happen once.
         end
 
         # Guesses the table name, but does not decorate it with prefix and suffix information.

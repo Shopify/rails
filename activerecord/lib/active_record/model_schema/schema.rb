@@ -1,7 +1,5 @@
 # frozen_string_literal: true
 
-require "monitor"
-
 module ActiveRecord
   module ModelSchema
     # Encapsulates all schema-context-dependent state for a model.
@@ -17,7 +15,6 @@ module ActiveRecord
         @model_class = model_class
         @context_key = context_key
         @schema_loaded = false
-        @load_schema_monitor = Monitor.new
 
         # Schema-context-dependent state
         @columns_hash = nil
@@ -41,7 +38,7 @@ module ActiveRecord
 
       # Returns the columns hash for this schema context
       def columns_hash
-        load_schema unless @columns_hash
+        model_class.send(:load_schema) unless @columns_hash
         @columns_hash
       end
 
@@ -115,7 +112,7 @@ module ActiveRecord
 
       # Returns column defaults hash
       def column_defaults
-        load_schema
+        model_class.send(:load_schema)
         @column_defaults ||= _default_attributes.deep_dup.to_hash.freeze
       end
 
@@ -196,42 +193,30 @@ module ActiveRecord
         @find_by_statement_cache = { true => Concurrent::Map.new, false => Concurrent::Map.new }
       end
 
-      # Load schema information from the schema cache
-      def load_schema
-        return if schema_loaded?
-        @load_schema_monitor.synchronize do
-          return if schema_loaded?
+      # Populate this schema context's columns and default attributes
+      # from the schema cache. Called by the model class's load_schema!.
+      def load_schema!
+        return if @schema_loaded
 
-          model_class.send(:load_schema!)
-          @schema_loaded = true
-        rescue
-          reload_schema_from_cache
-          raise
+        unless table_name
+          raise ActiveRecord::TableNotSpecified, "#{model_class} has no table configured. Set one with #{model_class}.table_name="
         end
+
+        columns_hash = schema_cache.columns_hash(table_name)
+        if model_class.only_columns.present?
+          columns_hash = columns_hash.slice(*model_class.only_columns)
+        elsif model_class.ignored_columns.present?
+          columns_hash = columns_hash.except(*model_class.ignored_columns)
+        end
+        @columns_hash = columns_hash.freeze
+
+        # Precompute default attributes to cache DB-dependent attribute types
+        _default_attributes
+
+        @schema_loaded = true
       end
 
       private
-        def schema_loaded?
-          @schema_loaded
-        end
-
-        def load_schema!
-          unless table_name
-            raise ActiveRecord::TableNotSpecified, "#{model_class} has no table configured. Set one with #{model_class}.table_name="
-          end
-
-          columns_hash = schema_cache.columns_hash(table_name)
-          if model_class.only_columns.present?
-            columns_hash = columns_hash.slice(*model_class.only_columns)
-          elsif model_class.ignored_columns.present?
-            columns_hash = columns_hash.except(*model_class.ignored_columns)
-          end
-          @columns_hash = columns_hash.freeze
-
-          # Precompute default attributes to cache DB-dependent attribute types
-          _default_attributes
-        end
-
         def schema_cache
           connection_pool.schema_cache
         end
