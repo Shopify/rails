@@ -531,7 +531,7 @@ module ActiveRecord
         if group_fields.size == 1 && group_fields.first.respond_to?(:to_sym)
           association  = model._reflect_on_association(group_fields.first)
           associated   = association && association.belongs_to? # only count belongs_to associations
-          group_fields = Array(association.foreign_key) if associated
+          group_fields = association.foreign_key if associated
         end
 
         relation = except(:group).distinct!(false)

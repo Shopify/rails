@@ -195,21 +195,12 @@ module ActiveRecord
             joins   = targets.map do |target|
               join = {}
 
-              if rhs_key.is_a?(Array)
-                composite_key = ActiveRecord::FixtureSet.composite_identify(target, rhs_key)
-                composite_key.each do |column, value|
-                  join[column] = value
-                end
-              else
-                join[rhs_key] = ActiveRecord::FixtureSet.identify(target, column_type)
+              ActiveRecord::FixtureSet.composite_identify(target, rhs_key).each do |column, value|
+                join[column] = value
               end
 
-              if lhs_key.is_a?(Array)
-                lhs_key.zip(model_metadata.primary_key_name).each do |fkey, pkey|
-                  join[fkey] = @row[pkey]
-                end
-              else
-                join[lhs_key] = @row[model_metadata.primary_key_name]
+              lhs_key.zip(Array(model_metadata.primary_key_name)).each do |fkey, pkey|
+                join[fkey] = @row[pkey]
               end
 
               association.timestamp_column_names.each do |col|

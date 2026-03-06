@@ -102,6 +102,7 @@ module ActiveRecord
     def bind_attribute(name, value) # :nodoc:
       if reflection = model._reflect_on_association(name)
         name = reflection.foreign_key
+        name = name.first if name.size == 1
         value = value.read_attribute(reflection.association_primary_key) unless value.nil?
       end
 

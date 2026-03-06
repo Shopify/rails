@@ -216,7 +216,7 @@ module ActiveRecord
 
       def initialize_attributes(record, except_from_scope_attributes = nil) # :nodoc:
         except_from_scope_attributes ||= {}
-        skip_assign = [reflection.foreign_key, reflection.type].compact
+        skip_assign = [*reflection.foreign_key, reflection.type].compact
         assigned_keys = record.changed_attribute_names_to_save
         assigned_keys += except_from_scope_attributes.keys.map(&:to_s)
         attributes = scope_for_create.except!(*(assigned_keys - skip_assign))
@@ -368,8 +368,7 @@ module ActiveRecord
 
         # Returns true if record contains the foreign_key
         def foreign_key_for?(record)
-          foreign_key = Array(reflection.foreign_key)
-          foreign_key.all? { |key| record._has_attribute?(key) }
+          reflection.foreign_key.all? { |key| record._has_attribute?(key) }
         end
 
         # This should be implemented to return the values of the relevant key(s) on the owner,
@@ -409,11 +408,12 @@ module ActiveRecord
         end
 
         def matches_foreign_key?(record)
+          fk = reflection.foreign_key
           if foreign_key_for?(record)
-            record.read_attribute(reflection.foreign_key) == owner.id ||
-              (foreign_key_for?(owner) && owner.read_attribute(reflection.foreign_key) == record.id)
+            fk.map { |k| record.read_attribute(k) } == Array(owner.id) ||
+              (foreign_key_for?(owner) && fk.map { |k| owner.read_attribute(k) } == Array(record.id))
           else
-            owner.read_attribute(reflection.foreign_key) == record.id
+            fk.map { |k| owner.read_attribute(k) } == Array(record.id)
           end
         end
     end

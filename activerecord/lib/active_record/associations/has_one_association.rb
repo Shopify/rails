@@ -117,7 +117,7 @@ module ActiveRecord
         end
 
         def nullify_owner_attributes(record)
-          Array(reflection.foreign_key).each do |foreign_key_column|
+          reflection.foreign_key.each do |foreign_key_column|
             record[foreign_key_column] = nil unless foreign_key_column.in?(Array(record.class.primary_key))
           end
         end

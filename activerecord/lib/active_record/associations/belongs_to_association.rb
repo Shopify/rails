@@ -11,13 +11,8 @@ module ActiveRecord
         when :destroy
           raise ActiveRecord::Rollback unless target.destroy
         when :destroy_async
-          if reflection.foreign_key.is_a?(Array)
-            primary_key_column = reflection.active_record_primary_key
-            id = reflection.foreign_key.map { |col| owner.public_send(col) }
-          else
-            primary_key_column = reflection.active_record_primary_key
-            id = owner.public_send(reflection.foreign_key)
-          end
+          primary_key_column = reflection.active_record_primary_key
+          id = reflection.foreign_key.map { |col| owner.public_send(col) }
 
           association_class = if reflection.polymorphic?
             owner.public_send(reflection.foreign_type)
@@ -72,23 +67,23 @@ module ActiveRecord
           model_was = klass
         end
 
-        foreign_key_was = owner.attribute_before_last_save(reflection.foreign_key)
+        foreign_key_was = reflection.foreign_key.map { |fk| owner.attribute_before_last_save(fk) }
 
-        if foreign_key_was && model_was < ActiveRecord::Base
+        if foreign_key_was.all? && model_was < ActiveRecord::Base
           update_counters_via_scope(model_was, foreign_key_was, -1)
         end
       end
 
       def target_changed?
-        owner.attribute_changed?(reflection.foreign_key) || (!foreign_key_present? && target&.new_record?)
+        reflection.foreign_key.any? { |fk| owner.attribute_changed?(fk) } || (!foreign_key_present? && target&.new_record?)
       end
 
       def target_previously_changed?
-        owner.attribute_previously_changed?(reflection.foreign_key)
+        reflection.foreign_key.any? { |fk| owner.attribute_previously_changed?(fk) }
       end
 
       def saved_change_to_target?
-        owner.saved_change_to_attribute?(reflection.foreign_key)
+        reflection.foreign_key.any? { |fk| owner.saved_change_to_attribute?(fk) }
       end
 
       private
@@ -111,13 +106,16 @@ module ActiveRecord
             if target && !stale_target?
               target.increment!(reflection.counter_cache_column, by, touch: reflection.options[:touch])
             else
-              update_counters_via_scope(klass, owner._read_attribute(reflection.foreign_key), by)
+              fk_value = reflection.foreign_key.map { |fk| owner._read_attribute(fk) }
+              update_counters_via_scope(klass, fk_value, by)
             end
           end
         end
 
-        def update_counters_via_scope(klass, foreign_key, by)
-          scope = klass.unscoped.where!(primary_key(klass) => foreign_key)
+        def update_counters_via_scope(klass, foreign_key_value, by)
+          pk = primary_key(klass)
+          value = pk.is_a?(Array) ? [foreign_key_value] : foreign_key_value
+          scope = klass.unscoped.where!(pk => value)
           scope.update_counters(reflection.counter_cache_column => by, touch: reflection.options[:touch])
         end
 
@@ -131,21 +129,13 @@ module ActiveRecord
 
         def replace_keys(record, force: false)
           reflection_fk = reflection.foreign_key
-          if reflection_fk.is_a?(Array)
-            target_key_values = record ? Array(primary_key(record.class)).map { |key| record._read_attribute(key) } : []
+          target_key_values = record ? Array(primary_key(record.class)).map { |key| record._read_attribute(key) } : []
 
-            if force || reflection_fk.map { |fk| owner._read_attribute(fk) } != target_key_values
-              owner_pk = Array(owner.class.primary_key)
-              reflection_fk.each_with_index do |key, index|
-                next if record.nil? && owner_pk.include?(key)
-                owner[key] = target_key_values[index]
-              end
-            end
-          else
-            target_key_value = record ? record._read_attribute(primary_key(record.class)) : nil
-
-            if force || owner._read_attribute(reflection_fk) != target_key_value
-              owner[reflection_fk] = target_key_value
+          if force || reflection_fk.map { |fk| owner._read_attribute(fk) } != target_key_values
+            owner_pk = Array(owner.class.primary_key)
+            reflection_fk.each_with_index do |key, index|
+              next if record.nil? && owner_pk.include?(key)
+              owner[key] = target_key_values[index]
             end
           end
         end
@@ -155,7 +145,7 @@ module ActiveRecord
         end
 
         def foreign_key_present?
-          Array(reflection.foreign_key).all? { |fk| owner._read_attribute(fk) }
+          reflection.foreign_key.all? { |fk| owner._read_attribute(fk) }
         end
 
         def invertible_for?(record)
@@ -164,15 +154,10 @@ module ActiveRecord
         end
 
         def stale_state
-          foreign_key = reflection.foreign_key
-          if foreign_key.is_a?(Array)
-            attributes = foreign_key.map do |fk|
-              owner._read_attribute(fk) { |n| owner.send(:missing_attribute, n, caller) }
-            end
-            attributes if attributes.any?
-          else
-            owner._read_attribute(foreign_key) { |n| owner.send(:missing_attribute, n, caller) }
+          attributes = reflection.foreign_key.map do |fk|
+            owner._read_attribute(fk) { |n| owner.send(:missing_attribute, n, caller) }
           end
+          attributes if attributes.any?
         end
     end
   end

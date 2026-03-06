@@ -561,11 +561,7 @@ module ActiveRecord
 
       def foreign_key(infer_from_inverse_of: true)
         @foreign_key ||= if options[:foreign_key]
-          if options[:foreign_key].is_a?(Array)
-            options[:foreign_key].map { |fk| -fk.to_s.freeze }.freeze
-          else
-            options[:foreign_key].to_s.freeze
-          end
+          Array(options[:foreign_key]).map { |fk| -fk.to_s.freeze }.freeze
         elsif options[:query_constraints]
           options[:query_constraints].map { |fk| -fk.to_s.freeze }.freeze
         else
@@ -575,12 +571,7 @@ module ActiveRecord
             derived_fk = derive_fk_query_constraints(derived_fk)
           end
 
-          if derived_fk.is_a?(Array)
-            derived_fk.map! { |fk| -fk.freeze }
-            derived_fk.freeze
-          else
-            -derived_fk.freeze
-          end
+          Array(derived_fk).map { |fk| -fk.to_s.freeze }.freeze
         end
       end
 
@@ -612,7 +603,8 @@ module ActiveRecord
       end
 
       def join_primary_key(klass = nil)
-        foreign_key
+        fk = foreign_key
+        fk.size == 1 ? fk.first : fk
       end
 
       def join_primary_type
@@ -629,9 +621,9 @@ module ActiveRecord
         check_validity_of_inverse!
 
         if !polymorphic? && (klass.composite_primary_key? || active_record.composite_primary_key?)
-          if (has_one? || collection?) && Array(active_record_primary_key).length != Array(foreign_key).length
+          if (has_one? || collection?) && Array(active_record_primary_key).length != foreign_key.length
             raise CompositePrimaryKeyMismatchError.new(self)
-          elsif belongs_to? && Array(association_primary_key).length != Array(foreign_key).length
+          elsif belongs_to? && Array(association_primary_key).length != foreign_key.length
             raise CompositePrimaryKeyMismatchError.new(self)
           end
         end
@@ -962,7 +954,8 @@ module ActiveRecord
       end
 
       def join_foreign_key
-        foreign_key
+        fk = foreign_key
+        fk.size == 1 ? fk.first : fk
       end
 
       def join_foreign_type

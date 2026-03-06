@@ -487,7 +487,7 @@ module ActiveRecord
           return unless (autosave && record.changed_for_autosave?) || _record_changed?(reflection, record, primary_key_value)
 
           unless reflection.through_reflection
-            foreign_key = Array(reflection.foreign_key)
+            foreign_key = reflection.foreign_key
             primary_key_foreign_key_pairs = primary_key.zip(foreign_key)
 
             primary_key_foreign_key_pairs.each do |primary_key, foreign_key|
@@ -511,13 +511,13 @@ module ActiveRecord
         record.new_record? ||
           (association_foreign_key_changed?(reflection, record, key) ||
           inverse_polymorphic_association_changed?(reflection, record)) ||
-          record.will_save_change_to_attribute?(reflection.foreign_key)
+          reflection.foreign_key.any? { |fk| record.will_save_change_to_attribute?(fk) }
       end
 
       def association_foreign_key_changed?(reflection, record, key)
         return false if reflection.through_reflection?
 
-        foreign_key = Array(reflection.foreign_key)
+        foreign_key = reflection.foreign_key
         return false unless foreign_key.all? { |key| record._has_attribute?(key) }
 
         foreign_key.map { |key| record._read_attribute(key) } != Array(key)
@@ -542,8 +542,7 @@ module ActiveRecord
           autosave = reflection.options[:autosave]
 
           if autosave && record.marked_for_destruction?
-            foreign_key = Array(reflection.foreign_key)
-            foreign_key.each { |key| self[key] = nil }
+            reflection.foreign_key.each { |key| self[key] = nil }
             record.destroy
           elsif autosave != false
             saved = if record.new_record? || (autosave && record.changed_for_autosave?)
@@ -558,7 +557,7 @@ module ActiveRecord
 
             if association.updated?
               primary_key = Array(compute_primary_key(reflection, record)).map(&:to_s)
-              foreign_key = Array(reflection.foreign_key)
+              foreign_key = reflection.foreign_key
 
               primary_key_foreign_key_pairs = primary_key.zip(foreign_key)
               primary_key_foreign_key_pairs.each do |primary_key, foreign_key|

@@ -12,7 +12,7 @@ module ActiveRecord::Associations
 
     def nullified_owner_attributes
       Hash.new.tap do |attrs|
-        Array(reflection.foreign_key).each { |foreign_key| attrs[foreign_key] = nil }
+        reflection.foreign_key.each { |foreign_key| attrs[foreign_key] = nil }
         attrs[reflection.type] = nil if reflection.type.present?
       end
     end
