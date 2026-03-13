@@ -25,15 +25,9 @@ module ActiveRecord
         @attributes_builder = nil
         @column_defaults = nil
         @_returning_columns_for_insert = nil
-        @sequence_name = nil
-        @table_name = nil
-        @arel_table = nil
-        @predicate_builder = nil
         @find_by_statement_cache = nil
         @content_columns = nil
         @symbol_column_to_string_name_hash = nil
-        @primary_key = nil
-        @composite_primary_key = nil
       end
 
       # Returns the columns hash for this schema context
@@ -52,41 +46,16 @@ module ActiveRecord
         @column_names ||= columns.map(&:name).freeze
       end
 
-      # Returns the Arel table for this schema context
-      def arel_table
-        @arel_table ||= Arel::Table.new(table_name, klass: model_class)
-      end
-
-      # Returns the predicate builder for this schema context
-      def predicate_builder
-        @predicate_builder ||= PredicateBuilder.new(TableMetadata.new(model_class, arel_table))
-      end
-
       # Returns the table name for this schema context
       # For now, delegates to the model class
       def table_name
         model_class.table_name
       end
-
-      # Returns the sequence name for this schema context
-      def sequence_name
-        @sequence_name ||= begin
-          model_class.with_connection do |conn|
-            conn.default_sequence_name(table_name, primary_key)
-          end
-        end
-      end
-
       # Returns the primary key column(s) for this schema context
       # For now, delegates to the model class
       # In a full implementation, this would be per-context
       def primary_key
         model_class.primary_key
-      end
-
-      # Returns whether this schema context has a composite primary key
-      def composite_primary_key?
-        model_class.composite_primary_key?
       end
 
       # Returns the default attributes for this schema context
@@ -160,7 +129,6 @@ module ActiveRecord
       # Reset all cached schema state
       def reload_schema_from_cache
         @_returning_columns_for_insert = nil
-        @arel_table = nil
         @column_names = nil
         @symbol_column_to_string_name_hash = nil
         @content_columns = nil
@@ -171,16 +139,6 @@ module ActiveRecord
         @schema_loaded = false
         @attribute_types = nil
         @default_attributes = nil
-        @primary_key = nil
-        @composite_primary_key = nil
-      end
-
-      # Set the table name and clear cached state that depends on it
-      def table_name=(value)
-        @table_name = nil
-        @arel_table = nil
-        @predicate_builder = nil
-        @sequence_name = nil
       end
 
       def cached_find_by_statement(connection, key, &block)

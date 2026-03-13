@@ -298,8 +298,10 @@ module ActiveRecord
           reset_column_information if connected?
         end
 
-        @table_name = value
-        model_schemas.each_value { |schema| schema.table_name = value }
+        @table_name        = value
+        @arel_table        = nil
+        @sequence_name     = nil unless @explicit_sequence_name
+        @predicate_builder = nil
       end
 
       # Returns a quoted version of the table name.

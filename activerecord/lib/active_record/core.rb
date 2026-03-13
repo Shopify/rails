@@ -400,11 +400,11 @@ module ActiveRecord
 
       # Returns an instance of +Arel::Table+ loaded with the current table name.
       def arel_table # :nodoc:
-        model_schema.arel_table
+        @arel_table ||= Arel::Table.new(table_name, klass: self)
       end
 
       def predicate_builder # :nodoc:
-        model_schema.predicate_builder
+        @predicate_builder ||= PredicateBuilder.new(TableMetadata.new(self, arel_table))
       end
 
       def type_caster # :nodoc:
@@ -430,6 +430,8 @@ module ActiveRecord
           end
 
           subclass.class_eval do
+            @arel_table = nil
+            @predicate_builder = nil
             @inspection_filter = nil
             @filter_attributes ||= nil
             @generated_association_methods ||= nil
