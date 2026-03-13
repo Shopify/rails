@@ -32,7 +32,7 @@ module ActiveRecord
 
       # Returns the columns hash for this schema context
       def columns_hash
-        model_class.send(:load_schema) unless @columns_hash
+        model_class.load_schema unless @columns_hash
         @columns_hash
       end
 
@@ -62,11 +62,11 @@ module ActiveRecord
       def _default_attributes
         @default_attributes ||= begin
           attributes_hash = columns_hash.transform_values do |column|
-            ActiveModel::Attribute.from_database(column.name, column.default, model_class.send(:type_for_column, column))
+            ActiveModel::Attribute.from_database(column.name, column.default, model_class.type_for_column(column))
           end
 
           attribute_set = ActiveModel::AttributeSet.new(attributes_hash)
-          model_class.send(:apply_pending_attribute_modifications, attribute_set)
+          model_class.apply_pending_attribute_modifications(attribute_set)
           attribute_set
         end
       end
@@ -81,7 +81,7 @@ module ActiveRecord
 
       # Returns column defaults hash
       def column_defaults
-        model_class.send(:load_schema)
+        model_class.load_schema
         @column_defaults ||= _default_attributes.deep_dup.to_hash.freeze
       end
 
