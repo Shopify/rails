@@ -156,6 +156,8 @@ module ActiveRecord
             # No immediate result - will be populated when pipeline flushes
             nil
           else
+            raise ArgumentError, "Cannot pipeline this query" if intent.prefer_pipeline
+
             # Normal immediate execution (exits pipeline mode if active)
             super
           end
@@ -195,6 +197,9 @@ module ActiveRecord
 
             # Pipeline if already active (add to existing batch)
             return true if pipeline_active?
+
+            # Pipeline if explicitly requested by the caller
+            return true if intent.prefer_pipeline
 
             # Otherwise, don't pipeline by default
             # Future: add logic for starting pipeline mode based on transaction state
