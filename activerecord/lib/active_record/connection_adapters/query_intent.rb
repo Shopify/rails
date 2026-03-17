@@ -61,7 +61,7 @@ module ActiveRecord
         end
       end
 
-      attr_reader :arel, :name, :prepare, :allow_retry, :allow_async,
+      attr_reader :arel, :name, :prepare, :allow_retry, :allow_async, :prefer_pipeline,
                   :materialize_transactions, :batch, :pool, :session, :lock_wait,
                   :event_buffer, :retries_remaining, :retry_deadline, :error, :reconnectable,
                   :not_run_reason, :finalized
@@ -70,7 +70,7 @@ module ActiveRecord
       attr_accessor :adapter, :binds, :ran_async, :notification_payload, :log_handle
 
       def initialize(adapter:, arel: nil, raw_sql: nil, processed_sql: nil, name: "SQL", binds: [], prepare: false, allow_async: false,
-                     allow_retry: false, materialize_transactions: true, batch: false)
+                     prefer_pipeline: false, allow_retry: false, materialize_transactions: true, batch: false)
         if arel.nil? && raw_sql.nil? && processed_sql.nil?
           raise ArgumentError, "One of arel, raw_sql, or processed_sql must be provided"
         end
@@ -82,6 +82,7 @@ module ActiveRecord
         @binds = binds
         @prepare = prepare
         @allow_async = allow_async
+        @prefer_pipeline = prefer_pipeline
         @ran_async = nil
         @allow_retry = allow_retry
         @materialize_transactions = materialize_transactions
@@ -174,7 +175,7 @@ module ActiveRecord
 
       # Is this intent still pending (result not yet available)?
       def pending?
-        !@raw_result_available && @session&.active?
+        !@raw_result_available && (@session&.active? || @executed)
       end
 
       # Was this intent canceled?
