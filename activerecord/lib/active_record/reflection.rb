@@ -167,6 +167,7 @@ module ActiveRecord
         @inverse_of = nil
         @inverse_which_updates_counter_cache_defined = false
         @inverse_which_updates_counter_cache = nil
+        @association_primary_key = {}
       end
 
       def through_reflection?
@@ -525,9 +526,10 @@ module ActiveRecord
         @type = -(options[:foreign_type]&.to_s || "#{options[:as]}_type") if options[:as]
         @foreign_type = -(options[:foreign_type]&.to_s || "#{name}_type") if options[:polymorphic]
         @join_table = nil
-        @foreign_key = nil
+        @foreign_key = {}
         @association_foreign_key = nil
-        @association_primary_key = nil
+        @association_primary_key = {}
+        @active_record_primary_key = {}
         if options[:query_constraints]
           raise ConfigurationError, <<~MSG.squish
             Setting `query_constraints:` option on `#{active_record}.#{macro} :#{name}` is not allowed.
@@ -560,7 +562,8 @@ module ActiveRecord
       end
 
       def foreign_key(infer_from_inverse_of: true)
-        @foreign_key ||= if options[:foreign_key]
+        context = active_record.current_schema_context
+        @foreign_key[context] ||= if options[:foreign_key]
           if options[:foreign_key].is_a?(Array)
             options[:foreign_key].map { |fk| -fk.to_s.freeze }.freeze
           else
@@ -593,8 +596,9 @@ module ActiveRecord
       end
 
       def active_record_primary_key
+        context = active_record.current_schema_context
         custom_primary_key = options[:primary_key]
-        @active_record_primary_key ||= if custom_primary_key
+        @active_record_primary_key[context] ||= if custom_primary_key
           if custom_primary_key.is_a?(Array)
             custom_primary_key.map { |pk| pk.to_s.freeze }.freeze
           else
@@ -941,7 +945,8 @@ module ActiveRecord
       # klass option is necessary to support loading polymorphic associations
       def association_primary_key(klass = nil)
         if primary_key = options[:primary_key]
-          @association_primary_key ||= if primary_key.is_a?(Array)
+          context = active_record.current_schema_context
+          @association_primary_key[context] ||= if primary_key.is_a?(Array)
             primary_key.map { |pk| pk.to_s.freeze }.freeze
           else
             -primary_key.to_s
@@ -1102,7 +1107,8 @@ module ActiveRecord
         # Get the "actual" source reflection if the immediate source reflection has a
         # source reflection itself
         if primary_key = actual_source_reflection.options[:primary_key]
-          @association_primary_key ||= if primary_key.is_a?(Array)
+          context = active_record.current_schema_context
+          @association_primary_key[context] ||= if primary_key.is_a?(Array)
             primary_key.map { |pk| pk.to_s.freeze }.freeze
           else
             -primary_key.to_s

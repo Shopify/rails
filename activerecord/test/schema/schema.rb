@@ -1411,6 +1411,11 @@ ActiveRecord::Schema.define do
     t.integer :hotel_id
   end
 
+  create_table :steps, force: true do |t|
+    t.integer :recipe_id
+    t.integer :chef_id
+  end
+
   create_table :recipients, force: true do |t|
     t.integer  :message_id
     t.string   :email_address
