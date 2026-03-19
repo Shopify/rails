@@ -34,7 +34,9 @@ module ActiveRecord::Associations::Builder # :nodoc:
       end
     end
 
-    def self.touch_record(record, name, touch)
+    def self.touch_record(record, reflection)
+      name = reflection.name
+      touch = reflection.options[:touch]
       instance = record.send(name)
 
       if instance&.persisted?
@@ -44,10 +46,9 @@ module ActiveRecord::Associations::Builder # :nodoc:
     end
 
     def self.add_touch_callbacks(model, reflection)
-      name  = reflection.name
-      touch = reflection.options[:touch]
+      name = reflection.name
 
-      callback = -> (record) { HasOne.touch_record(record, name, touch) }
+      callback = -> (record) { HasOne.touch_record(record, reflection) }
       model.after_create callback, if: :saved_changes?
       model.after_create_commit { association(name).reset_negative_cache }
       model.after_update callback, if: :saved_changes?

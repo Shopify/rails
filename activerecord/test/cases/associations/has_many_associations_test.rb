@@ -3201,7 +3201,7 @@ class HasManyAssociationsTest < ActiveRecord::TestCase
     assert_equal(<<~MESSAGE.squish, error.message)
       Unknown key: :trough. Valid keys are:
       :anonymous_class, :primary_key, :foreign_key, :dependent, :validate, :inverse_of,
-      :strict_loading, :query_constraints, :deprecated, :autosave, :class_name, :before_add,
+      :strict_loading, :query_constraints, :deprecated, :context, :autosave, :class_name, :before_add,
       :after_add, :before_remove, :after_remove, :extend, :counter_cache, :join_table,
       :index_errors, :as, :through
     MESSAGE

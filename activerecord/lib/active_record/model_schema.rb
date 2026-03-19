@@ -200,10 +200,12 @@ module ActiveRecord
     end
 
     module ClassMethods
+      DEFAULT_SCHEMA_CONTEXT = "default"
+
       def current_schema_context # :nodoc:
         connection_db_config.schema_context
       rescue ConnectionNotDefined
-        "default"
+        DEFAULT_SCHEMA_CONTEXT
       end
 
       def model_schema # :nodoc:

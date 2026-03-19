@@ -1425,8 +1425,15 @@ module ActiveRecord
         #   has_many :comments, query_constraints: [:blog_id, :post_id]
         #   has_many :comments, index_errors: :nested_attributes_order
         def has_many(name, scope = nil, **options, &extension)
+          contexts = options.delete(:context)
+
           reflection = Builder::HasMany.build(self, name, scope, options, &extension)
           Reflection.add_reflection(self, name, reflection)
+
+          contexts&.each do |context_key, context_options|
+            context_reflection = Builder::HasMany.create_reflection(self, name, scope, options.merge(context_options))
+            Reflection.add_context_to_reflection(self, name, context_key, context_reflection)
+          end
         end
 
         # Specifies a one-to-one association with another class. This method
@@ -1626,8 +1633,15 @@ module ActiveRecord
         #   has_one :credit_card, strict_loading: true
         #   has_one :employment_record_book, query_constraints: [:organization_id, :employee_id]
         def has_one(name, scope = nil, **options)
+          contexts = options.delete(:context)
+
           reflection = Builder::HasOne.build(self, name, scope, options)
           Reflection.add_reflection(self, name, reflection)
+
+          contexts&.each do |context_key, context_options|
+            context_reflection = Builder::HasOne.create_reflection(self, name, scope, options.merge(context_options))
+            Reflection.add_context_to_reflection(self, name, context_key, context_reflection)
+          end
         end
 
         # Specifies a one-to-one association with another class. This method
@@ -1822,8 +1836,15 @@ module ActiveRecord
         #   belongs_to :account, strict_loading: true
         #   belongs_to :note, query_constraints: [:organization_id, :note_id]
         def belongs_to(name, scope = nil, **options)
+          contexts = options.delete(:context)
+
           reflection = Builder::BelongsTo.build(self, name, scope, options)
           Reflection.add_reflection(self, name, reflection)
+
+          contexts&.each do |context_key, context_options|
+            context_reflection = Builder::BelongsTo.create_reflection(self, name, scope, options.merge(context_options))
+            Reflection.add_context_to_reflection(self, name, context_key, context_reflection)
+          end
         end
 
         # Specifies a many-to-many relationship with another class. This associates two classes via an

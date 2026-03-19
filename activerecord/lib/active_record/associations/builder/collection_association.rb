@@ -12,10 +12,9 @@ module ActiveRecord::Associations::Builder # :nodoc:
 
     def self.define_callbacks(model, reflection)
       super
-      name    = reflection.name
-      options = reflection.options
+      name = reflection.name
       CALLBACKS.each { |callback_name|
-        define_callback(model, callback_name, name, options)
+        define_callback(model, callback_name, name, reflection.options)
       }
     end
 

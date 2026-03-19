@@ -26,6 +26,23 @@ module ActiveRecord
         ar._reflections = ar._reflections.except(name).merge!(name => reflection)
       end
 
+      # Wraps an existing reflection in a type-specific context-aware proxy
+      # and adds a context-specific override. If the reflection is already
+      # context-aware, just adds the new context to it.
+      def add_context_to_reflection(ar, name, context_key, context_reflection)
+        ar.clear_reflections_cache
+        name = name.to_sym
+
+        existing = ar._reflections[name]
+        if existing.context_aware?
+          existing.add_context(context_key, context_reflection)
+        else
+          proxy = context_aware_class_for(existing).new(existing)
+          proxy.add_context(context_key, context_reflection)
+          ar._reflections = ar._reflections.except(name).merge!(name => proxy)
+        end
+      end
+
       def add_aggregate_reflection(ar, name, reflection)
         ar.aggregate_reflections = ar.aggregate_reflections.merge(name.to_sym => reflection)
       end
@@ -43,6 +60,19 @@ module ActiveRecord
             BelongsToReflection
           else
             raise "Unsupported Macro: #{macro}"
+          end
+        end
+
+        def context_aware_class_for(reflection)
+          case reflection
+          when BelongsToReflection
+            ContextAwareBelongsToReflection
+          when HasManyReflection
+            ContextAwareHasManyReflection
+          when HasOneReflection
+            ContextAwareHasOneReflection
+          else
+            raise ArgumentError, "Context-aware reflections are not supported for #{reflection.class}"
           end
         end
     end
@@ -170,6 +200,10 @@ module ActiveRecord
       end
 
       def through_reflection?
+        false
+      end
+
+      def context_aware?
         false
       end
 
@@ -1321,5 +1355,7 @@ module ActiveRecord
 
       def all_includes; yield; end
     end
+
+    require "active_record/reflection/context_aware_reflection"
   end
 end
