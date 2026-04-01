@@ -43,15 +43,11 @@ module ActiveRecord
 
         # Returns a scope for the model with default scopes.
         def default_scoped(scope = relation, all_queries: nil)
-          build_default_scope(scope, all_queries: all_queries) || scope
+          build_default_scope(scope, all_queries: all_queries)
         end
 
         def default_extensions # :nodoc:
-          if scope = scope_for_association || build_default_scope
-            scope.extensions
-          else
-            []
-          end
+          (scope_for_association || build_default_scope).extensions
         end
 
         # Adds a class method for retrieving and querying objects.

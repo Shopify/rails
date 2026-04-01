@@ -74,7 +74,7 @@ module ActiveRecord
         def unscoped(*names, &block)
           existing = current_scope&.excluded_default_scope_names || []
           names = (existing + names.map(&:to_sym)).uniq
-          relation_with_named_defaults = build_default_scope(unscoped_names: names) || relation
+          relation_with_named_defaults = build_default_scope(unscoped_names: names)
           relation_with_named_defaults.excluded_default_scope_names = names
 
           if block_given?
@@ -204,7 +204,7 @@ module ActiveRecord
           end
 
           def build_default_scope(relation = relation(), all_queries: nil, unscoped_names: nil)
-            return if abstract_class?
+            return relation if abstract_class?
 
             if default_scope_override.nil?
               self.default_scope_override = !Base.is_a?(method(:default_scope).owner)
@@ -221,7 +221,7 @@ module ActiveRecord
                 scopes = scopes.select { |s| s.named? && !unscoped_names.include?(s.name) }
               end
 
-              return if scopes.empty?
+              return relation if scopes.empty?
 
               evaluate_default_scope do
                 scopes.inject(relation) do |combined_scope, scope_obj|
@@ -233,7 +233,9 @@ module ActiveRecord
                     combined_scope
                   end
                 end
-              end
+              end || relation
+            else
+              relation
             end
           end
 
