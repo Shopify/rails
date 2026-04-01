@@ -3,11 +3,16 @@
 module ActiveRecord
   module Scoping
     class DefaultScope # :nodoc:
-      attr_reader :scope, :all_queries
+      attr_reader :scope, :all_queries, :name
 
-      def initialize(scope, all_queries = nil)
+      def initialize(scope, all_queries = nil, name = nil)
         @scope = scope
         @all_queries = all_queries
+        @name = name&.to_sym
+      end
+
+      def named?
+        !@name.nil?
       end
     end
 
@@ -22,6 +27,9 @@ module ActiveRecord
 
       module ClassMethods
         # Returns a scope for the model without the previously set scopes.
+        # Unnamed default scopes are always removed. Named default scopes
+        # (see #default_scope) are durable and survive +unscoped+ unless
+        # explicitly listed by name.
         #
         #   class Post < ActiveRecord::Base
         #     belongs_to :user
@@ -47,8 +55,33 @@ module ActiveRecord
         #   Post.unscoped {
         #     Post.limit(10) # Fires "SELECT * FROM posts LIMIT 10"
         #   }
-        def unscoped(&block)
-          block_given? ? relation.scoping(&block) : relation
+        #
+        # Named default scopes are not removed by +unscoped+ unless explicitly listed by name. For example:
+        #
+        #   class Article < ActiveRecord::Base
+        #     default_scope :published, -> { where(published: true) }
+        #     default_scope :rating, -> { where(rating: 'G') }
+        #   end
+        #
+        #   Article.unscoped.all            # Named scopes are preserved
+        #   # SELECT * FROM articles WHERE published = true AND rating = 'G'
+        #
+        #   Article.unscoped(:published).all # Only :published is removed
+        #   # SELECT * FROM articles WHERE rating = 'G'
+        #
+        #   Article.unscoped(:published, :rating).all # Both removed
+        #   # SELECT * FROM articles
+        def unscoped(*names, &block)
+          existing = current_scope&.excluded_default_scope_names || []
+          names = (existing + names.map(&:to_sym)).uniq
+          relation_with_named_defaults = build_default_scope(unscoped_names: names) || relation
+          relation_with_named_defaults.excluded_default_scope_names = names
+
+          if block_given?
+            relation_with_named_defaults.scoping(&block)
+          else
+            relation_with_named_defaults
+          end
         end
 
         # Are there attributes associated with this scope?
@@ -126,8 +159,36 @@ module ActiveRecord
           #       # Should return a scope, you can call 'super' here etc.
           #     end
           #   end
-          def default_scope(scope = nil, all_queries: nil, &block) # :doc:
-            scope = block if block_given?
+          #
+          # === Named default scopes
+          #
+          # A default scope can be given a name, making it durable. It will
+          # not be removed by +unscoped+ unless explicitly referenced by name.
+          #
+          #   class Article < ActiveRecord::Base
+          #     default_scope :published, -> { where(published: true) }
+          #     default_scope :rating, -> { where(rating: 'G') }
+          #   end
+          #
+          #   Article.all
+          #   # SELECT * FROM articles WHERE published = true AND rating = 'G'
+          #
+          #   Article.unscoped.all # Named scopes are preserved
+          #   # SELECT * FROM articles WHERE published = true AND rating = 'G'
+          #
+          #   Article.unscoped(:published).all # Only :published is removed
+          #   # SELECT * FROM articles WHERE rating = 'G'
+          #
+          # See +unscoped+ for more details on removing named default scopes.
+          def default_scope(name_or_scope = nil, scope = nil, all_queries: nil, &block) # :doc:
+            if name_or_scope.is_a?(Symbol) || name_or_scope.is_a?(String)
+              name = name_or_scope.to_sym
+              scope = block if block_given?
+            else
+              name = nil
+              scope = name_or_scope
+              scope = block if block_given?
+            end
 
             if scope.is_a?(Relation) || !scope.respond_to?(:call)
               raise ArgumentError,
@@ -137,12 +198,12 @@ module ActiveRecord
                 "self.default_scope.)"
             end
 
-            default_scope = DefaultScope.new(scope, all_queries)
+            default_scope = DefaultScope.new(scope, all_queries, name)
 
             self.default_scopes += [default_scope]
           end
 
-          def build_default_scope(relation = relation(), all_queries: nil)
+          def build_default_scope(relation = relation(), all_queries: nil, unscoped_names: nil)
             return if abstract_class?
 
             if default_scope_override.nil?
@@ -155,8 +216,15 @@ module ActiveRecord
                 relation.scoping { default_scope }
               end
             elsif default_scopes.any?
+              scopes = default_scopes
+              if unscoped_names
+                scopes = scopes.select { |s| s.named? && !unscoped_names.include?(s.name) }
+              end
+
+              return if scopes.empty?
+
               evaluate_default_scope do
-                default_scopes.inject(relation) do |combined_scope, scope_obj|
+                scopes.inject(relation) do |combined_scope, scope_obj|
                   if execute_scope?(all_queries, scope_obj)
                     scope = scope_obj.scope.respond_to?(:to_proc) ? scope_obj.scope : scope_obj.scope.method(:call)
 

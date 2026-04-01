@@ -70,6 +70,7 @@ module ActiveRecord
 
     attr_reader :table, :model, :loaded, :predicate_builder
     attr_accessor :skip_preloading_value
+    attr_accessor :excluded_default_scope_names
     alias :klass :model
     alias :loaded? :loaded
     alias :locked? :lock_value
@@ -92,11 +93,18 @@ module ActiveRecord
       @records = nil
       @async = false
       @none = false
+      @excluded_default_scope_names = []
     end
 
     def initialize_copy(other)
       @values = @values.dup
+      @excluded_default_scope_names = @excluded_default_scope_names.dup
       reset
+    end
+
+    def unscoped(*names, &block)
+      all_excluded = excluded_default_scope_names + names.map(&:to_sym)
+      model.unscoped(*all_excluded, &block)
     end
 
     def bind_attribute(name, value) # :nodoc:

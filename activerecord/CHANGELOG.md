@@ -1,3 +1,29 @@
+*   Add named default scopes.
+
+    Default scopes can now be given a name, making them durable. They
+    will not be removed by `unscoped` unless explicitly referenced by name.
+
+    ```ruby
+    class Article < ActiveRecord::Base
+      default_scope :published, -> { where(published: true) }
+      default_scope :user, -> { where(user: User.current) }
+    end
+
+    Article.unscoped.all # Named scopes are preserved
+    # SELECT * FROM articles WHERE published = true AND user_id = 1
+
+    Article.unscoped(:published).all # Only :published is removed
+    # SELECT * FROM articles WHERE user_id = 1
+
+    Article.unscoped(:published, :user).all # Both removed
+    # SELECT * FROM articles
+
+    Article.unscoped(:published).unscoped(:user).all # Both removed
+    # SELECT * FROM articles
+    ```
+
+    *Andrew Novoselac*
+
 *   Support PostgreSQL `RESET` on readonly queries.
 
     ```ruby

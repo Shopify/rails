@@ -177,6 +177,13 @@ class DeveloperWithDefaultNilableFirmScopeAllQueries < ActiveRecord::Base
   default_scope -> { where(firm_id: firm_id) if firm_id }, all_queries: true
 end
 
+class DeveloperWithNamedDefaultScopes < ActiveRecord::Base
+  self.table_name = "developers"
+  default_scope -> { where(salary: 70000)}
+  default_scope :mentor, -> { where(mentor_id: 1) }
+  default_scope :firm, -> { where(firm_id: 1) }
+end
+
 module MentorDefaultScopeNotAllQueries
   extend ActiveSupport::Concern
 

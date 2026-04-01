@@ -708,6 +708,55 @@ class DefaultScopingTest < ActiveRecord::TestCase
     assert_match %r/#{Regexp.escape(quote_table_name("lions.is_vegetarian"))}/i, Lion.all.to_sql
     assert_match %r/#{Regexp.escape(quote_table_name("lions.gender"))}/i, Lion.female.to_sql
   end
+
+  def test_named_default_scope
+    wheres = DeveloperWithNamedDefaultScopes.all.where_values_hash
+    assert_equal 70000, wheres["salary"]
+    assert_equal 1, wheres["mentor_id"]
+    assert_equal 1, wheres["firm_id"]
+  end
+
+  def test_unscoped_does_not_remove_named_default_scope
+    wheres = DeveloperWithNamedDefaultScopes.unscoped.where_values_hash
+    assert_nil wheres["salary"]
+    assert_equal 1, wheres["mentor_id"]
+    assert_equal 1, wheres["firm_id"]
+  end
+
+  def test_unscoped_named_default_scope_only_clears_that_scope
+    wheres = DeveloperWithNamedDefaultScopes.unscoped(:mentor).where_values_hash
+    assert_nil wheres["salary"]
+    assert_nil wheres["mentor_id"]
+    assert_equal 1, wheres["firm_id"]
+  end
+
+  def test_unscoped_chained_removes_multiple_named_default_scopes
+    wheres = DeveloperWithNamedDefaultScopes.unscoped(:mentor).unscoped(:firm).where_values_hash
+    assert_nil wheres["salary"]
+    assert_nil wheres["mentor_id"]
+    assert_nil wheres["firm_id"]
+  end
+
+  def test_unscoped_removes_multiple_named_default_scopes_in_one_call
+    wheres = DeveloperWithNamedDefaultScopes.unscoped(:mentor, :firm).where_values_hash
+    assert_nil wheres["salary"]
+    assert_nil wheres["mentor_id"]
+    assert_nil wheres["firm_id"]
+  end
+
+  def test_unscoped_block_preserves_named_default_scopes
+    wheres = DeveloperWithNamedDefaultScopes.unscoped { DeveloperWithNamedDefaultScopes.all }.where_values_hash
+    assert_nil wheres["salary"]
+    assert_equal 1, wheres["mentor_id"]
+    assert_equal 1, wheres["firm_id"]
+  end
+
+  def test_unscoped_block_with_names_removes_specified_named_default_scopes
+    wheres = DeveloperWithNamedDefaultScopes.unscoped(:mentor) { DeveloperWithNamedDefaultScopes.unscoped(:firm) }.where_values_hash
+    assert_nil wheres["salary"]
+    assert_nil wheres["mentor_id"]
+    assert_nil wheres["firm_id"]
+  end
 end
 
 class DefaultScopingWithThreadTest < ActiveRecord::TestCase
