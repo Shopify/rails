@@ -1,3 +1,60 @@
+*   Add named default scopes.
+
+    Default scopes can now be given a name, making them durable. They
+    will not be removed by `unscoped` unless explicitly referenced by name.
+
+    Calling `unscoped` with no arguments removes only unnamed default
+    scopes. Calling `unscoped(:name, ...)` removes only the listed named
+    scopes and leaves unnamed default scopes intact. You can chain multiple
+    calls together.
+
+    ```ruby
+    class Article < ActiveRecord::Base
+      default_scope { where(visible: true) }
+      default_scope :published, -> { where(published: true) }
+      default_scope :user, -> { where(user: User.current) }
+    end
+
+    Article.unscoped.all # Only the unnamed default scope is removed
+    # SELECT * FROM articles WHERE published = true AND user_id = 1
+
+    Article.unscoped(:published).all # Only :published is removed
+    # SELECT * FROM articles WHERE visible = true AND user_id = 1
+
+    Article.unscoped(:published, :user).all # Both named scopes removed
+    # SELECT * FROM articles WHERE visible = true
+
+    Article.unscoped(:published).unscoped.all # :published and unnamed removed
+    # SELECT * FROM articles WHERE user_id = 1
+    ```
+
+    *Andrew Novoselac*
+
+*   Fix `find` with multiple composite primary key ids passed as strings
+    silently returning `[]`.
+
+    `Model.find([["1", "10"], ["1", "20"]])` (the shape ids take when they come
+    from request parameters) returned an empty array instead of the records and
+    without raising `RecordNotFound`. The ids were cast against the array of key
+    column names as a whole — which is a no-op — so the string tuples never
+    compared equal to the records' integer ids when ordering the result. Each
+    component is now cast against its own column type, matching the documented
+    coercion already performed for single-column keys.
+
+    *Kenta Ishizaki*
+
+*   Fix PostgreSQL `daterange` / `tsrange` / `tstzrange` schema dump producing
+    invalid Ruby.
+
+    The schema dumper used to render range defaults via `Range#inspect`, which
+    falls back to `Date#inspect` / `Time#inspect` for the bounds. The resulting
+    `schema.rb` literal (for example `default: Mon, 01 Jan 2024..Wed, 01 Jan 2025`)
+    raised a `SyntaxError` on `db:schema:load`. The bounds are now rendered via
+    the subtype's `type_cast_for_schema`, so date and timestamp range defaults
+    round-trip through `schema.rb` like any other column.
+
+    *Kenta Ishizaki*
+
 *   Respect `schema_search_path` on `rails dbconsole` for PostgreSQL.
 
     *Gabriel Sobrinho*
