@@ -700,33 +700,78 @@ class ReflectionTest < ActiveRecord::TestCase
     assert_equal ["blog_id", "blog_post_id"], blog_post_foreign_key
   end
 
-  def test_using_query_constraints_warns_about_changing_behavior
-    has_many_expected_message = <<~MSG.squish
-      Setting `query_constraints:` option on `Firm.has_many :clients` is not allowed.
-      To get the same behavior, use the `foreign_key` option instead.
-    MSG
+  def test_using_query_constraints_is_allowed
+    has_many = ActiveRecord::Reflection.create(:has_many, :clients, nil, { query_constraints: [:firm_id, :firm_name] }, Firm)
+    has_one = ActiveRecord::Reflection.create(:has_one, :account, nil, { query_constraints: [:firm_id, :firm_name] }, Firm)
+    belongs_to = ActiveRecord::Reflection.create(:belongs_to, :client, nil, { query_constraints: [:firm_id, :firm_name] }, Firm)
 
-    assert_raises(ActiveRecord::ConfigurationError, match: has_many_expected_message) do
-      ActiveRecord::Reflection.create(:has_many, :clients, nil, { query_constraints: [:firm_id, :firm_name] }, Firm)
+    assert_equal ["firm_id", "firm_name"], has_many.query_constraints_foreign_key
+    assert_equal ["firm_id", "firm_name"], has_one.query_constraints_foreign_key
+    assert_equal ["firm_id", "firm_name"], belongs_to.query_constraints_foreign_key
+  end
+
+  def test_normalized_query_constraints_mapping_with_symbols
+    reflection = Sharded::Comment.reflect_on_association(:blog_post_with_decoupled_qc)
+
+    assert_equal [["blog_id", "blog_id"]], reflection.normalized_query_constraints_mapping
+  end
+
+  def test_normalized_query_constraints_mapping_with_hash
+    reflection = Sharded::BlogPost.reflect_on_association(:featured_comment)
+
+    assert_equal [["blog_id", "blog_id"], ["id", "blog_post_id"]], reflection.normalized_query_constraints_mapping
+  end
+
+  def test_normalized_query_constraints_mapping_returns_nil_for_old_style
+    # Old-style: all symbols, no explicit foreign_key → nil (use legacy behavior)
+    reflection = Sharded::BlogPost.reflect_on_association(:comments_with_composite_pk)
+
+    assert_nil reflection.normalized_query_constraints_mapping
+  end
+
+  def test_belongs_to_join_keys_with_query_constraints_mapping
+    reflection = Sharded::BlogPost.reflect_on_association(:featured_comment)
+
+    # target (Comment) columns for WHERE clause
+    assert_equal ["blog_id", "blog_post_id", "id"], reflection.join_query_constraints_primary_key
+    # self (BlogPost) columns to read values from
+    assert_equal ["blog_id", "id", "featured_comment_id"], reflection.join_query_constraints_foreign_key
+  end
+
+  def test_query_constraints_mapping_requires_foreign_key_when_hash_present
+    assert_raises(ArgumentError, match: /requires an explicit `foreign_key` option/) do
+      ActiveRecord::Reflection.create(
+        :belongs_to, :comment, nil,
+        { query_constraints: [:blog_id, { id: :blog_post_id }], class_name: "Sharded::Comment" },
+        Sharded::BlogPost
+      ).foreign_key
     end
+  end
 
-    has_one_expected_message = <<~MSG.squish
-      Setting `query_constraints:` option on `Firm.has_one :account` is not allowed.
-      To get the same behavior, use the `foreign_key` option instead.
-    MSG
+  def test_has_many_with_decoupled_query_constraints_active_record_primary_key_is_scalar
+    # When both foreign_key and query_constraints are specified, active_record_primary_key
+    # should return the scalar primary key, not the query_constraints_list array.
+    # This ensures .joins() works correctly.
+    reflection = ActiveRecord::Reflection.create(
+      :has_many, :comments, nil,
+      { foreign_key: :blog_post_id, query_constraints: :blog_id, class_name: "Sharded::Comment" },
+      Sharded::BlogPost
+    )
 
-    assert_raises(ActiveRecord::ConfigurationError, match: has_one_expected_message) do
-      ActiveRecord::Reflection.create(:has_one, :account, nil, { query_constraints: [:firm_id, :firm_name] }, Firm)
-    end
+    assert_equal "id", reflection.active_record_primary_key
+    assert_equal "id", reflection.join_foreign_key
+  end
 
-    belongs_to_expected_message = <<~MSG.squish
-      Setting `query_constraints:` option on `Firm.belongs_to :client` is not allowed.
-      To get the same behavior, use the `foreign_key` option instead.
-    MSG
+  def test_has_many_decoupled_query_constraints_join_query_constraints_keys
+    reflection = ActiveRecord::Reflection.create(
+      :has_many, :comments, nil,
+      { foreign_key: :blog_post_id, query_constraints: :blog_id, class_name: "Sharded::Comment" },
+      Sharded::BlogPost
+    )
 
-    assert_raises(ActiveRecord::ConfigurationError, match: belongs_to_expected_message) do
-      ActiveRecord::Reflection.create(:belongs_to, :client, nil, { query_constraints: [:firm_id, :firm_name] }, Firm)
-    end
+    # For querying: parent columns (self) = [blog_id, id], child columns (target) = [blog_id, blog_post_id]
+    assert_equal ["blog_id", "id"], reflection.join_query_constraints_foreign_key
+    assert_equal ["blog_id", "blog_post_id"], reflection.join_query_constraints_primary_key
   end
 
   private

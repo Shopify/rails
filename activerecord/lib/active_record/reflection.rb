@@ -528,15 +528,9 @@ module ActiveRecord
         @foreign_key = nil
         @association_foreign_key = nil
         @association_primary_key = nil
-        if options[:query_constraints]
-          raise ConfigurationError, <<~MSG.squish
-            Setting `query_constraints:` option on `#{active_record}.#{macro} :#{name}` is not allowed.
-            To get the same behavior, use the `foreign_key` option instead.
-          MSG
-        end
 
-        # If the foreign key is an array, set query constraints options and don't use the foreign key
-        if options[:foreign_key].is_a?(Array)
+        # If the foreign key is an array, set query constraints options
+        if options[:foreign_key].is_a?(Array) && !options[:query_constraints]
           options[:query_constraints] = options.delete(:foreign_key)
         end
 
@@ -559,6 +553,41 @@ module ActiveRecord
         @join_table ||= -(options[:join_table]&.to_s || derive_join_table)
       end
 
+      # Normalizes the `query_constraints` option into [self_column, target_column] pairs.
+      # Returns nil for old-style query_constraints (plain FK column arrays without explicit foreign_key).
+      #
+      # Activated when `foreign_key` is also specified, or when any element is a Hash.
+      # Key = column on this model's table (self), Value = column on the other table (target).
+      #
+      # Examples:
+      #   query_constraints: :shop_id                        => [["shop_id", "shop_id"]]
+      #   query_constraints: [:blog_id, { id: :blog_post_id }] => [["blog_id", "blog_id"], ["id", "blog_post_id"]]
+      def normalized_query_constraints_mapping
+        return unless options[:query_constraints]
+        return unless options[:foreign_key] || Array(options[:query_constraints]).any?(Hash)
+
+        @normalized_query_constraints_mapping ||= Array(options[:query_constraints]).flat_map { |element|
+          case element
+          when Symbol, String
+            [[element.to_s, element.to_s]]
+          when Hash
+            element.map { |self_col, target_col| [self_col.to_s, target_col.to_s] }
+          end
+        }.freeze
+      end
+
+      # defaults to `foreign_key` for all models
+      # should be used instead of `foreign_key` for all querying purposes: load association targets, preload.
+      # otherwise it will differ from `foreign_key` if association has `_query_constraints` option or it can be derived
+      def query_constraints_foreign_key
+        @query_constraints_foreign_key ||= if options[:query_constraints]
+          qc = Array(options[:query_constraints]).map { |fk| fk.to_s.freeze }
+          [*qc, *Array(foreign_key)].uniq.freeze
+        else
+          foreign_key
+        end
+      end
+
       def foreign_key(infer_from_inverse_of: true)
         @foreign_key ||= if options[:foreign_key]
           if options[:foreign_key].is_a?(Array)
@@ -567,7 +596,13 @@ module ActiveRecord
             options[:foreign_key].to_s.freeze
           end
         elsif options[:query_constraints]
-          options[:query_constraints].map { |fk| -fk.to_s.freeze }.freeze
+          qc = Array(options[:query_constraints])
+          if qc.any?(Hash)
+            raise ArgumentError,
+              "`query_constraints` with column mapping (Hash) on `#{active_record}.#{macro} :#{name}` " \
+              "requires an explicit `foreign_key` option."
+          end
+          qc.map { |fk| -fk.to_s.freeze }.freeze
         else
           derived_fk = derive_foreign_key(infer_from_inverse_of: infer_from_inverse_of)
 
@@ -592,6 +627,16 @@ module ActiveRecord
         primary_key(klass || self.klass)
       end
 
+      def active_record_query_constraints_primary_key
+        if options[:primary_key]
+          active_record_primary_key
+        elsif active_record.has_query_constraints? || options[:query_constraints]
+          @active_record_query_constraints_primary_key ||= active_record.query_constraints_list
+        else
+          active_record_primary_key
+        end
+      end
+
       def active_record_primary_key
         custom_primary_key = options[:primary_key]
         @active_record_primary_key ||= if custom_primary_key
@@ -600,7 +645,7 @@ module ActiveRecord
           else
             custom_primary_key.to_s.freeze
           end
-        elsif active_record.has_query_constraints? || options[:query_constraints]
+        elsif active_record.has_query_constraints? || (options[:query_constraints] && !options[:foreign_key])
           active_record.query_constraints_list
         elsif active_record.composite_primary_key?
           # If active_record has composite primary key of shape [:<tenant_key>, :id], infer primary_key as :id
@@ -611,12 +656,30 @@ module ActiveRecord
         end
       end
 
+      def join_query_constraints_primary_key(klass = nil)
+        if (mapping = normalized_query_constraints_mapping)
+          # target (child) columns: mapping values + foreign_key
+          [*mapping.map(&:last), *Array(foreign_key)].uniq.freeze
+        else
+          query_constraints_foreign_key
+        end
+      end
+
       def join_primary_key(klass = nil)
         foreign_key
       end
 
       def join_primary_type
         type
+      end
+
+      def join_query_constraints_foreign_key
+        if (mapping = normalized_query_constraints_mapping)
+          # self (parent) columns: mapping keys + active_record_primary_key
+          [*mapping.map(&:first), *Array(active_record_primary_key)].uniq.freeze
+        else
+          active_record_query_constraints_primary_key
+        end
       end
 
       def join_foreign_key
@@ -649,6 +712,10 @@ module ActiveRecord
             is not supported.
           MSG
         end
+      end
+
+      def join_query_constraints_id_for(owner)
+        Array(join_query_constraints_foreign_key).map { |key| owner._read_attribute(key) }
       end
 
       def join_id_for(owner) # :nodoc:
@@ -938,6 +1005,16 @@ module ActiveRecord
         end
       end
 
+      def association_query_constraints_primary_key(klass = nil)
+        if options[:primary_key]
+          association_primary_key(klass)
+        elsif (klass || self.klass).has_query_constraints? || options[:query_constraints]
+          @association_query_constraints_primary_key ||= (klass || self.klass).query_constraints_list
+        else
+          association_primary_key(klass)
+        end
+      end
+
       # klass option is necessary to support loading polymorphic associations
       def association_primary_key(klass = nil)
         if primary_key = options[:primary_key]
@@ -946,7 +1023,9 @@ module ActiveRecord
           else
             -primary_key.to_s
           end
-        elsif (klass || self.klass).has_query_constraints? || options[:query_constraints]
+        elsif options[:query_constraints]
+          primary_key(klass || self.klass)
+        elsif (klass || self.klass).has_query_constraints?
           (klass || self.klass).composite_query_constraints_list
         elsif (klass || self.klass).composite_primary_key?
           # If klass has composite primary key of shape [:<tenant_key>, :id], infer primary_key as :id
@@ -957,8 +1036,27 @@ module ActiveRecord
         end
       end
 
+      def join_query_constraints_primary_key(klass = nil)
+        if (mapping = normalized_query_constraints_mapping)
+          # target (parent) columns: mapping values + association_primary_key
+          target_klass = polymorphic? ? klass : (klass || self.klass)
+          [*mapping.map(&:last), *Array(association_primary_key(target_klass))].uniq.freeze
+        else
+          polymorphic? ? association_query_constraints_primary_key(klass) : association_query_constraints_primary_key
+        end
+      end
+
       def join_primary_key(klass = nil)
         polymorphic? ? association_primary_key(klass) : association_primary_key
+      end
+
+      def join_query_constraints_foreign_key
+        if (mapping = normalized_query_constraints_mapping)
+          # self (child) columns: mapping keys + foreign_key
+          [*mapping.map(&:first), *Array(foreign_key)].uniq.freeze
+        else
+          query_constraints_foreign_key
+        end
       end
 
       def join_foreign_key
@@ -1110,6 +1208,10 @@ module ActiveRecord
         else
           primary_key(klass || self.klass)
         end
+      end
+
+      def join_query_constraints_primary_key(klass = self.klass)
+        source_reflection.join_query_constraints_primary_key(klass)
       end
 
       def join_primary_key(klass = self.klass)
@@ -1269,8 +1371,7 @@ module ActiveRecord
     end
 
     class PolymorphicReflection < AbstractReflection # :nodoc:
-      delegate :klass, :scope, :plural_name, :type, :join_primary_key, :join_foreign_key,
-               :name, :scope_for, to: :@reflection
+      delegate :klass, :scope, :plural_name, :type, :join_primary_key, :join_foreign_key, :name, :scope_for, :join_query_constraints_primary_key, :join_query_constraints_foreign_key, to: :@reflection
 
       def initialize(reflection, previous_reflection)
         super()
@@ -1299,7 +1400,7 @@ module ActiveRecord
     end
 
     class RuntimeReflection < AbstractReflection # :nodoc:
-      delegate :scope, :type, :constraints, :join_foreign_key, to: :@reflection
+      delegate :scope, :type, :constraints, :join_foreign_key, :join_query_constraints_foreign_key, to: :@reflection
 
       def initialize(reflection, association)
         super()
@@ -1313,6 +1414,10 @@ module ActiveRecord
 
       def aliased_table
         klass.arel_table
+      end
+
+      def join_query_constraints_primary_key(klass = self.klass)
+        @reflection.join_query_constraints_primary_key(klass)
       end
 
       def join_primary_key(klass = self.klass)
