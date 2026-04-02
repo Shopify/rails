@@ -576,7 +576,7 @@ module ActiveRecord
       def compute_primary_key(reflection, record)
         if primary_key_options = reflection.options[:primary_key]
           primary_key_options
-        elsif reflection.options[:query_constraints] && (query_constraints = record.class.query_constraints_list)
+        elsif reflection.options[:query_constraints] && !reflection.options[:foreign_key] && (query_constraints = record.class.query_constraints_list)
           query_constraints
         elsif record.class.has_query_constraints? && !reflection.options[:foreign_key]
           record.class.query_constraints_list
