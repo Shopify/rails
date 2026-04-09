@@ -271,6 +271,7 @@ module Rails
           model._default_attributes.make_shareable! rescue nil
           model.define_attribute_methods
           model.reflections.each_value { |r| r.make_shareable! rescue nil }
+
           # Freeze non-cyclic method blocks (from autosave_association)
           model.instance_variables.each do |ivar|
             if ivar.to_s.start_with?("@_ncm_block_")
@@ -316,20 +317,23 @@ module Rails
 
 
 
-      # Temporarily detach the connection handler from the class attribute
-      # so make_shareable! doesn't freeze it (connection pools must remain
-      # mutable for the main Ractor's DB operations).
-      saved_handler = ::ActiveRecord::Base.default_connection_handler
-      ::ActiveRecord::Base.singleton_class.instance_variable_set(
-        :@__class_attr_default_connection_handler, nil
-      )
+      # Final pass: re-set model state that freeze passes may have reset
+      ::ActiveRecord::Base.descendants.each do |model|
+        begin
+          at = model.arel_table
+          at.make_shareable! rescue nil
+          model.instance_variable_set(:@arel_table, at)
+          model.instance_variable_set(:@primary_key, model.primary_key)
+        rescue
+        end
+      end
 
-      make_shareable!
-
-      # Restore the connection handler
-      ::ActiveRecord::Base.singleton_class.instance_variable_set(
-        :@__class_attr_default_connection_handler, saved_handler
-      )
+      # Make the key components shareable individually rather than
+      # freezing the entire Application (which would freeze AR model
+      # classes and prevent creating new records in the main Ractor).
+      @app_env_config.make_shareable!
+      @routes.make_shareable! rescue nil
+      @app.make_shareable! rescue nil
     end
 
     def freeze

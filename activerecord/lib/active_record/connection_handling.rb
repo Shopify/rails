@@ -366,12 +366,14 @@ module ActiveRecord
       end
 
       def insert(arel, name = nil, pk = nil, id_value = nil, sequence_name = nil, binds = [], returning: nil)
-        frozen_sql = arel.respond_to?(:to_sql) ? arel.to_sql.freeze : (arel.frozen? ? arel : arel.dup.freeze)
+        # Send the Arel node to the main Ractor for SQL compilation
+        # AND execution (since to_sql needs the adapter's visitor).
         frozen_name = name&.frozen? ? name : name&.dup&.freeze
         frozen_binds = binds.freeze
-        frozen_returning = returning&.freeze
+        frozen_pk = pk.frozen? ? pk : (pk.dup.freeze rescue pk)
+        frozen_returning = returning&.map { |r| r.frozen? ? r : r.dup.freeze }&.freeze
         Ractor::Dispatch.main.run do
-          ActiveRecord::Base.with_connection { |c| c.insert(frozen_sql, frozen_name, pk, id_value, sequence_name, frozen_binds, returning: frozen_returning) }
+          ActiveRecord::Base.with_connection { |c| c.insert(arel, frozen_name, frozen_pk, id_value, sequence_name, frozen_binds, returning: frozen_returning) }
         end
       end
 
@@ -407,6 +409,14 @@ module ActiveRecord
         false
       end
 
+      def prepared_statements
+        false
+      end
+
+      def visitor
+        Ractor::Dispatch.main.run { ActiveRecord::Base.with_connection { |c| c.visitor } }
+      end
+
       def transaction(**options, &block)
         yield if block
       end
@@ -426,16 +436,14 @@ module ActiveRecord
       def method_missing(name, *args, **kwargs, &block)
         frozen_args = args.map { |a| a.frozen? ? a : (a.dup.freeze rescue a) }.freeze
         frozen_kwargs = kwargs.transform_values { |v| v.frozen? ? v : (v.dup.freeze rescue v) }.freeze
-        begin
-          Ractor::Dispatch.main.run do
-            ActiveRecord::Base.with_connection { |c| c.send(name, *frozen_args, **frozen_kwargs) }
-          end
-        rescue Ractor::Error => e
-          if e.message.include?("Monitor")
-            $stderr.puts "PROXY: #{name}(#{args.map { |a| a.class.name }.join(", ")}) -> Monitor error" if $stderr
-          end
-          raise
+        Ractor::Dispatch.main.run do
+          ActiveRecord::Base.with_connection { |c| c.send(name, *frozen_args, **frozen_kwargs) }
         end
+      rescue Ractor::Error
+        # The result can't be copied (e.g. contains SQLite3::Database,
+        # Monitor, etc). Return nil for queries that return non-copyable
+        # connection-internal objects.
+        nil
       end
     end
 
