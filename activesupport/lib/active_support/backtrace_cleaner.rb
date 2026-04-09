@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "active_support/core_ext/kernel/shareable"
+
 module ActiveSupport
   # = Backtrace Cleaner
   #
@@ -152,7 +154,7 @@ module ActiveSupport
     #   root = "#{Rails.root}/"
     #   backtrace_cleaner.add_filter { |line| line.delete_prefix(root) }
     def add_filter(&block)
-      @filters << block
+      @filters << shareable_proc(&block)
     end
 
     # Adds a silencer from the block provided. If the silencer returns +true+
@@ -161,7 +163,7 @@ module ActiveSupport
     #   # Will reject all lines that include the word "puma", like "/gems/puma/server.rb" or "/app/my_puma_server/rb"
     #   backtrace_cleaner.add_silencer { |line| /puma/.match?(line) }
     def add_silencer(&block)
-      @silencers << block
+      @silencers << shareable_proc(&block)
     end
 
     # Removes all silencers, but leaves in the filters. Useful if your
