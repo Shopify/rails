@@ -485,6 +485,15 @@ module ActionDispatch
         @finalized = true
       end
 
+      def freeze
+        # Append/prepend blocks capture boot-time locals and are only
+        # needed during route drawing. Clear them so the route set can
+        # be made Ractor-shareable.
+        @append = [].freeze
+        @prepend = [].freeze
+        super
+      end
+
       def clear!
         @finalized = false
         named_routes.clear
