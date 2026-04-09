@@ -119,7 +119,7 @@ module ActiveSupport
         def finish(name, id, payload); end
       end
 
-      NULL = Ractor.make_shareable(new(NullNotifier.new))
+      NULL = new(NullNotifier.new).make_shareable!
     end
 
     class Event

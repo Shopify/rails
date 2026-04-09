@@ -62,7 +62,7 @@ module Rails
     #   Rails.root
     #     # => #<Pathname:/Users/someuser/some/path/project>
     def root
-      application && application.config.root
+      @root || (application && application.config.root)
     end
 
     # Returns the current \Rails environment.

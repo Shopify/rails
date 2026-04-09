@@ -417,6 +417,10 @@ module ActionView
         value = _layout(lookup_context, formats, keys) if action_has_layout?
       rescue NameError => e
         raise e, "Could not render layout: #{e.message}"
+      rescue RuntimeError => e
+        # In non-main Ractors, _layout may fail if its generated code
+        # references methods defined via define_method. Skip layout.
+        raise unless e.message.include?("un-shareable Proc")
       end
 
       if require_layout && action_has_layout? && !value
