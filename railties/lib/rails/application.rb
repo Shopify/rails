@@ -123,10 +123,31 @@ module Rails
       # After eager loading and boot, these are populated and read-only.
       # This catches Rack, ActionDispatch, Mime, and other constants
       # that weren't designed for Ractor safety.
+      # Freeze constants in Rails and Rack modules only (not ALL modules,
+      # which would catch Bootsnap/Bundler/RubyVM internal caches)
+      rails_prefixes = %w[
+        ActionController ActionDispatch ActionMailer ActionView
+        ActiveModel ActiveRecord ActiveStorage ActiveJob ActiveSupport
+        ActionCable ActionMailbox ActionText Rails Mime
+      ]
       ObjectSpace.each_object(Module) do |mod|
+        name = mod.name rescue nil
+        next unless name && rails_prefixes.any? { |p| name.start_with?(p) }
         mod.constants(false).each do |const|
           begin
-            # Skip autoloaded constants to avoid triggering loads
+            next if mod.autoload?(const)
+            val = mod.const_get(const, false)
+            next if val.is_a?(Module) || val.frozen?
+            val.make_shareable!
+          rescue
+          end
+        end
+      end
+      # Also freeze Rack constants
+      ObjectSpace.each_object(Module) do |mod|
+        next unless mod.name&.start_with?("Rack")
+        mod.constants(false).each do |const|
+          begin
             next if mod.autoload?(const)
             val = mod.const_get(const, false)
             next if val.is_a?(Module) || val.frozen?
