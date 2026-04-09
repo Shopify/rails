@@ -331,17 +331,26 @@ module ActionDispatch
           #     foo_url(bar, baz, bang, sort_by: 'baz')
           #
           def define_url_helper(mod, name, helper, url_strategy)
-            mod.define_method(name) do |*args|
-              last = args.last
-              options = \
-                case last
-                when Hash
-                  args.pop
-                when ActionController::Parameters
-                  args.pop.to_h
-                end
-              helper.call(self, name, args, options, url_strategy)
-            end
+            # Store the helper and strategy as module ivars so the
+            # generated method can access them without closures
+            # (closures prevent methods from being called in non-main Ractors).
+            mod.instance_variable_set(:"@_url_helper_#{name}", helper)
+            mod.instance_variable_set(:"@_url_strategy_#{name}", url_strategy)
+            mod.module_eval <<~RUBY, __FILE__, __LINE__ + 1
+              def #{name}(*args)
+                last = args.last
+                options = \\
+                  case last
+                  when Hash
+                    args.pop
+                  when ActionController::Parameters
+                    args.pop.to_h
+                  end
+                mod = self.class.ancestors.find { |m| m.instance_variable_defined?(:@_url_helper_#{name}) }
+                mod.instance_variable_get(:@_url_helper_#{name}).call(self, :#{name}, args, options,
+                  mod.instance_variable_get(:@_url_strategy_#{name}))
+              end
+            RUBY
           end
       end
 
