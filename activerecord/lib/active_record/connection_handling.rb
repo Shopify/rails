@@ -321,8 +321,7 @@ module ActiveRecord
       if !Ractor.main? && defined?(Ractor::Dispatch)
         # Yield a proxy that dispatches each DB call to the main
         # Ractor where the real connection pool lives.
-        yield RactorConnectionProxy.instance
-        return
+        return yield RactorConnectionProxy.instance
       end
       connection_pool.with_connection(prevent_permanent_checkout: prevent_permanent_checkout, &block)
     end
@@ -344,7 +343,6 @@ module ActiveRecord
         Ractor::Dispatch.main.run do
           ActiveRecord::Base.with_connection { |c| c.exec_query(frozen_sql, frozen_name, frozen_binds, prepare: prepare) }
         end
-      end
       end
 
       def execute(sql, name = nil, allow_retry: false)
@@ -370,24 +368,28 @@ module ActiveRecord
       def insert(arel, name = nil, pk = nil, id_value = nil, sequence_name = nil, binds = [], returning: nil)
         frozen_sql = arel.respond_to?(:to_sql) ? arel.to_sql.freeze : (arel.frozen? ? arel : arel.dup.freeze)
         frozen_name = name&.frozen? ? name : name&.dup&.freeze
+        frozen_binds = binds.freeze
+        frozen_returning = returning&.freeze
         Ractor::Dispatch.main.run do
-          ActiveRecord::Base.with_connection { |c| c.insert(frozen_sql, frozen_name, pk, id_value, sequence_name, binds, returning: returning) }
+          ActiveRecord::Base.with_connection { |c| c.insert(frozen_sql, frozen_name, pk, id_value, sequence_name, frozen_binds, returning: frozen_returning) }
         end
       end
 
       def update(arel, name = nil, binds = [])
         frozen_sql = arel.respond_to?(:to_sql) ? arel.to_sql.freeze : (arel.frozen? ? arel : arel.dup.freeze)
         frozen_name = name&.frozen? ? name : name&.dup&.freeze
+        frozen_binds = binds.freeze
         Ractor::Dispatch.main.run do
-          ActiveRecord::Base.with_connection { |c| c.update(frozen_sql, frozen_name, binds) }
+          ActiveRecord::Base.with_connection { |c| c.update(frozen_sql, frozen_name, frozen_binds) }
         end
       end
 
       def delete(arel, name = nil, binds = [])
         frozen_sql = arel.respond_to?(:to_sql) ? arel.to_sql.freeze : (arel.frozen? ? arel : arel.dup.freeze)
         frozen_name = name&.frozen? ? name : name&.dup&.freeze
+        frozen_binds = binds.freeze
         Ractor::Dispatch.main.run do
-          ActiveRecord::Base.with_connection { |c| c.delete(frozen_sql, frozen_name, binds) }
+          ActiveRecord::Base.with_connection { |c| c.delete(frozen_sql, frozen_name, frozen_binds) }
         end
       end
 
@@ -396,16 +398,59 @@ module ActiveRecord
         Ractor::Dispatch.main.run { ActiveRecord::Base.with_connection { |c| c.schema_cache } }
       end
 
+      # Return a pool proxy for transaction isolation level calls
+      def pool
+        RactorPoolProxy.instance
+      end
+
+      def transaction_open?
+        false
+      end
+
+      def transaction(**options, &block)
+        yield if block
+      end
+
+      # Transaction record tracking -- no-op in Ractor context
+      def add_transaction_record(*)
+      end
+
+      def current_transaction
+        ActiveRecord::ConnectionAdapters::NullTransaction.new
+      end
+
       def respond_to_missing?(name, include_private = false)
         true
       end
 
       def method_missing(name, *args, **kwargs, &block)
-        frozen_args = args.map { |a| a.is_a?(String) && !a.frozen? ? a.freeze : a }.freeze
-        frozen_kwargs = kwargs.transform_values { |v| v.is_a?(String) && !v.frozen? ? v.freeze : v }.freeze
-        Ractor::Dispatch.main.run do
-          ActiveRecord::Base.with_connection { |c| c.send(name, *frozen_args, **frozen_kwargs) }
+        frozen_args = args.map { |a| a.frozen? ? a : (a.dup.freeze rescue a) }.freeze
+        frozen_kwargs = kwargs.transform_values { |v| v.frozen? ? v : (v.dup.freeze rescue v) }.freeze
+        begin
+          Ractor::Dispatch.main.run do
+            ActiveRecord::Base.with_connection { |c| c.send(name, *frozen_args, **frozen_kwargs) }
+          end
+        rescue Ractor::Error => e
+          if e.message.include?("Monitor")
+            $stderr.puts "PROXY: #{name}(#{args.map { |a| a.class.name }.join(", ")}) -> Monitor error" if $stderr
+          end
+          raise
         end
+      end
+    end
+
+    # Minimal pool proxy for non-main Ractors. Only implements methods
+    # called on connection.pool during the save/transaction path.
+    class RactorPoolProxy # :nodoc:
+      INSTANCE = new.freeze
+      def self.instance = INSTANCE
+
+      def with_pool_transaction_isolation_level(level, open, &block)
+        yield  # No-op isolation management in Ractor context
+      end
+
+      def pool_transaction_isolation_level
+        nil
       end
     end
 

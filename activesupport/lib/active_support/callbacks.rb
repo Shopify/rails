@@ -419,19 +419,21 @@ module ActiveSupport
             [target, @override_block, :instance_exec]
           end
 
-          def make_lambda
-            override_block = @override_block
-            lambda do |target, value, &block|
-              target.instance_exec(&override_block)
+          class Invoke
+            def initialize(override_block, invert: false)
+              @override_block = override_block
+              @invert = invert
             end
+            def call(target, value, &block)
+              result = target.instance_exec(&@override_block)
+              @invert ? !result : result
+            end
+            def arity; 2; end
+            def lambda?; true; end
           end
 
-          def inverted_lambda
-            override_block = @override_block
-            lambda do |target, value, &block|
-              !target.instance_exec(&override_block)
-            end
-          end
+          def make_lambda = Invoke.new(@override_block)
+          def inverted_lambda = Invoke.new(@override_block, invert: true)
         end
 
         class InstanceExec1
@@ -443,19 +445,21 @@ module ActiveSupport
             [target, @override_block, :instance_exec, target]
           end
 
-          def make_lambda
-            override_block = @override_block
-            lambda do |target, value, &block|
-              target.instance_exec(target, &override_block)
+          class Invoke
+            def initialize(override_block, invert: false)
+              @override_block = override_block
+              @invert = invert
             end
+            def call(target, value, &block)
+              result = target.instance_exec(target, &@override_block)
+              @invert ? !result : result
+            end
+            def arity; 2; end
+            def lambda?; true; end
           end
 
-          def inverted_lambda
-            override_block = @override_block
-            lambda do |target, value, &block|
-              !target.instance_exec(target, &override_block)
-            end
-          end
+          def make_lambda = Invoke.new(@override_block)
+          def inverted_lambda = Invoke.new(@override_block, invert: true)
         end
 
         class InstanceExec2
@@ -468,21 +472,22 @@ module ActiveSupport
             [target, @override_block || block, :instance_exec, target, block]
           end
 
-          def make_lambda
-            override_block = @override_block
-            lambda do |target, value, &block|
-              raise ArgumentError unless block
-              target.instance_exec(target, block, &override_block)
+          class Invoke
+            def initialize(override_block, invert: false)
+              @override_block = override_block
+              @invert = invert
             end
+            def call(target, value, &block)
+              raise ArgumentError unless block
+              result = target.instance_exec(target, block, &@override_block)
+              @invert ? !result : result
+            end
+            def arity; 2; end
+            def lambda?; true; end
           end
 
-          def inverted_lambda
-            override_block = @override_block
-            lambda do |target, value, &block|
-              raise ArgumentError unless block
-              !target.instance_exec(target, block, &override_block)
-            end
-          end
+          def make_lambda = Invoke.new(@override_block)
+          def inverted_lambda = Invoke.new(@override_block, invert: true)
         end
 
         class ProcCall
@@ -494,19 +499,21 @@ module ActiveSupport
             [@override_target || target, block, :call, target, value]
           end
 
-          def make_lambda
-            override_target = @override_target
-            lambda do |target, value, &block|
-              (override_target || target).call(target, value, &block)
+          class Invoke
+            def initialize(override_target, invert: false)
+              @override_target = override_target
+              @invert = invert
             end
+            def call(target, value, &block)
+              result = (@override_target || target).call(target, value, &block)
+              @invert ? !result : result
+            end
+            def arity; 2; end
+            def lambda?; true; end
           end
 
-          def inverted_lambda
-            override_target = @override_target
-            lambda do |target, value, &block|
-              !(override_target || target).call(target, value, &block)
-            end
-          end
+          def make_lambda = Invoke.new(@override_target)
+          def inverted_lambda = Invoke.new(@override_target, invert: true)
         end
 
         # Filters support:

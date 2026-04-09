@@ -210,6 +210,9 @@ module Rails
           model.arel_table
           model.predicate_builder
           model.finder_needs_type_condition?
+          model.reflections.each_value { |r| r.make_shareable! rescue nil }
+          model.table_exists?
+          model.columns
           model.columns_hash
           model._default_attributes
           model.all
