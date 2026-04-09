@@ -95,15 +95,6 @@ module Rails
       def has?(name)
         @resolve.key?(name)
       end
-
-      def freeze
-        # Strip default procs before freezing — they implicitly capture
-        # self, preventing the Collection from being made Ractor-shareable.
-        # After boot the hashes are fully populated so the procs aren't needed.
-        @order.default_proc = nil
-        @resolve.default_proc = nil
-        super
-      end
     end
 
     def run_initializers(group = :default, *args)

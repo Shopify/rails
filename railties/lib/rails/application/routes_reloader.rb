@@ -42,6 +42,14 @@ module Rails
         end
       end
 
+      def freeze
+        # The updater holds a file-watcher block that captures self
+        # (via reload!). After boot in production, routes are loaded
+        # and the watcher is no longer needed.
+        @updater = nil
+        super
+      end
+
     private
       def updater
         @updater ||= begin
@@ -65,8 +73,10 @@ module Rails
         run_after_load_paths.call
       end
 
+      NOOP = shareable_proc { }
+
       def run_after_load_paths
-        @run_after_load_paths ||= -> { }
+        @run_after_load_paths ||= NOOP
       end
 
       def finalize!
