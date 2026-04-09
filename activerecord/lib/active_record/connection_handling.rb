@@ -354,14 +354,38 @@ module ActiveRecord
       end
 
       def select_all(arel, name = nil, binds = [], preparable: nil, async: false, **)
-        _ractor_select_all(
-          arel.respond_to?(:to_sql) ? arel.to_sql.freeze : (arel.frozen? ? arel : arel.dup.freeze),
-          (name || "SQL").freeze,
-          binds.freeze
-        )
+        if arel.respond_to?(:to_sql)
+          # Arel objects can't cross the Ractor boundary. Freeze the
+          # AST and dispatch SQL compilation + execution together.
+          frozen_ast = arel.ast.make_shareable!
+          # Find the engine (model class) from the Arel's table
+          arel_table = if arel.respond_to?(:froms)
+            arel.froms&.first
+          end
+          sql_engine = arel_table.respond_to?(:klass) ? arel_table.klass : ActiveRecord::Base
+          query_name = (name || "SQL").freeze
+          frozen_binds = binds.freeze
+          _ractor_select_all_arel(sql_engine, frozen_ast, query_name, frozen_binds)
+        else
+          _ractor_select_all_sql(
+            arel.frozen? ? arel : arel.dup.freeze,
+            (name || "SQL").freeze,
+            binds.freeze
+          )
+        end
       end
 
-      def _ractor_select_all(sql, query_name, query_binds)
+      def _ractor_select_all_arel(sql_engine, frozen_ast, query_name, query_binds)
+        Ractor::Dispatch.main.run do
+          conn = sql_engine.lease_connection
+          # Dup the frozen AST so to_sql_and_binds can modify bind params
+          ast_dup = Marshal.load(Marshal.dump(frozen_ast))
+          compiled = conn.to_sql_and_binds(ast_dup, query_binds)
+          conn.select_all(compiled[0], query_name, compiled[1])
+        end
+      end
+
+      def _ractor_select_all_sql(sql, query_name, query_binds)
         Ractor::Dispatch.main.run do
           ActiveRecord::Base.with_connection { |c| c.select_all(sql, query_name, query_binds) }
         end
@@ -417,20 +441,39 @@ module ActiveRecord
       public
 
       def update(arel, name = nil, binds = [])
-        frozen_sql = arel.respond_to?(:to_sql) ? arel.to_sql.freeze : (arel.frozen? ? arel : arel.dup.freeze)
-        frozen_name = (name || "SQL").freeze
-        frozen_binds = binds.freeze
-        Ractor::Dispatch.main.run do
-          ActiveRecord::Base.with_connection { |c| c.update(frozen_sql, frozen_name, frozen_binds) }
+        if arel.respond_to?(:to_sql)
+          _ractor_write_arel(:update, arel, name, binds)
+        else
+          _ractor_write_sql(:update, arel, name, binds)
         end
       end
 
       def delete(arel, name = nil, binds = [])
-        frozen_sql = arel.respond_to?(:to_sql) ? arel.to_sql.freeze : (arel.frozen? ? arel : arel.dup.freeze)
-        frozen_name = (name || "SQL").freeze
-        frozen_binds = binds.freeze
+        if arel.respond_to?(:to_sql)
+          _ractor_write_arel(:delete, arel, name, binds)
+        else
+          _ractor_write_sql(:delete, arel, name, binds)
+        end
+      end
+
+      def _ractor_write_arel(method, arel, name, binds)
+        frozen_ast = arel.ast.make_shareable!
+        write_name = (name || "SQL").freeze
+        write_binds = binds.freeze
         Ractor::Dispatch.main.run do
-          ActiveRecord::Base.with_connection { |c| c.delete(frozen_sql, frozen_name, frozen_binds) }
+          conn = ActiveRecord::Base.lease_connection
+          ast_dup = Marshal.load(Marshal.dump(frozen_ast))
+          compiled = conn.to_sql_and_binds(ast_dup, write_binds)
+          conn.send(method, compiled[0], write_name, compiled[1])
+        end
+      end
+
+      def _ractor_write_sql(method, sql, name, binds)
+        write_sql = sql.frozen? ? sql : sql.dup.freeze
+        write_name = (name || "SQL").freeze
+        write_binds = binds.freeze
+        Ractor::Dispatch.main.run do
+          ActiveRecord::Base.with_connection { |c| c.send(method, write_sql, write_name, write_binds) }
         end
       end
 
