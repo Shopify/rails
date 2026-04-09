@@ -131,8 +131,8 @@ module Rails
       end
       ::ActiveRecord::Base.make_shareable! rescue nil
 
-      # Restore the connection handler for the main Ractor
-      ::ActiveRecord::Base.connection_handler = saved_handler
+      # Restore the connection handler
+      ::ActiveRecord::Base.default_connection_handler = saved_handler
     end
 
     def freeze
@@ -206,6 +206,10 @@ module Rails
        ::ActionView::Template,
        ::ActionView::Template::Handlers,
        ::ActionView::Helpers::TagHelper,
+       ::ActionController::Parameters,
+       ::ActiveRecord::Relation::WhereClause,
+       ::ActiveRecord::Type,
+       ::Arel::SelectManager,
        ::ActionDispatch::ExceptionWrapper,
        ::ActionDispatch::Http::FilterParameters,
        ::ActionDispatch::ParamBuilder,
