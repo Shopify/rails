@@ -118,6 +118,20 @@ module Rails
       # Freeze Rack constants that are mutable by default
       ::Rack::Mime::MIME_TYPES.make_shareable! unless ::Rack::Mime::MIME_TYPES.frozen?
 
+      # Make class_attribute values shareable. These are stored as ivars
+      # on class singleton classes with the __class_attr_ prefix. Some
+      # values (e.g. compiled callback chains) contain Procs that can't
+      # be made shareable -- skip those gracefully.
+      ObjectSpace.each_object(Module) do |mod|
+        mod.singleton_class.instance_variables.each do |ivar|
+          if ivar.start_with?("@__class_attr_")
+            val = mod.singleton_class.instance_variable_get(ivar)
+            next if val.nil? || val.frozen?
+            val.make_shareable! rescue nil
+          end
+        end
+      end
+
       make_shareable!
     end
 
