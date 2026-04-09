@@ -18,9 +18,9 @@ module ActionDispatch
     # ActiveSupport::ParameterFilter.
     module FilterParameters
       # :stopdoc:
-      ENV_MATCH = [/RAW_POST_DATA/, "rack.request.form_vars"]
-      NULL_PARAM_FILTER = ActiveSupport::ParameterFilter.new
-      NULL_ENV_FILTER   = ActiveSupport::ParameterFilter.new ENV_MATCH
+      ENV_MATCH = [/RAW_POST_DATA/, "rack.request.form_vars"].freeze
+      NULL_PARAM_FILTER = Ractor.make_shareable(ActiveSupport::ParameterFilter.new)
+      NULL_ENV_FILTER   = Ractor.make_shareable(ActiveSupport::ParameterFilter.new(ENV_MATCH))
       # :startdoc:
 
       def initialize

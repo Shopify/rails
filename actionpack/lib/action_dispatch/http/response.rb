@@ -99,8 +99,8 @@ module ActionDispatch # :nodoc:
     SET_COOKIE   = "Set-Cookie"
     NO_CONTENT_CODES = [100, 101, 102, 103, 204, 205, 304]
 
-    class_attribute :default_charset, default: "utf-8"
-    class_attribute :default_headers
+    cattr_accessor :default_charset, default: "utf-8"
+    cattr_accessor :default_headers
 
     include Rack::Response::Helpers
     # Aliasing these off because AD::Http::Cache::Response defines them.

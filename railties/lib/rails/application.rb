@@ -119,20 +119,22 @@ module Rails
       # across Ractors. Each Ractor should set up its own logger.
       @app_env_config.delete("action_dispatch.logger")
 
-      # Freeze Rack constants and class ivars that are mutable by default.
-      # Rack was not designed for Ractor safety so we freeze everything we
-      # know about in one pass.
-      rack_objects_to_freeze = [
-        ::Rack::Mime::MIME_TYPES,
-        ::Rack::MethodOverride::ALLOWED_METHODS,
-        ::Rack::Utils::SYMBOL_TO_STATUS_CODE,
-        ::Rack::Utils.const_get(:OBSOLETE_SYMBOLS_TO_STATUS_CODES),
-        ::Rack::Utils.const_get(:OBSOLETE_SYMBOL_MAPPINGS),
-        ::Rack::Utils::HTTP_STATUS_CODES,
-        ::Rack::Headers::KNOWN_HEADERS,
-        ::Rack::Request.instance_variable_get(:@forwarded_priority),
-      ]
-      rack_objects_to_freeze.each { |obj| obj.make_shareable! unless obj.frozen? }
+      # Freeze all constants and class ivars across all loaded modules.
+      # After eager loading and boot, these are populated and read-only.
+      # This catches Rack, ActionDispatch, Mime, and other constants
+      # that weren't designed for Ractor safety.
+      ObjectSpace.each_object(Module) do |mod|
+        mod.constants(false).each do |const|
+          begin
+            # Skip autoloaded constants to avoid triggering loads
+            next if mod.autoload?(const)
+            val = mod.const_get(const, false)
+            next if val.is_a?(Module) || val.frozen?
+            val.make_shareable!
+          rescue
+          end
+        end
+      end
 
       # Freeze ActionView path registries (populated at boot, read-only after)
       ::ActionView::PathRegistry.instance_variable_get(:@file_system_resolvers).make_shareable!
@@ -145,14 +147,27 @@ module Rails
       # Freeze ActionView lookup context defaults
       ::ActionView::LookupContext::Accessors::DEFAULT_PROCS.make_shareable! rescue nil
 
-      # Eagerly initialize lazy class ivars on controllers/views
+      # I18n uses @@fallbacks class variable. Initialize it if unset,
+      # and pre-compute fallbacks for the default locale so the
+      # Fallbacks hash is populated before freezing.
+      unless I18n.class_variable_defined?(:@@fallbacks)
+        I18n.class_variable_set(:@@fallbacks, false)
+      end
+      if (fallbacks = I18n.class_variable_get(:@@fallbacks)) && fallbacks.respond_to?(:[])
+        fallbacks[I18n.default_locale]
+        fallbacks.make_shareable! rescue nil
+      end
+
+      # Eagerly initialize lazy state on controllers/views
+      ::ActionView::Template::Handlers.extensions
       ::ActionController::Base.descendants.each do |klass|
         klass._prefixes if klass.respond_to?(:_prefixes)
       end
 
-      # Freeze all class/module instance variables that are not yet
-      # shareable. After eager loading, these are populated and
-      # read-only in production.
+      # Freeze all class/module instance variables and class variables
+      # that are not yet shareable. After eager loading, these are
+      # populated and read-only in production. Non-main Ractors can
+      # read class variables only if their values are shareable.
       ObjectSpace.each_object(Module) do |mod|
         mod.instance_variables.each do |ivar|
           begin
@@ -160,8 +175,14 @@ module Rails
             next if val.equal?(nil) || val.frozen?
             val.make_shareable!
           rescue
-            # Skip values that can't be made shareable (e.g. callback
-            # chains with compiled Procs, IO objects, etc.)
+          end
+        end
+        mod.class_variables(false).each do |cvar|
+          begin
+            val = mod.class_variable_get(cvar)
+            next if val.equal?(nil) || val.frozen?
+            val.make_shareable!
+          rescue
           end
         end
       end

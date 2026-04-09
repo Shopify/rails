@@ -206,7 +206,7 @@ module ActiveSupport
       end
 
       def instrument(name, payload = {})
-        if notifier.listening?(name)
+        if Ractor.main? && notifier.listening?(name)
           instrumenter.instrument(name, payload) { yield payload if block_given? }
         else
           yield payload if block_given?
