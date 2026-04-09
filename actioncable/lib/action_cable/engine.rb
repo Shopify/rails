@@ -33,7 +33,7 @@ module ActionCable
 
     initializer "action_cable.health_check_application" do
       ActiveSupport.on_load(:action_cable) {
-        self.health_check_application = ->(env) { Rails::HealthController.action(:show).call(env) }
+        self.health_check_application = shareable_proc { |env| Rails::HealthController.action(:show).call(env) }
       }
     end
 
