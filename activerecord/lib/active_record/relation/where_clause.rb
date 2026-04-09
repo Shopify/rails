@@ -93,7 +93,7 @@ module ActiveRecord
       end
 
       def self.empty
-        @empty ||= new([]).freeze
+        @empty ||= new([]).make_shareable!
       end
 
       def contradiction?

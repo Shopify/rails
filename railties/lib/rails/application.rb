@@ -115,6 +115,9 @@ module Rails
       routes
       app
 
+      # Cache Rails.root before config gets nilled during freeze
+      ::Rails.instance_variable_set(:@root, ::Rails.root.freeze)
+
       # Remove the logger from env_config -- IO objects can't be shared
       # across Ractors. Each Ractor should set up its own logger.
       @app_env_config.delete("action_dispatch.logger")
@@ -192,7 +195,8 @@ module Rails
         fallbacks.make_shareable! rescue nil
       end
 
-      # Eagerly initialize lazy state on controllers/views/models
+      # Eagerly initialize lazy singletons
+      ::ActiveRecord::Relation::WhereClause.empty
       ::ActionView::Template::Handlers.extensions
       ::ActiveRecord::Base.descendants.each do |model|
         # Eagerly initialize all lazy class ivars (table_name, arel_table,
