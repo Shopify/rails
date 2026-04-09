@@ -267,6 +267,7 @@ module ActiveRecord
       # NOT freeze the class (it must remain mutable for creating
       # instances in the main Ractor).
       def make_shareable!
+        @_making_shareable = true
         unless abstract_class?
           # Eagerly resolve all lazy schema state
           table_name
@@ -279,7 +280,6 @@ module ActiveRecord
           arel_table
           predicate_builder rescue nil
           all_timestamp_attributes_in_model rescue nil
-          with_connection { |c| _returning_columns_for_insert(c) } rescue nil
 
           # Make reflections and autosave blocks shareable
           reflections.each_value { |r| r.make_shareable! rescue nil }
@@ -308,15 +308,36 @@ module ActiveRecord
           self.default_connection_handler = nil
         end
 
-        super
-
-        # Re-set values that super's traversal may have nilled
-        unless abstract_class?
-          @arel_table ||= Arel::Table.new(table_name, klass: self)
-          @primary_key = primary_key unless @primary_key.is_a?(String)
-          @relation_delegate_cache ||= {}
-          relation_delegate_class(ActiveRecord::Relation) rescue nil
+        # Make ivar values shareable. Only freeze simple data structures
+        # that don't contain deep object graphs with Monitors/Procs.
+        # Use freeze instead of make_shareable! to avoid deep traversal
+        # into objects that may reference Monitors or cause deadlocks.
+        instance_variables.each do |ivar|
+          next if ivar.to_s.include?("connection") || ivar == :@_making_shareable
+          val = instance_variable_get(ivar) rescue next
+          next if val.equal?(nil) || val.shareable?
+          next if val.is_a?(Thread::Mutex) || val.is_a?(Monitor) || val.is_a?(Proc)
+          # Simple values: freeze directly. Complex objects: use make_shareable!
+          if val.is_a?(String) || val.is_a?(Symbol) || val.is_a?(Numeric) ||
+             val.is_a?(TrueClass) || val.is_a?(FalseClass) || val.is_a?(Regexp)
+            val.freeze
+          else
+            val.make_shareable! rescue nil
+          end
         end
+        singleton_class.instance_variables.each do |ivar|
+          next if ivar.to_s.include?("connection")
+          val = singleton_class.instance_variable_get(ivar) rescue next
+          next if val.equal?(nil) || val.shareable?
+          next if val.is_a?(Thread::Mutex) || val.is_a?(Monitor) || val.is_a?(Proc)
+          if val.is_a?(String) || val.is_a?(Symbol) || val.is_a?(Numeric)
+            val.freeze
+          else
+            val.make_shareable! rescue nil
+          end
+        end
+      ensure
+        @_making_shareable = false
       end
 
       def initialize_find_by_cache # :nodoc:

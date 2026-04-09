@@ -55,10 +55,6 @@ module ActionView # :nodoc:
     end
 
     def self.make_shareable! # :nodoc:
-      # Eagerly build PathParser regexes before freezing
-      @file_system_resolvers.each_value do |resolver|
-        resolver.send(:path_parser)&.parse("_dummy.html.erb") rescue nil
-      end
       @file_system_resolvers.make_shareable!
       @view_paths_by_class.make_shareable!
       @file_system_resolver_mutex = nil

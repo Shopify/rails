@@ -33,8 +33,13 @@ module ActionView
         }x
       end
 
+      def freeze
+        @regex ||= build_path_regex
+        super
+      end
+
       def parse(path)
-        @regex ||= build_path_regex # rubocop:disable Naming/MemoizedInstanceVariableName
+        @regex ||= build_path_regex
         match = @regex.match(path)
         path = TemplatePath.build(match[:action], match[:prefix] || "", !!match[:partial])
         details = TemplateDetails.new(
