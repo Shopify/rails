@@ -263,7 +263,11 @@ module AbstractController
       # Override `AbstractController::Base#process_action` to run the `process_action`
       # callbacks around the normal behavior.
       def process_action(...)
-        run_callbacks(:process_action) do
+        if Ractor.main?
+          run_callbacks(:process_action) do
+            super
+          end
+        else
           super
         end
       end
