@@ -66,5 +66,12 @@ module ActiveSupport
     def generate_key(*args)
       @cache_keys[args.join("|")] ||= @key_generator.generate_key(*args)
     end
+
+    def freeze
+      # Concurrent::Map cannot be frozen. Convert to a plain Hash so
+      # the generator can be made Ractor-shareable after boot.
+      @cache_keys = @cache_keys.each_pair.to_h
+      super
+    end
   end
 end
