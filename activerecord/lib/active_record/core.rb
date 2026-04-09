@@ -277,8 +277,6 @@ module ActiveRecord
           _default_attributes rescue nil
           arel_table
           predicate_builder rescue nil
-          finder_needs_type_condition?
-          define_attribute_methods rescue nil
           all_timestamp_attributes_in_model rescue nil
           with_connection { |c| _returning_columns_for_insert(c) } rescue nil
 
@@ -291,17 +289,19 @@ module ActiveRecord
             end
           end
 
-          # Ensure lazy values are the resolved values
+          # LAST: generate attribute methods and set lazy flags.
+          # Must be after all other calls because some of them trigger
+          # undefine_attribute_methods which resets the flag.
+          define_attribute_methods rescue nil
           instance_variable_set(:@primary_key, primary_key)
           instance_variable_set(:@finder_needs_type_condition,
             descends_from_active_record? ? :false : :true)
         end
 
-        # Detach the connection handler -- it must stay mutable
+        # Detach the connection handler -- it must stay mutable.
+        # It will be restored by ractorize! after make_shareable!.
         if self == ActiveRecord::Base
-          singleton_class.instance_variable_set(
-            :@__class_attr_default_connection_handler, nil
-          )
+          self.default_connection_handler = nil
         end
 
         super

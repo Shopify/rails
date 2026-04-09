@@ -39,6 +39,42 @@ class Object
   end
 end
 
+class Module
+  # Modules/Classes are already shareable in Ruby, but their instance
+  # variables may hold non-shareable values. Override make_shareable!
+  # to freeze the module (triggering any custom #freeze logic) and
+  # then make each ivar value shareable.
+  if defined?(Ractor)
+    def make_shareable!
+      return self if @_made_shareable
+      @_made_shareable = true
+      freeze unless frozen?
+      [self, singleton_class].each do |target|
+        target.instance_variables.each do |ivar|
+          next if ivar == :@_made_shareable
+          # Skip the connection handler -- it must stay mutable
+          next if ivar.to_s.include?("connection_handler")
+          val = target.instance_variable_get(ivar)
+          next if val.equal?(nil) || val.shareable?
+          val.make_shareable! rescue nil
+        end
+      end
+      class_variables(false).each do |cvar|
+        val = class_variable_get(cvar)
+        next if val.equal?(nil) || val.shareable?
+        val.make_shareable! rescue nil
+      end
+      constants(false).each do |const|
+        next if autoload?(const)
+        val = const_get(const, false) rescue next
+        next if val.is_a?(Module) || val.shareable?
+        val.make_shareable! rescue nil
+      end
+      self
+    end
+  end
+end
+
 # Concurrent::Map explicitly undefs #freeze. Restore it so that
 # Ractor.make_shareable can freeze instances. On freeze, convert the
 # internal backend to a plain frozen Hash. After freeze, fetch falls
