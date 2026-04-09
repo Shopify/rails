@@ -444,7 +444,10 @@ module ActiveRecord
 
       # Indicates whether the table associated with this class exists
       def table_exists?
-        schema_cache.data_source_exists?(table_name)
+        if instance_variable_defined?(:@table_exists)
+          return @table_exists
+        end
+        @table_exists = schema_cache.data_source_exists?(table_name)
       end
 
       def attributes_builder # :nodoc:

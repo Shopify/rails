@@ -35,10 +35,13 @@ module Arel # :nodoc: all
         rescue NoMethodError => e
           raise e if respond_to?(dispatch_method, true)
           superklass = object.class.ancestors.find { |klass|
-            respond_to?(dispatch[klass], true)
+            method_name = dispatch[klass] || :"visit_#{(klass.name || "").gsub("::", "_")}"
+            respond_to?(method_name, true)
           }
           raise(TypeError, "Cannot visit #{object.class}") unless superklass
-          dispatch[object.class] = dispatch[superklass]
+          found_method = dispatch[superklass] || :"visit_#{(superklass.name || "").gsub("::", "_")}"
+          dispatch[object.class] = found_method unless dispatch.frozen?
+          dispatch_method = found_method
           retry
         end
     end
