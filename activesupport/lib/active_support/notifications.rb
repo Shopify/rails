@@ -267,6 +267,7 @@ module ActiveSupport
       end
 
       def instrumenter
+        return Instrumenter::NULL unless Ractor.main?
         registry[notifier] ||= Instrumenter.new(notifier)
       end
 

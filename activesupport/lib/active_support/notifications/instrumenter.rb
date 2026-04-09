@@ -101,6 +101,25 @@ module ActiveSupport
         def unique_id
           SecureRandom.hex(10)
         end
+
+      public
+
+      # Null instrumenter used in non-main Ractors where the Notifications
+      # subsystem (which contains Mutexes) is not accessible.
+      module NullHandle # :nodoc:
+        def self.start; end
+        def self.finish; end
+      end
+
+      class NullNotifier # :nodoc:
+        def build_handle(name, id, payload)
+          NullHandle
+        end
+        def start(name, id, payload); end
+        def finish(name, id, payload); end
+      end
+
+      NULL = Ractor.make_shareable(new(NullNotifier.new))
     end
 
     class Event
