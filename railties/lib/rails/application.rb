@@ -114,7 +114,7 @@ module Rails
       env_config
       routes
 
-      Ractor.make_shareable(self)
+      make_shareable!
     end
 
     INITIAL_VARIABLES = [:config, :railties, :routes_reloader, :reloaders,
