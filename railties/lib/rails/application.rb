@@ -113,6 +113,7 @@ module Rails
       # Force env_config and routes to be built before freezing
       env_config
       routes
+      app
 
       make_shareable!
     end
@@ -122,6 +123,7 @@ module Rails
       # contains objects that cannot be made Ractor-shareable (Mutexes,
       # Procs capturing self, file watchers, autoloaders, etc.).
       @app_build_lock = nil
+      @config = nil
       @initializers = nil
       @reloaders = [].freeze
       @routes_reloader = nil

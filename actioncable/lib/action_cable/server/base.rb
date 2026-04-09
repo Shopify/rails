@@ -34,6 +34,11 @@ module ActionCable
         @remote_connections = @event_loop = @worker_pool = @pubsub = nil
       end
 
+      def freeze
+        @mutex = nil
+        super
+      end
+
       # Called by Rack to set up the server.
       def call(env)
         return config.health_check_application.call(env) if env["PATH_INFO"] == config.health_check_path
