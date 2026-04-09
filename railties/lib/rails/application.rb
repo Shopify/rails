@@ -115,8 +115,16 @@ module Rails
       routes
       app
 
-      # Freeze Rack constants that are mutable by default
+      # Freeze external gem constants that are mutable by default
       ::Rack::Mime::MIME_TYPES.make_shareable! unless ::Rack::Mime::MIME_TYPES.frozen?
+      ::Rack::MethodOverride::ALLOWED_METHODS.make_shareable! unless ::Rack::MethodOverride::ALLOWED_METHODS.frozen?
+
+      # Freeze ActionView path registries (populated at boot, read-only after)
+      ::ActionView::PathRegistry.instance_variable_get(:@file_system_resolvers).make_shareable!
+      ::ActionView::PathRegistry.instance_variable_get(:@view_paths_by_class).make_shareable!
+
+      # Freeze the error reporter (set at boot, read-only after)
+      ::ActiveSupport.error_reporter.make_shareable!
 
       # Make class_attribute values shareable. These are stored as ivars
       # on class singleton classes with the __class_attr_ prefix. Some

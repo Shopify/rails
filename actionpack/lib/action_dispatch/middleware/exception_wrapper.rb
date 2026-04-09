@@ -9,7 +9,7 @@ require "rack/utils"
 
 module ActionDispatch
   class ExceptionWrapper
-    cattr_accessor :rescue_responses, default: Hash.new(:internal_server_error).merge!(
+    class_attribute :rescue_responses, default: Hash.new(:internal_server_error).merge!(
       "ActionController::RoutingError"                     => :not_found,
       "AbstractController::ActionNotFound"                 => :not_found,
       "ActionController::MethodNotAllowed"                 => :method_not_allowed,
@@ -28,7 +28,7 @@ module ActionDispatch
       "Rack::QueryParser::InvalidParameterError"           => :bad_request
     )
 
-    cattr_accessor :rescue_templates, default: Hash.new("diagnostics").merge!(
+    class_attribute :rescue_templates, default: Hash.new("diagnostics").merge!(
       "ActionView::MissingTemplate"            => "missing_template",
       "ActionController::RoutingError"         => "routing_error",
       "AbstractController::ActionNotFound"     => "unknown_action",
@@ -37,11 +37,11 @@ module ActionDispatch
       "ActionController::MissingExactTemplate" => "missing_exact_template",
     )
 
-    cattr_accessor :wrapper_exceptions, default: [
+    class_attribute :wrapper_exceptions, default: [
       "ActionView::Template::Error"
     ]
 
-    cattr_accessor :silent_exceptions, default: [
+    class_attribute :silent_exceptions, default: [
       "ActionController::RoutingError",
       "ActionDispatch::Http::MimeNegotiation::InvalidType"
     ]

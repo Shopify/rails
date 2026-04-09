@@ -70,10 +70,11 @@ module Rails
           Rails.error.logger = Rails.logger
         end
 
-        Rails.error.add_middleware(->(error, handled:, severity:, context:, source:) {
+        revision = app.revision.freeze
+        Rails.error.add_middleware(shareable_proc { |error, handled:, severity:, context:, source:|
           context.reverse_merge(rails: {
             version: Rails::VERSION::STRING,
-            app_revision: app.revision,
+            app_revision: revision,
             environment: Rails.env.to_s,
           })
         })

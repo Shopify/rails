@@ -38,3 +38,13 @@ class Object
     end
   end
 end
+
+# Concurrent::Map explicitly undefs #freeze. Restore it so that
+# Ractor.make_shareable can freeze instances. On freeze, convert the
+# internal backend to a plain frozen Hash.
+require "concurrent/map"
+Concurrent::Map.define_method(:freeze) do
+  @backend = each_pair.to_h.freeze
+  @write_lock = nil
+  super()
+end
