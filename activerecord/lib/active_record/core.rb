@@ -280,11 +280,21 @@ module ActiveRecord
           arel_table
           predicate_builder rescue nil
           attributes_builder rescue nil
+          query_constraints_list rescue nil
           _to_partial_path rescue nil
           all_timestamp_attributes_in_model rescue nil
 
-          # Make reflections and autosave blocks shareable
-          reflections.each_value { |r| r.make_shareable! rescue nil }
+          # Eagerly resolve and freeze reflections
+          reflections.each_value do |r|
+            r.class_name rescue nil
+            r.klass rescue nil
+            r.foreign_key rescue nil
+            r.association_foreign_key rescue nil
+            r.has_inverse? rescue nil
+            r.inverse_of rescue nil
+            r.check_validity_of_inverse! rescue nil
+            r.make_shareable! rescue nil
+          end
           instance_variables.each do |ivar|
             if ivar.to_s.start_with?("@_ncm_block_")
               val = instance_variable_get(ivar)

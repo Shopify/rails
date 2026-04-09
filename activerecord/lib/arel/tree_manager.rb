@@ -67,10 +67,9 @@ module Arel # :nodoc: all
         frozen_ast = @ast.make_shareable!
         sql_engine = engine
         return Ractor::Dispatch.main.run {
+          conn = sql_engine.lease_connection
           collector = Arel::Collectors::SQLString.new
-          sql_engine.with_connection do |connection|
-            connection.visitor.accept(frozen_ast, collector).value.freeze
-          end
+          conn.visitor.accept(frozen_ast, collector).value.freeze
         }
       end
 
