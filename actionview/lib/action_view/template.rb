@@ -194,7 +194,7 @@ module ActionView
     attr_reader :identifier, :handler
     attr_reader :variable, :format, :variant, :virtual_path
 
-    NONE = Object.new
+    NONE = Object.new.freeze
 
     def initialize(source, identifier, handler, locals:, format: nil, variant: nil, virtual_path: nil)
       @source            = source.dup
@@ -561,7 +561,7 @@ module ActionView
         end
       end
 
-      RUBY_RESERVED_KEYWORDS = ::ActiveSupport::Delegation::RUBY_RESERVED_KEYWORDS
+      RUBY_RESERVED_KEYWORDS = ::ActiveSupport::Delegation::RUBY_RESERVED_KEYWORDS.freeze
       private_constant :RUBY_RESERVED_KEYWORDS
 
       def locals_code

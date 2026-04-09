@@ -118,13 +118,19 @@ module Rails
       # Remove the logger from env_config -- IO objects can't be shared
       @app_env_config.delete("action_dispatch.logger")
 
-      # Save the connection handler (nilled during AR::Base.freeze)
+      # Save the connection handler (nilled during AR::Base.make_shareable!)
       saved_handler = ::ActiveRecord::Base.default_connection_handler
 
       make_shareable!
 
-      # Restore the connection handler for the main Ractor via the
-      # IsolatedExecutionState override (the class attribute is frozen).
+      # Models LAST -- after all other make_shareable! calls that
+      # might reset model state as a side effect.
+      ::ActiveRecord::Base.descendants.sort_by { |m| -m.ancestors.size }.each do |model|
+        model.make_shareable! rescue nil
+      end
+      ::ActiveRecord::Base.make_shareable! rescue nil
+
+      # Restore the connection handler for the main Ractor
       ::ActiveRecord::Base.connection_handler = saved_handler
     end
 
@@ -187,11 +193,16 @@ module Rails
         middleware_app = middleware_app.respond_to?(:app) ? middleware_app.app : nil
       end
 
+      # Clear the constant-traversal guard so framework classes
+      # get full constant traversal even if visited during ancestor walk.
+      Thread.current[:_module_make_shareable]&.clear
+
       # Framework classes used during request processing but not
       # directly in the middleware chain.
       [::ActionDispatch::Response, ::ActionDispatch::Request,
        ::ActionView::Base, ::ActionView::LookupContext,
        ::ActionView::LookupContext::DetailsKey,
+       ::ActionView::Template,
        ::ActionView::Template::Handlers,
        ::ActionDispatch::ExceptionWrapper,
        ::ActionDispatch::Http::FilterParameters,
@@ -215,12 +226,6 @@ module Rails
       end
 
       ::Turbo.make_shareable! if defined?(::Turbo)
-
-      # Models LAST (other make_shareable! calls may reset model state)
-      ::ActiveRecord::Base.make_shareable! rescue nil
-      ::ActiveRecord::Base.descendants.sort_by { |m| -m.ancestors.size }.each do |model|
-        model.make_shareable! rescue nil
-      end
 
       # Nil boot-time state not needed for request handling
       @app_build_lock = nil

@@ -44,19 +44,16 @@ class Module
   # variables may hold non-shareable values. Override make_shareable!
   # to freeze the module (triggering any custom #freeze logic) and
   # then make each ivar value shareable.
-  MADE_SHAREABLE = {}.compare_by_identity # :nodoc:
-
   if defined?(Ractor)
     def make_shareable!
-      return self if MADE_SHAREABLE.key?(self)
-      MADE_SHAREABLE[self] = true
-
+      # Always traverse ivars (they may have been set after a previous call)
       [self, singleton_class].each do |target|
         target.instance_variables.each do |ivar|
           # Skip the connection handler -- it must stay mutable
           next if ivar.to_s.include?("connection_handler")
           val = target.instance_variable_get(ivar) rescue next
           next if val.equal?(nil) || val.shareable?
+          next if val.is_a?(Thread::Mutex) || val.is_a?(Monitor) || val.is_a?(Proc)
           val.make_shareable! rescue nil
         end
       end
@@ -65,13 +62,18 @@ class Module
         next if val.equal?(nil) || val.shareable?
         val.make_shareable! rescue nil
       end
-      constants(false).each do |const|
-        next if autoload?(const)
-        val = const_get(const, false) rescue next
-        if val.is_a?(Module)
-          val.make_shareable! rescue nil
-        elsif !val.shareable?
-          val.make_shareable! rescue nil
+      # Recurse into nested module constants (with guard to prevent loops)
+      in_progress = (Thread.current[:_module_make_shareable] ||= {}.compare_by_identity)
+      unless in_progress.key?(self)
+        in_progress[self] = true
+        constants(false).each do |const|
+          next if autoload?(const)
+          val = const_get(const, false) rescue next
+          if val.is_a?(Module)
+            val.make_shareable! rescue nil
+          elsif !val.shareable?
+            val.make_shareable! rescue nil
+          end
         end
       end
       self

@@ -580,6 +580,7 @@ module ActiveRecord
         end
 
         def reload_schema_from_cache(recursive = true)
+          return if defined?(@_making_shareable) && @_making_shareable
           @_returning_columns_for_insert = nil
           @arel_table = nil
           @column_names = nil
