@@ -41,10 +41,45 @@ end
 
 # Concurrent::Map explicitly undefs #freeze. Restore it so that
 # Ractor.make_shareable can freeze instances. On freeze, convert the
-# internal backend to a plain frozen Hash.
+# internal backend to a plain frozen Hash. After freeze, fetch falls
+# back to read-only (no block execution for cache writes).
 require "concurrent/map"
 Concurrent::Map.define_method(:freeze) do
   @backend = each_pair.to_h.freeze
   @write_lock = nil
   super()
 end
+
+Concurrent::Map.prepend(Module.new do
+  def fetch(key, *args, &block)
+    if frozen?
+      if @backend.key?(key)
+        @backend[key]
+      elsif block
+        yield key
+      elsif args.length > 0
+        args[0]
+      else
+        raise KeyError, "key not found: #{key.inspect}"
+      end
+    else
+      super
+    end
+  end
+
+  def []=(key, value)
+    if frozen?
+      raise FrozenError, "can't modify frozen #{self.class}"
+    else
+      super
+    end
+  end
+
+  def compute_if_absent(key, &block)
+    if frozen?
+      @backend.fetch(key) { yield }
+    else
+      super
+    end
+  end
+end)
