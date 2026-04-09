@@ -158,8 +158,20 @@ module Rails
         fallbacks.make_shareable! rescue nil
       end
 
-      # Eagerly initialize lazy state on controllers/views
+      # Eagerly initialize lazy state on controllers/views/models
       ::ActionView::Template::Handlers.extensions
+      ::ActiveRecord::Base.descendants.each do |model|
+        # Eagerly initialize all lazy class ivars (table_name, arel_table,
+        # predicate_builder, finder_needs_type_condition, etc.)
+        begin
+          model.table_name
+          model.arel_table
+          model.predicate_builder
+          model.finder_needs_type_condition?
+          model.all # triggers relation creation
+        rescue
+        end
+      end
       ::ActionController::Base.descendants.each do |klass|
         klass._prefixes if klass.respond_to?(:_prefixes)
       end
