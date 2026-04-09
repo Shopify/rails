@@ -131,7 +131,7 @@ module Rails
       rails_prefixes = %w[
         ActionController ActionDispatch ActionMailer ActionView
         ActiveModel ActiveRecord ActiveStorage ActiveJob ActiveSupport
-        ActionCable ActionMailbox ActionText Rails Mime
+        ActionCable ActionMailbox ActionText Rails Mime Arel
       ]
       ObjectSpace.each_object(Module) do |mod|
         name = mod.name rescue nil
@@ -197,6 +197,7 @@ module Rails
 
       # Eagerly initialize lazy singletons
       ::ActiveRecord::Relation::WhereClause.empty
+      ::ActiveRecord::Relation::FromClause.empty
       ::ActionView::Template::Handlers.extensions
       ::ActiveRecord::Base.descendants.each do |model|
         # Eagerly initialize all lazy class ivars (table_name, arel_table,

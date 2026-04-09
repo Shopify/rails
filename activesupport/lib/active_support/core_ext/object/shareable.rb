@@ -69,7 +69,7 @@ Concurrent::Map.prepend(Module.new do
 
   def []=(key, value)
     if frozen?
-      raise FrozenError, "can't modify frozen #{self.class}"
+      value # silently skip write, return value for ||= pattern
     else
       super
     end

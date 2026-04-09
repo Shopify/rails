@@ -44,6 +44,7 @@ module ActiveRecord
 
         class << self
           def register_pool(pool, frequency) # :nodoc:
+            return unless Ractor.main?
             @mutex.synchronize do
               unless @threads[frequency]&.alive?
                 @threads[frequency] = spawn_thread(frequency)
