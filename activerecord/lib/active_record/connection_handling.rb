@@ -376,26 +376,28 @@ module ActiveRecord
       private
 
       def _ractor_insert_arel(arel, name)
-        table = arel.instance_variable_get(:@ast)&.relation&.name rescue nil
-        cols = []
-        vals = []
-        arel.instance_variable_get(:@ast)&.columns&.each { |col| cols << col.name }
-        arel.instance_variable_get(:@ast)&.values&.instance_variable_get(:@expressions)&.each do |expr|
-          vals << (expr.respond_to?(:value) ? expr.value : expr)
-        end
+        ast = arel.instance_variable_get(:@ast)
+        table = ast&.relation&.name rescue nil
+        cols = ast&.columns&.map(&:name) || []
+        exprs = ast&.values&.instance_variable_get(:@expr)&.first || []
+
         placeholders = cols.map { "?" }.join(", ")
         sql = "INSERT INTO \"#{table}\" (\"#{cols.join('", "')}\") VALUES (#{placeholders})".freeze
-        binds = vals.map { |v|
-          ActiveRecord::Relation::QueryAttribute.new("", v.frozen? ? v : (v.freeze rescue v), ActiveRecord::Type::Value.new)
-        }.freeze
+        # Extract raw values -- QueryAttribute objects can't cross the
+        # Ractor boundary. Rebuild them in the main Ractor.
+        raw_vals = exprs.map { |attr|
+          val = attr.respond_to?(:value_for_database) ? attr.value_for_database : attr
+          val.shareable? ? val : (val.make_shareable! rescue val.freeze rescue val)
+        }.make_shareable!
         insert_name = (name || "SQL").freeze
         Ractor::Dispatch.main.run do
           begin
+            binds = raw_vals.map { |v| ActiveRecord::Relation::QueryAttribute.new("", v, ActiveRecord::Type::Value.new) }
             id = ActiveRecord::Base.with_connection do |c|
               result = c.exec_insert(sql, insert_name, binds)
               result.rows.dig(0, 0)
             end
-            id.is_a?(Integer) ? id : id.to_i
+            [id.is_a?(Integer) ? id : id.to_i]
           rescue => e
             raise RuntimeError, "INSERT failed: #{e.message}"
           end

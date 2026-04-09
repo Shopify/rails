@@ -513,8 +513,11 @@ module ActiveRecord
       end
 
       def symbol_column_to_string(name_symbol) # :nodoc:
-        @symbol_column_to_string_name_hash ||= column_names.index_by(&:to_sym)
-        @symbol_column_to_string_name_hash[name_symbol]
+        if Ractor.main?
+          @symbol_column_to_string_name_hash ||= column_names.index_by(&:to_sym)
+        else
+          @symbol_column_to_string_name_hash || column_names.index_by(&:to_sym)
+        end[name_symbol]
       end
 
       # Returns an array of column objects where the primary id, all columns ending in "_id" or "_count",
