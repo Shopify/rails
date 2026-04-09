@@ -25,7 +25,8 @@ module Arel # :nodoc: all
         end
 
         def visit(object, collector = nil)
-          dispatch_method = dispatch[object.class]
+          dispatch_method = dispatch[object.class] ||
+            :"visit_#{(object.class.name || "").gsub("::", "_")}"
           if collector
             send dispatch_method, object, collector
           else

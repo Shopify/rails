@@ -23,7 +23,7 @@ module ActiveRecord
       end
 
       def self.empty
-        @empty ||= new(nil, nil).freeze
+        @empty ||= new(nil, nil).make_shareable!
       end
     end
   end

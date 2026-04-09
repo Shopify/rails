@@ -33,7 +33,7 @@ module ActiveRecord
         @role = role
         @shard = shard
         @pool = nil
-        INSTANCES[self] = self
+        INSTANCES[self] = self if Ractor.main?
       end
 
       def server_version(connection)
