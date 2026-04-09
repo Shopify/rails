@@ -44,6 +44,9 @@ end
 # internal backend to a plain frozen Hash. After freeze, fetch falls
 # back to read-only (no block execution for cache writes).
 require "concurrent/map"
+# Freeze the sentinel used in Concurrent::Map internals
+Concurrent::NULL.freeze
+
 Concurrent::Map.define_method(:freeze) do
   @backend = each_pair.to_h.freeze
   @write_lock = nil
