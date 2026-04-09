@@ -467,13 +467,17 @@ module ActiveRecord
       end
 
       def _returning_columns_for_insert(connection) # :nodoc:
-        @_returning_columns_for_insert ||= begin
+        return @_returning_columns_for_insert if @_returning_columns_for_insert
+
+        result = begin
           auto_populated_columns = columns.filter_map do |c|
             c.name if connection.return_value_after_insert?(c)
           end
-
           auto_populated_columns.empty? ? Array(primary_key) : auto_populated_columns
         end
+
+        @_returning_columns_for_insert = result if Ractor.main?
+        result
       end
 
       # Returns the column object for the named attribute.

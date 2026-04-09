@@ -347,7 +347,7 @@ module ActiveRecord
 
       def execute(sql, name = nil, allow_retry: false)
         frozen_sql = sql.frozen? ? sql : sql.dup.freeze
-        frozen_name = name&.frozen? ? name : name&.dup&.freeze
+        frozen_name = (name || "SQL").freeze
         Ractor::Dispatch.main.run do
           ActiveRecord::Base.with_connection { |c| c.execute(frozen_sql, frozen_name) }
         end
@@ -359,27 +359,62 @@ module ActiveRecord
         else
           frozen_sql = arel.frozen? ? arel : arel.dup.freeze
         end
-        frozen_name = name&.frozen? ? name : name&.dup&.freeze
+        frozen_name = (name || "SQL").freeze
         Ractor::Dispatch.main.run do
           ActiveRecord::Base.with_connection { |c| c.select_all(frozen_sql, frozen_name, binds, preparable: preparable) }
         end
       end
 
       def insert(arel, name = nil, pk = nil, id_value = nil, sequence_name = nil, binds = [], returning: nil)
-        # Send the Arel node to the main Ractor for SQL compilation
-        # AND execution (since to_sql needs the adapter's visitor).
-        frozen_name = name&.frozen? ? name : name&.dup&.freeze
-        frozen_binds = binds.freeze
-        frozen_pk = pk.frozen? ? pk : (pk.dup.freeze rescue pk)
-        frozen_returning = returning&.map { |r| r.frozen? ? r : r.dup.freeze }&.freeze
-        Ractor::Dispatch.main.run do
-          ActiveRecord::Base.with_connection { |c| c.insert(arel, frozen_name, frozen_pk, id_value, sequence_name, frozen_binds, returning: frozen_returning) }
+        if arel.respond_to?(:to_sql)
+          _ractor_insert_arel(arel, name)
+        else
+          _ractor_insert_sql(arel, name)
         end
       end
 
+      private
+
+      def _ractor_insert_arel(arel, name)
+        table = arel.instance_variable_get(:@ast)&.relation&.name rescue nil
+        cols = []
+        vals = []
+        arel.instance_variable_get(:@ast)&.columns&.each { |col| cols << col.name }
+        arel.instance_variable_get(:@ast)&.values&.instance_variable_get(:@expressions)&.each do |expr|
+          vals << (expr.respond_to?(:value) ? expr.value : expr)
+        end
+        placeholders = cols.map { "?" }.join(", ")
+        sql = "INSERT INTO \"#{table}\" (\"#{cols.join('", "')}\") VALUES (#{placeholders})".freeze
+        binds = vals.map { |v|
+          ActiveRecord::Relation::QueryAttribute.new("", v.frozen? ? v : (v.freeze rescue v), ActiveRecord::Type::Value.new)
+        }.freeze
+        insert_name = (name || "SQL").freeze
+        Ractor::Dispatch.main.run do
+          begin
+            id = ActiveRecord::Base.with_connection do |c|
+              result = c.exec_insert(sql, insert_name, binds)
+              result.rows.dig(0, 0)
+            end
+            id.is_a?(Integer) ? id : id.to_i
+          rescue => e
+            raise RuntimeError, "INSERT failed: #{e.message}"
+          end
+        end
+      end
+
+      def _ractor_insert_sql(arel, name)
+        sql = arel.frozen? ? arel : arel.dup.freeze
+        insert_name = (name || "SQL").freeze
+        Ractor::Dispatch.main.run do
+          ActiveRecord::Base.with_connection { |c| c.insert(sql, insert_name) }
+        end
+      end
+
+      public
+
       def update(arel, name = nil, binds = [])
         frozen_sql = arel.respond_to?(:to_sql) ? arel.to_sql.freeze : (arel.frozen? ? arel : arel.dup.freeze)
-        frozen_name = name&.frozen? ? name : name&.dup&.freeze
+        frozen_name = (name || "SQL").freeze
         frozen_binds = binds.freeze
         Ractor::Dispatch.main.run do
           ActiveRecord::Base.with_connection { |c| c.update(frozen_sql, frozen_name, frozen_binds) }
@@ -388,7 +423,7 @@ module ActiveRecord
 
       def delete(arel, name = nil, binds = [])
         frozen_sql = arel.respond_to?(:to_sql) ? arel.to_sql.freeze : (arel.frozen? ? arel : arel.dup.freeze)
-        frozen_name = name&.frozen? ? name : name&.dup&.freeze
+        frozen_name = (name || "SQL").freeze
         frozen_binds = binds.freeze
         Ractor::Dispatch.main.run do
           ActiveRecord::Base.with_connection { |c| c.delete(frozen_sql, frozen_name, frozen_binds) }
