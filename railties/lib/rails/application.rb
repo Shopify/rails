@@ -210,7 +210,6 @@ module Rails
           model.arel_table
           model.predicate_builder
           model.finder_needs_type_condition?
-          model.reflections.each_value { |r| r.make_shareable! rescue nil }
           model.table_exists?
           model.columns
           model.columns_hash
@@ -258,6 +257,20 @@ module Rails
       ::ActiveSupport.error_reporter.make_shareable!
       ::Rails.env.make_shareable!
 
+      # Final model init pass: re-set lazy state that earlier passes
+      # may have reset, freeze reflections, generate attribute methods.
+      # Must happen BEFORE callback chain freeze (which deep-freezes
+      # everything reachable from callbacks including models).
+      ::ActiveRecord::Base.descendants.each do |model|
+        begin
+          model.instance_variable_set(:@arel_table, model.arel_table) unless model.instance_variable_get(:@arel_table)
+          model.instance_variable_set(:@primary_key, model.primary_key)
+          model.define_attribute_methods
+          model.reflections.each_value { |r| r.make_shareable! rescue nil }
+        rescue
+        end
+      end
+
       # Explicitly freeze callback chains on all loaded classes. This must
       # happen before the general class attribute freeze because the chain's
       # freeze method deep-freezes callback templates (making their lambdas'
@@ -290,12 +303,7 @@ module Rails
         end
       end
 
-      # Generate attribute methods as the LAST step before freezing.
-      # This must happen after all other eager init and freezing passes
-      # because earlier passes can trigger undefine_attribute_methods.
-      ::ActiveRecord::Base.descendants.each do |model|
-        model.define_attribute_methods rescue nil
-      end
+
 
       # Temporarily detach the connection handler from the class attribute
       # so make_shareable! doesn't freeze it (connection pools must remain
