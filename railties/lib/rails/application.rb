@@ -203,23 +203,21 @@ module Rails
       ::ActiveRecord::Relation::FromClause.empty
       ::ActionView::Template::Handlers.extensions
       ::ActiveRecord::Base.descendants.each do |model|
-        # Eagerly initialize all lazy class ivars (table_name, arel_table,
-        # predicate_builder, schema, columns, etc.)
+        # Eagerly initialize all lazy class ivars
         begin
           model.table_name
-          model.primary_key             # resolves and caches
+          model.primary_key
           model.arel_table
           model.predicate_builder
           model.finder_needs_type_condition?
-          model.columns_hash            # forces schema load
-          model._default_attributes     # forces attribute type resolution
-          model.all                     # triggers relation creation
-          # Ensure primary_key is no longer the sentinel
-          pk = model.primary_key
-          model.instance_variable_set(:@primary_key, pk) if pk
+          model.columns_hash
+          model._default_attributes
+          model.all
+          model.instance_variable_set(:@primary_key, model.primary_key)
         rescue
         end
       end
+
       ::ActionController::Base.descendants.each do |klass|
         klass._prefixes if klass.respond_to?(:_prefixes)
         klass.view_context_class if klass.respond_to?(:view_context_class)
@@ -230,8 +228,13 @@ module Rails
       # populated and read-only in production. Non-main Ractors can
       # read class variables only if their values are shareable.
       ObjectSpace.each_object(Module) do |mod|
+        # Skip ActiveRecord connection infrastructure -- it must
+        # remain mutable for the main Ractor's DB operations.
+        next if mod.name&.include?("ConnectionAdapters") || mod.name&.include?("ConnectionHandler")
         mod.instance_variables.each do |ivar|
           begin
+            # Skip the connection handler value
+            next if ivar.to_s.include?("connection_handler")
             val = mod.instance_variable_get(ivar)
             next if val.equal?(nil) || val.frozen?
             val.make_shareable!
@@ -274,6 +277,9 @@ module Rails
       ObjectSpace.each_object(Module) do |mod|
         mod.singleton_class.instance_variables.each do |ivar|
           if ivar.start_with?("@__class_attr_")
+            # Skip the connection handler -- it contains Mutexes and
+            # connection pools that must remain mutable for DB access.
+            next if ivar == :@__class_attr_default_connection_handler
             val = mod.singleton_class.instance_variable_get(ivar)
             next if val.nil? || val.frozen?
             val.make_shareable! rescue nil
@@ -281,7 +287,27 @@ module Rails
         end
       end
 
+      # Generate attribute methods as the LAST step before freezing.
+      # This must happen after all other eager init and freezing passes
+      # because earlier passes can trigger undefine_attribute_methods.
+      ::ActiveRecord::Base.descendants.each do |model|
+        model.define_attribute_methods rescue nil
+      end
+
+      # Temporarily detach the connection handler from the class attribute
+      # so make_shareable! doesn't freeze it (connection pools must remain
+      # mutable for the main Ractor's DB operations).
+      saved_handler = ::ActiveRecord::Base.default_connection_handler
+      ::ActiveRecord::Base.singleton_class.instance_variable_set(
+        :@__class_attr_default_connection_handler, nil
+      )
+
       make_shareable!
+
+      # Restore the connection handler
+      ::ActiveRecord::Base.singleton_class.instance_variable_set(
+        :@__class_attr_default_connection_handler, saved_handler
+      )
     end
 
     def freeze

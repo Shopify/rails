@@ -30,7 +30,7 @@ module ActiveSupport
         BODY
 
         redefine_string_method(owner.singleton_class, "#{namespaced_name}=", <<~BODY, private: true, args: "value")
-          singleton_class.instance_variable_set(:#{ivar}, value)
+          singleton_class.instance_variable_set(:#{ivar}, value) unless singleton_class.frozen?
         BODY
       end
 

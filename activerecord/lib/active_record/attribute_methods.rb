@@ -103,6 +103,10 @@ module ActiveRecord
       # accessors, mutators and query methods.
       def define_attribute_methods # :nodoc:
         return false if @attribute_methods_generated
+        # Non-main Ractors cannot access the LOCK Monitor. If the class
+        # is frozen (after ractorize!), attribute methods were already
+        # generated during boot -- just bail out.
+        return false unless Ractor.main?
         # Use a mutex; we don't want two threads simultaneously trying to define
         # attribute methods.
         GeneratedAttributeMethods::LOCK.synchronize do

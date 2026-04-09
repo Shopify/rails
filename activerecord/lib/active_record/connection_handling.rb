@@ -275,6 +275,9 @@ module ActiveRecord
     # The connection will remain leased for the entire duration of the request
     # or job, or until +#release_connection+ is called.
     def lease_connection
+      if !Ractor.main? && defined?(Ractor::Dispatch)
+        return RactorConnectionProxy.instance
+      end
       connection_pool.lease_connection
     end
 
@@ -316,24 +319,93 @@ module ActiveRecord
     # unless the +prevent_permanent_checkout+ argument is set to +true+.
     def with_connection(prevent_permanent_checkout: false, &block)
       if !Ractor.main? && defined?(Ractor::Dispatch)
-        klass = self
-        return Ractor::Dispatch.main.run {
-          klass.connection_pool.with_connection(&block)
-        }
+        # Yield a proxy that dispatches each DB call to the main
+        # Ractor where the real connection pool lives.
+        yield RactorConnectionProxy.instance
+        return
       end
       connection_pool.with_connection(prevent_permanent_checkout: prevent_permanent_checkout, &block)
     end
 
-    if defined?(Ractor::Dispatch)
-      # In non-main Ractors, lease_connection and connection cannot
-      # return a connection object (it contains Mutexes). Instead,
-      # callers should use with_connection which dispatches the block
-      # to the main Ractor.
-      def lease_connection
-        if !Ractor.main?
-          raise "Use with_connection instead of lease_connection in non-main Ractors"
+    # Lightweight proxy that forwards database operations to the main
+    # Ractor. Used by with_connection in non-main Ractors so the
+    # application code can use the standard AR API unchanged.
+    class RactorConnectionProxy # :nodoc:
+      INSTANCE = new.freeze
+
+      def self.instance
+        INSTANCE
+      end
+
+      def exec_query(sql, name = "SQL", binds = [], prepare: false)
+        frozen_sql = sql.frozen? ? sql : sql.dup.freeze
+        frozen_name = name.frozen? ? name : name.dup.freeze
+        frozen_binds = binds.freeze
+        Ractor::Dispatch.main.run do
+          ActiveRecord::Base.with_connection { |c| c.exec_query(frozen_sql, frozen_name, frozen_binds, prepare: prepare) }
         end
-        connection_pool.lease_connection
+      end
+      end
+
+      def execute(sql, name = nil, allow_retry: false)
+        frozen_sql = sql.frozen? ? sql : sql.dup.freeze
+        frozen_name = name&.frozen? ? name : name&.dup&.freeze
+        Ractor::Dispatch.main.run do
+          ActiveRecord::Base.with_connection { |c| c.execute(frozen_sql, frozen_name) }
+        end
+      end
+
+      def select_all(arel, name = nil, binds = [], preparable: nil, async: false)
+        if arel.respond_to?(:to_sql)
+          frozen_sql = arel.to_sql.freeze
+        else
+          frozen_sql = arel.frozen? ? arel : arel.dup.freeze
+        end
+        frozen_name = name&.frozen? ? name : name&.dup&.freeze
+        Ractor::Dispatch.main.run do
+          ActiveRecord::Base.with_connection { |c| c.select_all(frozen_sql, frozen_name, binds, preparable: preparable) }
+        end
+      end
+
+      def insert(arel, name = nil, pk = nil, id_value = nil, sequence_name = nil, binds = [], returning: nil)
+        frozen_sql = arel.respond_to?(:to_sql) ? arel.to_sql.freeze : (arel.frozen? ? arel : arel.dup.freeze)
+        frozen_name = name&.frozen? ? name : name&.dup&.freeze
+        Ractor::Dispatch.main.run do
+          ActiveRecord::Base.with_connection { |c| c.insert(frozen_sql, frozen_name, pk, id_value, sequence_name, binds, returning: returning) }
+        end
+      end
+
+      def update(arel, name = nil, binds = [])
+        frozen_sql = arel.respond_to?(:to_sql) ? arel.to_sql.freeze : (arel.frozen? ? arel : arel.dup.freeze)
+        frozen_name = name&.frozen? ? name : name&.dup&.freeze
+        Ractor::Dispatch.main.run do
+          ActiveRecord::Base.with_connection { |c| c.update(frozen_sql, frozen_name, binds) }
+        end
+      end
+
+      def delete(arel, name = nil, binds = [])
+        frozen_sql = arel.respond_to?(:to_sql) ? arel.to_sql.freeze : (arel.frozen? ? arel : arel.dup.freeze)
+        frozen_name = name&.frozen? ? name : name&.dup&.freeze
+        Ractor::Dispatch.main.run do
+          ActiveRecord::Base.with_connection { |c| c.delete(frozen_sql, frozen_name, binds) }
+        end
+      end
+
+      # Delegate schema queries
+      def schema_cache
+        Ractor::Dispatch.main.run { ActiveRecord::Base.with_connection { |c| c.schema_cache } }
+      end
+
+      def respond_to_missing?(name, include_private = false)
+        true
+      end
+
+      def method_missing(name, *args, **kwargs, &block)
+        frozen_args = args.map { |a| a.is_a?(String) && !a.frozen? ? a.freeze : a }.freeze
+        frozen_kwargs = kwargs.transform_values { |v| v.is_a?(String) && !v.frozen? ? v.freeze : v }.freeze
+        Ractor::Dispatch.main.run do
+          ActiveRecord::Base.with_connection { |c| c.send(name, *frozen_args, **frozen_kwargs) }
+        end
       end
     end
 

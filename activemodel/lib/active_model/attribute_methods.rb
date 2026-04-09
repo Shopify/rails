@@ -415,7 +415,11 @@ module ActiveModel
         # significantly (in our case our test suite finishes 10% faster with
         # this cache).
         def attribute_method_patterns_cache
-          @attribute_method_patterns_cache ||= Concurrent::Map.new(initial_capacity: 4)
+          if Ractor.main?
+            @attribute_method_patterns_cache ||= Concurrent::Map.new(initial_capacity: 4)
+          else
+            @attribute_method_patterns_cache || Concurrent::Map.new(initial_capacity: 4)
+          end
         end
 
         def attribute_method_patterns_matching(method_name)
