@@ -355,8 +355,8 @@ module ActionDispatch
       end
 
       # strategy for building URLs to send to the client
-      PATH    = ->(options) { ActionDispatch::Http::URL.path_for(options) }
-      UNKNOWN = ->(options) { ActionDispatch::Http::URL.url_for(options) }
+      PATH    = shareable_proc { |options| ActionDispatch::Http::URL.path_for(options) }
+      UNKNOWN = shareable_proc { |options| ActionDispatch::Http::URL.url_for(options) }
 
       attr_accessor :formatter, :set, :named_routes, :router
       attr_accessor :disable_clear_and_finalize, :resources_path_names
@@ -500,6 +500,19 @@ module ActionDispatch
         # be made Ractor-shareable.
         @append = [].freeze
         @prepend = [].freeze
+
+        # Make URL helper module ivars shareable (route keys and
+        # url strategies need to be frozen for Ractor access).
+        [@url_helpers_with_paths, @url_helpers_without_paths].compact.each do |helpers_mod|
+          helpers_mod.instance_variables.each do |ivar|
+            # Skip the back-reference to the route set (causes infinite recursion)
+            next if ivar == :@_url_helpers_routes
+            val = helpers_mod.instance_variable_get(ivar) rescue next
+            next if val.equal?(nil) || val.frozen?
+            val.freeze rescue nil
+          end
+        end
+
         super
       end
 
