@@ -104,6 +104,19 @@ module Rails
 
     delegate :default_url_options, :default_url_options=, to: :routes
 
+    # Make the application, its env_config, and routes shareable so they
+    # can be passed into non-main Ractors. This must be called after the
+    # application has been fully initialized and eager-loaded.
+    def ractorize!
+      eager_load! if !config.eager_load
+
+      # Force env_config and routes to be built before freezing
+      env_config
+      routes
+
+      Ractor.make_shareable(self)
+    end
+
     INITIAL_VARIABLES = [:config, :railties, :routes_reloader, :reloaders,
                          :routes, :helpers, :app_env_config] # :nodoc:
 
