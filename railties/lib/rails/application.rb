@@ -115,6 +115,9 @@ module Rails
       routes
       app
 
+      # Freeze Rack constants that are mutable by default
+      ::Rack::Mime::MIME_TYPES.make_shareable! unless ::Rack::Mime::MIME_TYPES.frozen?
+
       make_shareable!
     end
 
