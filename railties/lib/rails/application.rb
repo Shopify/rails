@@ -117,6 +117,20 @@ module Rails
       make_shareable!
     end
 
+    def freeze
+      # Boot-time state that is not needed for request handling and
+      # contains objects that cannot be made Ractor-shareable (Mutexes,
+      # Procs capturing self, file watchers, autoloaders, etc.).
+      @app_build_lock = nil
+      @initializers = nil
+      @reloaders = [].freeze
+      @routes_reloader = nil
+      @ordered_railties = nil
+      @railties = nil
+      @autoloaders = nil
+      super
+    end
+
     INITIAL_VARIABLES = [:config, :railties, :routes_reloader, :reloaders,
                          :routes, :helpers, :app_env_config] # :nodoc:
 
