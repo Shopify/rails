@@ -136,6 +136,12 @@ module Rails
         end
       end
 
+      # Eagerly build PathParser regexes before freezing
+      ::ActionView::PathRegistry.instance_variable_get(:@file_system_resolvers).each_value do |resolver|
+        pp = resolver.instance_variable_get(:@path_parser)
+        pp&.parse("_dummy.html.erb") rescue nil
+      end
+
       # Freeze ActionView path registries (populated at boot, read-only after)
       ::ActionView::PathRegistry.instance_variable_get(:@file_system_resolvers).make_shareable!
       ::ActionView::PathRegistry.instance_variable_get(:@view_paths_by_class).make_shareable!
@@ -147,8 +153,9 @@ module Rails
       # Freeze ActionView lookup context defaults
       ::ActionView::LookupContext::Accessors::DEFAULT_PROCS.make_shareable! rescue nil
 
-      # Eagerly initialize I18n available_locales
-      I18n.available_locales
+      # Eagerly initialize and cache I18n available_locales
+      # (the getter doesn't cache; we must set it explicitly)
+      I18n.available_locales = I18n.available_locales
 
       # I18n uses @@fallbacks class variable. Initialize it if unset,
       # and pre-compute fallbacks for the default locale so the
