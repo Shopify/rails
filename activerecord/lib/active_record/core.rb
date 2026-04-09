@@ -262,6 +262,51 @@ module ActiveRecord
     end
 
     module ClassMethods
+      # Prepare the model for Ractor shareability when frozen by
+      # Ractor.make_shareable. Eagerly initializes all lazy schema
+      # state so it's available after the class is frozen.
+      def freeze
+        unless abstract_class?
+          # Eagerly resolve all lazy schema state
+          table_name
+          primary_key
+          table_exists? rescue nil
+          columns rescue nil
+          columns_hash rescue nil
+          column_names rescue nil
+          _default_attributes rescue nil
+          arel_table
+          predicate_builder rescue nil
+          finder_needs_type_condition?
+          define_attribute_methods rescue nil
+          all_timestamp_attributes_in_model rescue nil
+          with_connection { |c| _returning_columns_for_insert(c) } rescue nil
+
+          # Freeze reflections and autosave blocks
+          reflections.each_value { |r| r.make_shareable! rescue nil }
+          instance_variables.each do |ivar|
+            if ivar.to_s.start_with?("@_ncm_block_")
+              val = instance_variable_get(ivar)
+              val.make_shareable! rescue nil unless val.frozen?
+            end
+          end
+
+          # Ensure lazy values are the resolved values
+          instance_variable_set(:@primary_key, primary_key)
+          instance_variable_set(:@finder_needs_type_condition,
+            descends_from_active_record? ? :false : :true)
+        end
+
+        # Detach the connection handler -- it must stay mutable
+        if self == ActiveRecord::Base
+          singleton_class.instance_variable_set(
+            :@__class_attr_default_connection_handler, nil
+          )
+        end
+
+        super
+      end
+
       def initialize_find_by_cache # :nodoc:
         @find_by_statement_cache = { true => Concurrent::Map.new, false => Concurrent::Map.new }
       end
