@@ -80,6 +80,13 @@ module ActiveSupport
         @__instance__[locale] ||= new
       end
 
+      def self.make_shareable! # :nodoc:
+        instance(:en).make_shareable!
+        @__instance__.each_value(&:make_shareable!)
+        @__instance__.make_shareable!
+        self
+      end
+
       def self.instance_or_fallback(locale)
         return @__en_instance__ ||= new if locale == :en
 

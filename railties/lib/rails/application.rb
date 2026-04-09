@@ -115,169 +115,72 @@ module Rails
       routes
       app
 
-      # Cache Rails.root before config gets nilled during freeze
-      ::Rails.instance_variable_set(:@root, ::Rails.root.freeze)
-
       # Remove the logger from env_config -- IO objects can't be shared
-      # across Ractors. Each Ractor should set up its own logger.
       @app_env_config.delete("action_dispatch.logger")
 
-      # Freeze all constants and class ivars across all loaded modules.
-      # After eager loading and boot, these are populated and read-only.
-      # This catches Rack, ActionDispatch, Mime, and other constants
-      # that weren't designed for Ractor safety.
-      # Freeze constants in Rails and Rack modules only (not ALL modules,
-      # which would catch Bootsnap/Bundler/RubyVM internal caches)
-      rails_prefixes = %w[
-        ActionController ActionDispatch ActionMailer ActionView
-        ActiveModel ActiveRecord ActiveStorage ActiveJob ActiveSupport
-        ActionCable ActionMailbox ActionText Rails Mime Arel
-      ]
-      ObjectSpace.each_object(Module) do |mod|
-        name = mod.name rescue nil
-        next unless name && rails_prefixes.any? { |p| name.start_with?(p) }
-        mod.constants(false).each do |const|
-          begin
-            next if mod.autoload?(const)
-            val = mod.const_get(const, false)
-            next if val.is_a?(Module) || val.frozen?
-            val.make_shareable!
-          rescue
-          end
-        end
-      end
-      # Ensure lazily-loaded Rack modules are available before freezing
+      # Save the connection handler (nilled during AR::Base.freeze)
+      saved_handler = ::ActiveRecord::Base.default_connection_handler
+
+      make_shareable!
+
+      # Restore the connection handler for the main Ractor via the
+      # IsolatedExecutionState override (the class attribute is frozen).
+      ::ActiveRecord::Base.connection_handler = saved_handler
+    end
+
+    def freeze
+      # Cache Rails.root before config is nilled
+      ::Rails.cache_root!
+
+      # Prepare framework components for sharing. Each class's
+      # freeze/make_shareable! handles its own internal state.
       require "rack/multipart"
-
-      # Also freeze Rack constants
-      ObjectSpace.each_object(Module) do |mod|
-        next unless mod.name&.start_with?("Rack")
-        mod.constants(false).each do |const|
-          begin
-            next if mod.autoload?(const)
-            val = mod.const_get(const, false)
-            next if val.is_a?(Module) || val.frozen?
-            val.make_shareable!
-          rescue
-          end
-        end
-      end
-
-      # Eagerly build view context class (uses Mutex for lazy init)
+      ::ActiveSupport.error_reporter.make_shareable!
+      ::ActiveSupport::Inflector::Inflections.make_shareable!
+      ::ActionView::PathRegistry.make_shareable!
       ::ActionView::LookupContext::DetailsKey.view_context_class
-
-      # Eagerly build PathParser regexes before freezing
-      ::ActionView::PathRegistry.instance_variable_get(:@file_system_resolvers).each_value do |resolver|
-        pp = resolver.instance_variable_get(:@path_parser)
-        pp&.parse("_dummy.html.erb") rescue nil
-      end
-
-      # Freeze ActionView path registries (populated at boot, read-only after)
-      ::ActionView::PathRegistry.instance_variable_get(:@file_system_resolvers).make_shareable!
-      ::ActionView::PathRegistry.instance_variable_get(:@view_paths_by_class).make_shareable!
-
-      # Freeze inflections (populated at boot, read-only after)
-      ::ActiveSupport::Inflector.inflections.make_shareable!
-      ::ActiveSupport::Inflector.inflections(:en).make_shareable!
-
-      # Freeze ActionView lookup context defaults
       ::ActionView::LookupContext::Accessors::DEFAULT_PROCS.make_shareable! rescue nil
-
-      # Eagerly initialize and cache I18n available_locales
-      # (the getter doesn't cache; we must set it explicitly)
-      I18n.available_locales = I18n.available_locales
-
-      # I18n uses @@fallbacks class variable. Initialize it if unset,
-      # and pre-compute fallbacks for the default locale so the
-      # Fallbacks hash is populated before freezing.
-      unless I18n.class_variable_defined?(:@@fallbacks)
-        I18n.class_variable_set(:@@fallbacks, false)
-      end
-      if (fallbacks = I18n.class_variable_get(:@@fallbacks)) && fallbacks.respond_to?(:[])
-        fallbacks[I18n.default_locale]
-        fallbacks.make_shareable! rescue nil
-      end
-
-      # Eagerly initialize lazy singletons
       ::ActiveRecord::Relation::WhereClause.empty
       ::ActiveRecord::Relation::FromClause.empty
       ::ActionView::Template::Handlers.extensions
+      I18n.available_locales = I18n.available_locales
+      if I18n.class_variable_defined?(:@@fallbacks)
+        fallbacks = I18n.class_variable_get(:@@fallbacks)
+        if fallbacks.respond_to?(:[])
+          I18n.available_locales.each { |locale| fallbacks[locale] }
+        end
+      else
+        I18n.class_variable_set(:@@fallbacks, false)
+      end
 
-      # Eagerly build controller view context classes (uses Mutex)
+      # Eagerly build controller view context classes
       ::ActionController::Base.descendants.each do |klass|
         klass._prefixes if klass.respond_to?(:_prefixes)
         klass.view_context_class if klass.respond_to?(:view_context_class)
       end
 
-      # Freeze framework singletons
-      ::ActiveSupport.error_reporter.make_shareable!
-      ::Rails.env.make_shareable!
-
-      # Freeze model classes FIRST. Each model's #freeze eagerly
-      # initializes schema, attribute methods, reflections, etc.
-      saved_handler = ::ActiveRecord::Base.default_connection_handler
+      # Freeze model classes (leaf-first)
       ::ActiveRecord::Base.descendants.sort_by { |m| -m.ancestors.size }.each do |model|
         model.freeze rescue nil
       end
 
-      # Freeze all module instance variables and class variables
+      # Make all named modules shareable. Module#make_shareable!
+      # handles ivars, cvars, constants, and singleton class ivars.
+      # Skip internal Ruby/bundler/boot infrastructure.
       ObjectSpace.each_object(Module) do |mod|
-        next if mod.name&.start_with?("Bootsnap", "Concurrent", "RubyVM", "Bundler")
-        next if mod.name&.include?("ConnectionAdapters") || mod.name&.include?("ConnectionHandler")
-        mod.instance_variables.each do |ivar|
-          begin
-            next if ivar.to_s.include?("connection_handler")
-            val = mod.instance_variable_get(ivar)
-            next if val.equal?(nil) || val.frozen?
-            val.make_shareable!
-          rescue
-          end
-        end
-        mod.class_variables(false).each do |cvar|
-          begin
-            val = mod.class_variable_get(cvar)
-            next if val.equal?(nil) || val.frozen?
-            val.make_shareable!
-          rescue
-          end
-        end
-      end
-
-      # Freeze constants in Rails, Rack, and Arel modules
-      rails_prefixes = %w[
-        ActionController ActionDispatch ActionMailer ActionView
-        ActiveModel ActiveRecord ActiveStorage ActiveJob ActiveSupport
-        ActionCable ActionMailbox ActionText Rails Mime Arel
-      ]
-      require "rack/multipart"
-      ObjectSpace.each_object(Module) do |mod|
-        name = mod.name rescue nil
+        name = mod.name rescue next
         next unless name
-        next unless rails_prefixes.any? { |p| name.start_with?(p) } || name.start_with?("Rack")
-        mod.constants(false).each do |const|
-          begin
-            next if mod.autoload?(const)
-            val = mod.const_get(const, false)
-            next if val.is_a?(Module) || val.frozen?
-            val.make_shareable!
-          rescue
-          end
-        end
+        next if name.start_with?("Bootsnap", "Bundler", "RubyVM",
+                                 "Concurrent", "Kernel", "IO", "File",
+                                 "Dir", "Process", "Signal", "Thread",
+                                 "Encoding", "GC", "ObjectSpace",
+                                 "RubyGems", "Gem", "Psych", "JSON",
+                                 "Racc", "RDoc", "IRB", "Monitor")
+        next if name.include?("ConnectionAdapters") || name.include?("ConnectionHandler")
+        mod.make_shareable! rescue nil
       end
 
-      # Make the app shareable.
-      make_shareable!
-
-      # Restore the connection handler for the main Ractor
-      ::ActiveRecord::Base.singleton_class.instance_variable_set(
-        :@__class_attr_default_connection_handler, saved_handler
-      )
-    end
-
-    def freeze
-      # Boot-time state that is not needed for request handling and
-      # contains objects that cannot be made Ractor-shareable (Mutexes,
-      # Procs capturing self, file watchers, autoloaders, etc.).
+      # Nil boot-time state not needed for request handling
       @app_build_lock = nil
       @config = nil
       @initializers = nil

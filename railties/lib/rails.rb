@@ -65,6 +65,10 @@ module Rails
       @root || (application && application.config.root)
     end
 
+    def cache_root! # :nodoc:
+      @root = root.freeze
+    end
+
     # Returns the current \Rails environment.
     #
     #   Rails.env # => "development"
