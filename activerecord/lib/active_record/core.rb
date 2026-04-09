@@ -348,6 +348,9 @@ module ActiveRecord
         # We don't have cache keys for this stuff yet
         return super unless ids.length == 1
         return super if block_given? || primary_key.nil? || scope_attributes?
+        # cached_find_by uses StatementCache which needs the adapter's
+        # cacheable_query -- not available through the Ractor proxy.
+        return super unless Ractor.main?
 
         id = ids.first
 
