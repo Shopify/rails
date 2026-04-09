@@ -112,6 +112,14 @@ Concurrent::Map.prepend(Module.new do
     end
   end
 
+  def [](key)
+    if frozen?
+      @backend[key] || {}
+    else
+      super
+    end
+  end
+
   def []=(key, value)
     if frozen?
       value # silently skip write, return value for ||= pattern

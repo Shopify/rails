@@ -279,6 +279,8 @@ module ActiveRecord
           _default_attributes rescue nil
           arel_table
           predicate_builder rescue nil
+          attributes_builder rescue nil
+          _to_partial_path rescue nil
           all_timestamp_attributes_in_model rescue nil
 
           # Make reflections and autosave blocks shareable

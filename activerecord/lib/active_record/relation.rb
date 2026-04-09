@@ -1433,13 +1433,6 @@ module ActiveRecord
       end
 
       def exec_queries(&block)
-        # When running in a non-main Ractor, dispatch the entire query
-        # (SQL generation + execution + instantiation) to the main
-        # Ractor where the database driver and connection pool live.
-        if !Ractor.main? && defined?(Ractor::Dispatch)
-          return Ractor::Dispatch.main.run { to_a }
-        end
-
         if lock_value && model.current_preventing_writes
           raise ActiveRecord::ReadOnlyError, "Lock query attempted while in readonly mode"
         end

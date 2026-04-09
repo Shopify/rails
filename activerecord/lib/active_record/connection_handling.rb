@@ -345,7 +345,7 @@ module ActiveRecord
         end
       end
 
-      def execute(sql, name = nil, allow_retry: false)
+      def execute(sql, name = nil, **kwargs)
         frozen_sql = sql.frozen? ? sql : sql.dup.freeze
         frozen_name = (name || "SQL").freeze
         Ractor::Dispatch.main.run do
@@ -353,15 +353,17 @@ module ActiveRecord
         end
       end
 
-      def select_all(arel, name = nil, binds = [], preparable: nil, async: false)
-        if arel.respond_to?(:to_sql)
-          frozen_sql = arel.to_sql.freeze
-        else
-          frozen_sql = arel.frozen? ? arel : arel.dup.freeze
-        end
-        frozen_name = (name || "SQL").freeze
+      def select_all(arel, name = nil, binds = [], preparable: nil, async: false, **)
+        _ractor_select_all(
+          arel.respond_to?(:to_sql) ? arel.to_sql.freeze : (arel.frozen? ? arel : arel.dup.freeze),
+          (name || "SQL").freeze,
+          binds.freeze
+        )
+      end
+
+      def _ractor_select_all(sql, query_name, query_binds)
         Ractor::Dispatch.main.run do
-          ActiveRecord::Base.with_connection { |c| c.select_all(frozen_sql, frozen_name, binds, preparable: preparable) }
+          ActiveRecord::Base.with_connection { |c| c.select_all(sql, query_name, query_binds) }
         end
       end
 
@@ -450,6 +452,16 @@ module ActiveRecord
         false
       end
 
+      def to_sql(arel, binds = [])
+        # Can't pass Arel across Ractor boundary -- but we need to
+        # compile it. Use the Arel's own table klass to find the
+        # engine and compile.
+        table = arel.instance_variable_get(:@ctx)&.instance_variable_get(:@relation) ||
+                arel.instance_variable_get(:@ast)&.relation
+        engine = table.respond_to?(:klass) ? table.klass : ActiveRecord::Base
+        Ractor::Dispatch.main.run { engine.with_connection { |c| c.to_sql(arel, binds) }.freeze }
+      end
+
       def visitor
         Ractor::Dispatch.main.run { ActiveRecord::Base.with_connection { |c| c.visitor } }
       end
@@ -472,14 +484,10 @@ module ActiveRecord
 
       def method_missing(name, *args, **kwargs, &block)
         frozen_args = args.map { |a| a.frozen? ? a : (a.dup.freeze rescue a) }.freeze
-        frozen_kwargs = kwargs.transform_values { |v| v.frozen? ? v : (v.dup.freeze rescue v) }.freeze
         Ractor::Dispatch.main.run do
-          ActiveRecord::Base.with_connection { |c| c.send(name, *frozen_args, **frozen_kwargs) }
+          ActiveRecord::Base.with_connection { |c| c.send(name, *frozen_args) }
         end
       rescue Ractor::Error
-        # The result can't be copied (e.g. contains SQLite3::Database,
-        # Monitor, etc). Return nil for queries that return non-copyable
-        # connection-internal objects.
         nil
       end
     end
