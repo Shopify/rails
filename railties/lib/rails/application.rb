@@ -205,6 +205,7 @@ module Rails
        ::ActionView::LookupContext::DetailsKey,
        ::ActionView::Template,
        ::ActionView::Template::Handlers,
+       ::ActionView::Helpers::TagHelper,
        ::ActionDispatch::ExceptionWrapper,
        ::ActionDispatch::Http::FilterParameters,
        ::ActionDispatch::ParamBuilder,
