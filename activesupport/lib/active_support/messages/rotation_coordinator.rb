@@ -7,8 +7,9 @@ module ActiveSupport
     class RotationCoordinator # :nodoc:
       attr_accessor :transitional
 
-      def initialize(&secret_generator)
-        raise ArgumentError, "A secret generator block is required" unless secret_generator
+      def initialize(secret_generator = nil, &block)
+        secret_generator ||= block
+        raise ArgumentError, "A secret generator is required" unless secret_generator
         @secret_generator = secret_generator
         @rotate_options = []
         @on_rotation = nil
