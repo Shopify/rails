@@ -123,8 +123,15 @@ module Rails
       ::ActionView::PathRegistry.instance_variable_get(:@file_system_resolvers).make_shareable!
       ::ActionView::PathRegistry.instance_variable_get(:@view_paths_by_class).make_shareable!
 
-      # Freeze the error reporter (set at boot, read-only after)
+      # Freeze framework singletons that are set at boot
       ::ActiveSupport.error_reporter.make_shareable!
+      ::Rails.env.make_shareable!
+      # Note: ActiveSupport::Notifications.notifier can't be frozen (contains
+      # Mutex and subscriber state). Non-main Ractors should avoid instrumentation.
+
+      # Remove the logger from env_config -- IO objects can't be shared
+      # across Ractors. Each Ractor should set up its own logger.
+      @app_env_config.delete("action_dispatch.logger")
 
       # Make class_attribute values shareable. These are stored as ivars
       # on class singleton classes with the __class_attr_ prefix. Some

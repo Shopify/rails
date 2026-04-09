@@ -20,7 +20,7 @@ module Rails
       def call(env)
         request = ActionDispatch::Request.new(env)
 
-        env["rails.rack_logger_tag_count"] = if logger.respond_to?(:push_tags)
+        env["rails.rack_logger_tag_count"] = if logger&.respond_to?(:push_tags) && !logger.frozen?
           logger.push_tags(*compute_tags(request)).size
         else
           0
