@@ -101,6 +101,15 @@ module ActionController
         @name_set    = name
       end
 
+      def freeze
+        # Eagerly resolve lazy fields before freezing
+        self.include
+        self.name
+        self.model
+        @mutex = nil
+        super
+      end
+
       def model
         super || self.model = _default_wrap_model
       end

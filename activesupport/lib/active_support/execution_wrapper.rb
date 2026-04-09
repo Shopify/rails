@@ -127,9 +127,7 @@ module ActiveSupport
     end
 
     def run # :nodoc:
-      # Callback chains contain compiled Procs that are not
-      # Ractor-shareable. Skip them in non-main Ractors for now.
-      run_callbacks(:run) if Ractor.main?
+      run_callbacks(:run)
     end
 
     # Complete this in-flight execution. This method *must* be called
@@ -143,7 +141,7 @@ module ActiveSupport
     end
 
     def complete # :nodoc:
-      run_callbacks(:complete) if Ractor.main?
+      run_callbacks(:complete)
     end
 
     private

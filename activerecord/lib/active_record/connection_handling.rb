@@ -315,7 +315,26 @@ module ActiveRecord
     # If #connection is called inside the block, the connection won't be checked back in
     # unless the +prevent_permanent_checkout+ argument is set to +true+.
     def with_connection(prevent_permanent_checkout: false, &block)
+      if !Ractor.main? && defined?(Ractor::Dispatch)
+        klass = self
+        return Ractor::Dispatch.main.run {
+          klass.connection_pool.with_connection(&block)
+        }
+      end
       connection_pool.with_connection(prevent_permanent_checkout: prevent_permanent_checkout, &block)
+    end
+
+    if defined?(Ractor::Dispatch)
+      # In non-main Ractors, lease_connection and connection cannot
+      # return a connection object (it contains Mutexes). Instead,
+      # callers should use with_connection which dispatches the block
+      # to the main Ractor.
+      def lease_connection
+        if !Ractor.main?
+          raise "Use with_connection instead of lease_connection in non-main Ractors"
+        end
+        connection_pool.lease_connection
+      end
     end
 
     attr_writer :connection_specification_name

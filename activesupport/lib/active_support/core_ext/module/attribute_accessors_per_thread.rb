@@ -55,9 +55,10 @@ class Module
         default = default.dup.freeze unless default.frozen?
         singleton_class.define_method("#{sym}_default_value") { default }
 
+        @__thread_mattr_#{sym} = "attr_#{sym}_\#{object_id}"
+
         class_eval(<<~RUBY, __FILE__, __LINE__ + 1)
           def self.#{sym}
-            @__thread_mattr_#{sym} ||= "attr_#{sym}_\#{object_id}"
             value = ::ActiveSupport::IsolatedExecutionState[@__thread_mattr_#{sym}]
 
             if value.nil? && !::ActiveSupport::IsolatedExecutionState.key?(@__thread_mattr_#{sym})
@@ -105,8 +106,9 @@ class Module
       # The following generated method concatenates `object_id` because we want
       # subclasses to maintain independent values.
       class_eval(<<~RUBY, __FILE__, __LINE__ + 1)
+        @__thread_mattr_#{sym} = "attr_#{sym}_\#{object_id}"
+
         def self.#{sym}=(obj)
-          @__thread_mattr_#{sym} ||= "attr_#{sym}_\#{object_id}"
           ::ActiveSupport::IsolatedExecutionState[@__thread_mattr_#{sym}] = obj
         end
       RUBY

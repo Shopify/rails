@@ -146,6 +146,9 @@ module Rails
           end
         end
       end
+      # Ensure lazily-loaded Rack modules are available before freezing
+      require "rack/multipart"
+
       # Also freeze Rack constants
       ObjectSpace.each_object(Module) do |mod|
         next unless mod.name&.start_with?("Rack")
@@ -201,13 +204,19 @@ module Rails
       ::ActionView::Template::Handlers.extensions
       ::ActiveRecord::Base.descendants.each do |model|
         # Eagerly initialize all lazy class ivars (table_name, arel_table,
-        # predicate_builder, finder_needs_type_condition, etc.)
+        # predicate_builder, schema, columns, etc.)
         begin
           model.table_name
+          model.primary_key             # resolves and caches
           model.arel_table
           model.predicate_builder
           model.finder_needs_type_condition?
-          model.all # triggers relation creation
+          model.columns_hash            # forces schema load
+          model._default_attributes     # forces attribute type resolution
+          model.all                     # triggers relation creation
+          # Ensure primary_key is no longer the sentinel
+          pk = model.primary_key
+          model.instance_variable_set(:@primary_key, pk) if pk
         rescue
         end
       end
@@ -242,6 +251,21 @@ module Rails
       # Freeze framework singletons that are set at boot
       ::ActiveSupport.error_reporter.make_shareable!
       ::Rails.env.make_shareable!
+
+      # Explicitly freeze callback chains on all loaded classes. This must
+      # happen before the general class attribute freeze because the chain's
+      # freeze method deep-freezes callback templates (making their lambdas'
+      # self references shareable).
+      ObjectSpace.each_object(Module) do |mod|
+        ivar = :@__class_attr___callbacks
+        if mod.singleton_class.instance_variable_defined?(ivar)
+          cbs = mod.singleton_class.instance_variable_get(ivar)
+          if cbs.is_a?(Hash) && !cbs.frozen?
+            cbs.each_value { |chain| chain.freeze rescue nil }
+            cbs.make_shareable! rescue nil
+          end
+        end
+      end
 
       # Make class_attribute values shareable. These are stored as ivars
       # on class singleton classes with the __class_attr_ prefix. Some
