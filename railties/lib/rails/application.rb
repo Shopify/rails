@@ -265,8 +265,19 @@ module Rails
         begin
           model.instance_variable_set(:@arel_table, model.arel_table) unless model.instance_variable_get(:@arel_table)
           model.instance_variable_set(:@primary_key, model.primary_key)
+          model.column_names
+          model.all_timestamp_attributes_in_model rescue nil
+          model.with_connection { |c| model._returning_columns_for_insert(c).make_shareable! } rescue nil
+          model._default_attributes.make_shareable! rescue nil
           model.define_attribute_methods
           model.reflections.each_value { |r| r.make_shareable! rescue nil }
+          # Freeze non-cyclic method blocks (from autosave_association)
+          model.instance_variables.each do |ivar|
+            if ivar.to_s.start_with?("@_ncm_block_")
+              val = model.instance_variable_get(ivar)
+              val.make_shareable! rescue nil unless val.frozen?
+            end
+          end
         rescue
         end
       end
@@ -279,7 +290,7 @@ module Rails
         ivar = :@__class_attr___callbacks
         if mod.singleton_class.instance_variable_defined?(ivar)
           cbs = mod.singleton_class.instance_variable_get(ivar)
-          if cbs.is_a?(Hash) && !cbs.frozen?
+          if cbs.is_a?(Hash) && !cbs.shareable?
             cbs.each_value { |chain| chain.freeze rescue nil }
             cbs.make_shareable! rescue nil
           end
