@@ -42,6 +42,14 @@ module Rails
         end
       end
 
+      def freeze
+        # The updater holds a file-watcher block that captures self
+        # (via reload!). After boot in production, routes are loaded
+        # and the watcher is no longer needed.
+        @updater = nil
+        super
+      end
+
     private
       def updater
         @updater ||= begin

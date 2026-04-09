@@ -78,7 +78,11 @@ module ActionDispatch
 
       @redirect = redirect
 
-      @exclude = @redirect && @redirect[:exclude] || proc { !@redirect }
+      @exclude = if @redirect
+        @redirect[:exclude] || false
+      else
+        true
+      end
       @secure_cookies = secure_cookies
 
       @hsts_header = build_hsts_header(normalize_hsts_options(hsts))
