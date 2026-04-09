@@ -21,7 +21,11 @@ module ActionView # :nodoc:
       @@default_template_handlers = nil
 
       def self.extensions
-        @@template_extensions ||= @@template_handlers.keys
+        if Ractor.main?
+          @@template_extensions ||= @@template_handlers.keys
+        else
+          @@template_extensions
+        end
       end
 
       # Register an object that knows how to handle template files with the given
