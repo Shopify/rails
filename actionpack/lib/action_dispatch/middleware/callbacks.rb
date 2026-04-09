@@ -26,13 +26,17 @@ module ActionDispatch
     end
 
     def call(env)
-      error = nil
-      result = run_callbacks :call do
+      if Ractor.main?
+        error = nil
+        result = run_callbacks :call do
+          @app.call(env)
+        rescue => error
+        end
+        raise error if error
+        result
+      else
         @app.call(env)
-      rescue => error
       end
-      raise error if error
-      result
     end
   end
 end

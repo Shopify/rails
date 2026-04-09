@@ -115,9 +115,10 @@ module Rails
       routes
       app
 
-      # Freeze external gem constants that are mutable by default
+      # Freeze external gem state that is mutable by default
       ::Rack::Mime::MIME_TYPES.make_shareable! unless ::Rack::Mime::MIME_TYPES.frozen?
       ::Rack::MethodOverride::ALLOWED_METHODS.make_shareable! unless ::Rack::MethodOverride::ALLOWED_METHODS.frozen?
+      ::Rack::Request.instance_variable_get(:@forwarded_priority).make_shareable!
 
       # Freeze ActionView path registries (populated at boot, read-only after)
       ::ActionView::PathRegistry.instance_variable_get(:@file_system_resolvers).make_shareable!
@@ -566,6 +567,7 @@ module Rails
     end
 
     def config # :nodoc:
+      return @config if frozen?
       @config ||= Application::Configuration.new(self.class.find_root(self.class.called_from))
     end
 

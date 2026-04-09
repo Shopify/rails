@@ -79,9 +79,9 @@ module ActionDispatch
       @redirect = redirect
 
       @exclude = if @redirect
-        @redirect[:exclude] || false
+        @redirect[:exclude] || shareable_proc { |_request| false }
       else
-        true
+        shareable_proc { |_request| true }
       end
       @secure_cookies = secure_cookies
 

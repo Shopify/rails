@@ -120,7 +120,7 @@ module ActionDispatch
     end
 
     def rescue_template
-      @@rescue_templates[@exception_class_name]
+      self.class.rescue_templates[@exception_class_name]
     end
 
     def status_code
@@ -179,7 +179,7 @@ module ActionDispatch
     end
 
     def self.status_code_for_exception(class_name)
-      ActionDispatch::Response.rack_status_code(@@rescue_responses[class_name])
+      ActionDispatch::Response.rack_status_code(self.class.rescue_responses[class_name])
     end
 
     def show?(request)
@@ -198,7 +198,7 @@ module ActionDispatch
     end
 
     def rescue_response?
-      @@rescue_responses.key?(exception.class.name)
+      self.class.rescue_responses.key?(exception.class.name)
     end
 
     def source_extracts
