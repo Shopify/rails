@@ -157,6 +157,9 @@ module Rails
         end
       end
 
+      # Eagerly build view context class (uses Mutex for lazy init)
+      ::ActionView::LookupContext::DetailsKey.view_context_class
+
       # Eagerly build PathParser regexes before freezing
       ::ActionView::PathRegistry.instance_variable_get(:@file_system_resolvers).each_value do |resolver|
         pp = resolver.instance_variable_get(:@path_parser)
