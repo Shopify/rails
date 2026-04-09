@@ -202,40 +202,30 @@ module Rails
       ::ActiveRecord::Relation::WhereClause.empty
       ::ActiveRecord::Relation::FromClause.empty
       ::ActionView::Template::Handlers.extensions
-      ::ActiveRecord::Base.descendants.each do |model|
-        # Eagerly initialize all lazy class ivars
-        begin
-          model.table_name
-          model.primary_key
-          model.arel_table
-          model.predicate_builder
-          model.finder_needs_type_condition?
-          model.table_exists?
-          model.columns
-          model.columns_hash
-          model._default_attributes
-          model.all
-          model.instance_variable_set(:@primary_key, model.primary_key)
-        rescue
-        end
-      end
 
+      # Eagerly build controller view context classes (uses Mutex)
       ::ActionController::Base.descendants.each do |klass|
         klass._prefixes if klass.respond_to?(:_prefixes)
         klass.view_context_class if klass.respond_to?(:view_context_class)
       end
 
-      # Freeze all class/module instance variables and class variables
-      # that are not yet shareable. After eager loading, these are
-      # populated and read-only in production. Non-main Ractors can
-      # read class variables only if their values are shareable.
+      # Freeze framework singletons
+      ::ActiveSupport.error_reporter.make_shareable!
+      ::Rails.env.make_shareable!
+
+      # Freeze model classes FIRST. Each model's #freeze eagerly
+      # initializes schema, attribute methods, reflections, etc.
+      saved_handler = ::ActiveRecord::Base.default_connection_handler
+      ::ActiveRecord::Base.descendants.sort_by { |m| -m.ancestors.size }.each do |model|
+        model.freeze rescue nil
+      end
+
+      # Freeze all module instance variables and class variables
       ObjectSpace.each_object(Module) do |mod|
-        # Skip ActiveRecord connection infrastructure -- it must
-        # remain mutable for the main Ractor's DB operations.
+        next if mod.name&.start_with?("Bootsnap", "Concurrent", "RubyVM", "Bundler")
         next if mod.name&.include?("ConnectionAdapters") || mod.name&.include?("ConnectionHandler")
         mod.instance_variables.each do |ivar|
           begin
-            # Skip the connection handler value
             next if ivar.to_s.include?("connection_handler")
             val = mod.instance_variable_get(ivar)
             next if val.equal?(nil) || val.frozen?
@@ -253,87 +243,35 @@ module Rails
         end
       end
 
-      # Freeze framework singletons that are set at boot
-      ::ActiveSupport.error_reporter.make_shareable!
-      ::Rails.env.make_shareable!
-
-      # Final model init pass: re-set lazy state that earlier passes
-      # may have reset, freeze reflections, generate attribute methods.
-      # Must happen BEFORE callback chain freeze (which deep-freezes
-      # everything reachable from callbacks including models).
-      ::ActiveRecord::Base.descendants.each do |model|
-        begin
-          model.instance_variable_set(:@arel_table, model.arel_table) unless model.instance_variable_get(:@arel_table)
-          model.instance_variable_set(:@primary_key, model.primary_key)
-          model.column_names
-          model.all_timestamp_attributes_in_model rescue nil
-          model.with_connection { |c| model._returning_columns_for_insert(c).make_shareable! } rescue nil
-          model._default_attributes.make_shareable! rescue nil
-          model.define_attribute_methods
-          model.reflections.each_value { |r| r.make_shareable! rescue nil }
-
-          # Freeze non-cyclic method blocks (from autosave_association)
-          model.instance_variables.each do |ivar|
-            if ivar.to_s.start_with?("@_ncm_block_")
-              val = model.instance_variable_get(ivar)
-              val.make_shareable! rescue nil unless val.frozen?
-            end
-          end
-        rescue
-        end
-      end
-
-      # Explicitly freeze callback chains on all loaded classes. This must
-      # happen before the general class attribute freeze because the chain's
-      # freeze method deep-freezes callback templates (making their lambdas'
-      # self references shareable).
+      # Freeze constants in Rails, Rack, and Arel modules
+      rails_prefixes = %w[
+        ActionController ActionDispatch ActionMailer ActionView
+        ActiveModel ActiveRecord ActiveStorage ActiveJob ActiveSupport
+        ActionCable ActionMailbox ActionText Rails Mime Arel
+      ]
+      require "rack/multipart"
       ObjectSpace.each_object(Module) do |mod|
-        ivar = :@__class_attr___callbacks
-        if mod.singleton_class.instance_variable_defined?(ivar)
-          cbs = mod.singleton_class.instance_variable_get(ivar)
-          if cbs.is_a?(Hash) && !cbs.shareable?
-            cbs.each_value { |chain| chain.freeze rescue nil }
-            cbs.make_shareable! rescue nil
+        name = mod.name rescue nil
+        next unless name
+        next unless rails_prefixes.any? { |p| name.start_with?(p) } || name.start_with?("Rack")
+        mod.constants(false).each do |const|
+          begin
+            next if mod.autoload?(const)
+            val = mod.const_get(const, false)
+            next if val.is_a?(Module) || val.frozen?
+            val.make_shareable!
+          rescue
           end
         end
       end
 
-      # Make class_attribute values shareable. These are stored as ivars
-      # on class singleton classes with the __class_attr_ prefix. Some
-      # values (e.g. compiled callback chains) contain Procs that can't
-      # be made shareable -- skip those gracefully.
-      ObjectSpace.each_object(Module) do |mod|
-        mod.singleton_class.instance_variables.each do |ivar|
-          if ivar.start_with?("@__class_attr_")
-            # Skip the connection handler -- it contains Mutexes and
-            # connection pools that must remain mutable for DB access.
-            next if ivar == :@__class_attr_default_connection_handler
-            val = mod.singleton_class.instance_variable_get(ivar)
-            next if val.nil? || val.frozen?
-            val.make_shareable! rescue nil
-          end
-        end
-      end
+      # Make the app shareable.
+      make_shareable!
 
-
-
-      # Final pass: re-set model state that freeze passes may have reset
-      ::ActiveRecord::Base.descendants.each do |model|
-        begin
-          at = model.arel_table
-          at.make_shareable! rescue nil
-          model.instance_variable_set(:@arel_table, at)
-          model.instance_variable_set(:@primary_key, model.primary_key)
-        rescue
-        end
-      end
-
-      # Make the key components shareable individually rather than
-      # freezing the entire Application (which would freeze AR model
-      # classes and prevent creating new records in the main Ractor).
-      @app_env_config.make_shareable!
-      @routes.make_shareable! rescue nil
-      @app.make_shareable! rescue nil
+      # Restore the connection handler for the main Ractor
+      ::ActiveRecord::Base.singleton_class.instance_variable_set(
+        :@__class_attr_default_connection_handler, saved_handler
+      )
     end
 
     def freeze
