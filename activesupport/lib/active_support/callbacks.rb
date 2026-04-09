@@ -358,14 +358,16 @@ module ActiveSupport
           end
 
           def make_lambda
-            lambda do |target, value, &block|
-              target.send(@method_name, &block)
+            method_name = @method_name
+            shareable_proc do |target, value, &block|
+              target.send(method_name, &block)
             end
           end
 
           def inverted_lambda
-            lambda do |target, value, &block|
-              !target.send(@method_name, &block)
+            method_name = @method_name
+            shareable_proc do |target, value, &block|
+              !target.send(method_name, &block)
             end
           end
         end
@@ -380,16 +382,31 @@ module ActiveSupport
             [@override_target || target, block, @method_name, target]
           end
 
-          def make_lambda
-            lambda do |target, value, &block|
-              (@override_target || target).send(@method_name, target, &block)
+          # Callable that dispatches to override_target.method_name(target).
+          # Defined as a class (not a lambda) so its instances can be made
+          # Ractor-shareable without capturing a non-shareable self.
+          class Invoke
+            def initialize(override_target, method_name, invert: false)
+              @override_target = override_target
+              @method_name = method_name
+              @invert = invert
             end
+
+            def call(target, value, &block)
+              result = (@override_target || target).send(@method_name, target, &block)
+              @invert ? !result : result
+            end
+
+            def arity; 2; end
+            def lambda?; true; end
+          end
+
+          def make_lambda
+            Invoke.new(@override_target, @method_name)
           end
 
           def inverted_lambda
-            lambda do |target, value, &block|
-              !(@override_target || target).send(@method_name, target, &block)
-            end
+            Invoke.new(@override_target, @method_name, invert: true)
           end
         end
 
@@ -403,14 +420,16 @@ module ActiveSupport
           end
 
           def make_lambda
+            override_block = @override_block
             lambda do |target, value, &block|
-              target.instance_exec(&@override_block)
+              target.instance_exec(&override_block)
             end
           end
 
           def inverted_lambda
+            override_block = @override_block
             lambda do |target, value, &block|
-              !target.instance_exec(&@override_block)
+              !target.instance_exec(&override_block)
             end
           end
         end
@@ -425,14 +444,16 @@ module ActiveSupport
           end
 
           def make_lambda
+            override_block = @override_block
             lambda do |target, value, &block|
-              target.instance_exec(target, &@override_block)
+              target.instance_exec(target, &override_block)
             end
           end
 
           def inverted_lambda
+            override_block = @override_block
             lambda do |target, value, &block|
-              !target.instance_exec(target, &@override_block)
+              !target.instance_exec(target, &override_block)
             end
           end
         end
@@ -448,16 +469,18 @@ module ActiveSupport
           end
 
           def make_lambda
+            override_block = @override_block
             lambda do |target, value, &block|
               raise ArgumentError unless block
-              target.instance_exec(target, block, &@override_block)
+              target.instance_exec(target, block, &override_block)
             end
           end
 
           def inverted_lambda
+            override_block = @override_block
             lambda do |target, value, &block|
               raise ArgumentError unless block
-              !target.instance_exec(target, block, &@override_block)
+              !target.instance_exec(target, block, &override_block)
             end
           end
         end
@@ -472,14 +495,16 @@ module ActiveSupport
           end
 
           def make_lambda
+            override_target = @override_target
             lambda do |target, value, &block|
-              (@override_target || target).call(target, value, &block)
+              (override_target || target).call(target, value, &block)
             end
           end
 
           def inverted_lambda
+            override_target = @override_target
             lambda do |target, value, &block|
-              !(@override_target || target).call(target, value, &block)
+              !(override_target || target).call(target, value, &block)
             end
           end
         end
@@ -580,6 +605,26 @@ module ActiveSupport
           @all_callbacks = nil
           @single_callbacks = {}
           @mutex = Mutex.new
+        end
+
+        def freeze
+          # Eagerly compile callback sequences before freezing so they
+          # are cached and the Mutex is no longer needed.
+          compile(nil)
+          @chain.each { |cb| compile(cb.kind) }
+          @mutex = nil
+          # Deep-freeze all callback objects (including CallTemplate
+          # instances) BEFORE freezing the chain itself. This ensures
+          # that lambdas' implicit self references are shareable when
+          # make_shareable traverses the Proc objects.
+          @chain.each do |cb|
+            cb.instance_variables.each do |ivar|
+              val = cb.instance_variable_get(ivar)
+              val.make_shareable! rescue nil unless val.nil? || val.frozen?
+            end
+            cb.make_shareable! rescue nil
+          end
+          super
         end
 
         def each(&block); @chain.each(&block); end
