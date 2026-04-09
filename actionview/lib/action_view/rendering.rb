@@ -80,6 +80,8 @@ module ActionView
       end
 
       def view_context_class
+        return @view_context_class if @view_context_class && !Ractor.main?
+
         klass = ActionView::LookupContext::DetailsKey.view_context_class
 
         @view_context_class ||= build_view_context_class(klass, supports_path?, _routes, _helpers)
