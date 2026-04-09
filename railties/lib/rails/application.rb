@@ -115,24 +115,60 @@ module Rails
       routes
       app
 
-      # Freeze external gem state that is mutable by default
-      ::Rack::Mime::MIME_TYPES.make_shareable! unless ::Rack::Mime::MIME_TYPES.frozen?
-      ::Rack::MethodOverride::ALLOWED_METHODS.make_shareable! unless ::Rack::MethodOverride::ALLOWED_METHODS.frozen?
-      ::Rack::Request.instance_variable_get(:@forwarded_priority).make_shareable!
+      # Remove the logger from env_config -- IO objects can't be shared
+      # across Ractors. Each Ractor should set up its own logger.
+      @app_env_config.delete("action_dispatch.logger")
+
+      # Freeze Rack constants and class ivars that are mutable by default.
+      # Rack was not designed for Ractor safety so we freeze everything we
+      # know about in one pass.
+      rack_objects_to_freeze = [
+        ::Rack::Mime::MIME_TYPES,
+        ::Rack::MethodOverride::ALLOWED_METHODS,
+        ::Rack::Utils::SYMBOL_TO_STATUS_CODE,
+        ::Rack::Utils.const_get(:OBSOLETE_SYMBOLS_TO_STATUS_CODES),
+        ::Rack::Utils.const_get(:OBSOLETE_SYMBOL_MAPPINGS),
+        ::Rack::Utils::HTTP_STATUS_CODES,
+        ::Rack::Headers::KNOWN_HEADERS,
+        ::Rack::Request.instance_variable_get(:@forwarded_priority),
+      ]
+      rack_objects_to_freeze.each { |obj| obj.make_shareable! unless obj.frozen? }
 
       # Freeze ActionView path registries (populated at boot, read-only after)
       ::ActionView::PathRegistry.instance_variable_get(:@file_system_resolvers).make_shareable!
       ::ActionView::PathRegistry.instance_variable_get(:@view_paths_by_class).make_shareable!
 
+      # Freeze inflections (populated at boot, read-only after)
+      ::ActiveSupport::Inflector.inflections.make_shareable!
+      ::ActiveSupport::Inflector.inflections(:en).make_shareable!
+
+      # Freeze ActionView lookup context defaults
+      ::ActionView::LookupContext::Accessors::DEFAULT_PROCS.make_shareable! rescue nil
+
+      # Eagerly initialize lazy class ivars on controllers/views
+      ::ActionController::Base.descendants.each do |klass|
+        klass._prefixes if klass.respond_to?(:_prefixes)
+      end
+
+      # Freeze all class/module instance variables that are not yet
+      # shareable. After eager loading, these are populated and
+      # read-only in production.
+      ObjectSpace.each_object(Module) do |mod|
+        mod.instance_variables.each do |ivar|
+          begin
+            val = mod.instance_variable_get(ivar)
+            next if val.equal?(nil) || val.frozen?
+            val.make_shareable!
+          rescue
+            # Skip values that can't be made shareable (e.g. callback
+            # chains with compiled Procs, IO objects, etc.)
+          end
+        end
+      end
+
       # Freeze framework singletons that are set at boot
       ::ActiveSupport.error_reporter.make_shareable!
       ::Rails.env.make_shareable!
-      # Note: ActiveSupport::Notifications.notifier can't be frozen (contains
-      # Mutex and subscriber state). Non-main Ractors should avoid instrumentation.
-
-      # Remove the logger from env_config -- IO objects can't be shared
-      # across Ractors. Each Ractor should set up its own logger.
-      @app_env_config.delete("action_dispatch.logger")
 
       # Make class_attribute values shareable. These are stored as ivars
       # on class singleton classes with the __class_attr_ prefix. Some
