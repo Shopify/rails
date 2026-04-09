@@ -133,7 +133,7 @@ module ActionDispatch
     # HTTP methods from [RFC 5789: PATCH Method for HTTP](https://www.ietf.org/rfc/rfc5789.txt)
     RFC5789 = %w(PATCH).freeze
 
-    HTTP_METHODS = RFC2616 + RFC2518 + RFC3253 + RFC3648 + RFC3744 + RFC5323 + RFC4791 + RFC5789
+    HTTP_METHODS = (RFC2616 + RFC2518 + RFC3253 + RFC3648 + RFC3744 + RFC5323 + RFC4791 + RFC5789).freeze
 
     HTTP_METHOD_LOOKUP = {} # rubocop:disable Style/MutableConstant
 
@@ -141,6 +141,7 @@ module ActionDispatch
     HTTP_METHODS.each { |method|
       HTTP_METHOD_LOOKUP[method] = method.downcase.tap { |m| m.tr!("-", "_") }.to_sym
     }
+    HTTP_METHOD_LOOKUP.freeze
 
     alias raw_request_method request_method # :nodoc:
 
