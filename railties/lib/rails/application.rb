@@ -211,6 +211,8 @@ module Rails
        ::ActiveRecord::Type,
        ::Arel::SelectManager,
        ::ActiveRecord::QueryMethods,
+       ::ActiveRecord::Relation::Merger,
+       ::ActiveRecord::Associations::AssociationScope,
        ::ActionDispatch::Journey::Router::Utils,
        ::ActionDispatch::ExceptionWrapper,
        ::ActionDispatch::Http::FilterParameters,

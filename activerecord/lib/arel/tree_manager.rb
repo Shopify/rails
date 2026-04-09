@@ -63,13 +63,15 @@ module Arel # :nodoc: all
 
       if !Ractor.main? && defined?(Ractor::Dispatch)
         # SQL compilation needs the adapter's visitor which lives in
-        # the main Ractor. Freeze the AST so it can cross the boundary.
-        frozen_ast = @ast.make_shareable!
+        # the main Ractor. Serialize the AST so it can cross the
+        # boundary, then deserialize and compile in the main Ractor.
+        ast_data = Marshal.dump(@ast).freeze
         sql_engine = engine
         return Ractor::Dispatch.main.run {
+          ast = Marshal.load(ast_data)
           conn = sql_engine.lease_connection
-          collector = Arel::Collectors::SQLString.new
-          conn.visitor.accept(frozen_ast, collector).value.freeze
+          collector = Arel::Collectors::SubstituteBinds.new(conn, Arel::Collectors::SQLString.new)
+          conn.visitor.accept(ast, collector).value.freeze
         }
       end
 

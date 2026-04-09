@@ -130,7 +130,8 @@ module ActiveRecord
       self.filter_attributes = []
 
       def self.connection_handler
-        ActiveSupport::IsolatedExecutionState[:active_record_connection_handler] || default_connection_handler
+        ActiveSupport::IsolatedExecutionState[:active_record_connection_handler] ||
+          (Ractor.main? ? default_connection_handler : nil)
       end
 
       def self.connection_handler=(handler)
@@ -293,6 +294,9 @@ module ActiveRecord
             r.has_inverse? rescue nil
             r.inverse_of rescue nil
             r.check_validity_of_inverse! rescue nil
+            r.check_validity! rescue nil
+            r.active_record_primary_key rescue nil
+            r.join_foreign_key rescue nil
             r.make_shareable! rescue nil
           end
           instance_variables.each do |ivar|
@@ -350,6 +354,20 @@ module ActiveRecord
         end
       ensure
         @_making_shareable = false
+      end
+
+      # Proxy that mimics StatementCache for non-main Ractors
+      class RactorStatementProxy # :nodoc:
+        def initialize(block)
+          @block = block
+        end
+
+        def execute(values, connection, async: false, &block)
+          relation = @block.call(StatementCache::Params.new)
+          # Build the WHERE clause from bind values
+          relation.to_a.each(&block) if block
+          relation
+        end
       end
 
       def initialize_find_by_cache # :nodoc:
@@ -509,6 +527,12 @@ module ActiveRecord
       end
 
       def cached_find_by_statement(connection, key, &block) # :nodoc:
+        if !Ractor.main?
+          # StatementCache requires the adapter's cacheable_query which
+          # isn't available through the proxy. Return a wrapper that
+          # executes the relation directly.
+          return RactorStatementProxy.new(block)
+        end
         cache = @find_by_statement_cache[connection.prepared_statements]
         cache.compute_if_absent(key) { StatementCache.create(connection, &block) }
       end

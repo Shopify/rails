@@ -376,11 +376,13 @@ module ActiveRecord
       end
 
       def _ractor_select_all_arel(sql_engine, frozen_ast, query_name, query_binds)
+        # Use Marshal to serialize the frozen AST since make_shareable
+        # prevents modification during SQL compilation.
+        ast_data = Marshal.dump(frozen_ast).freeze
         Ractor::Dispatch.main.run do
+          ast = Marshal.load(ast_data)
           conn = sql_engine.lease_connection
-          # Dup the frozen AST so to_sql_and_binds can modify bind params
-          ast_dup = Marshal.load(Marshal.dump(frozen_ast))
-          compiled = conn.to_sql_and_binds(ast_dup, query_binds)
+          compiled = conn.to_sql_and_binds(ast, query_binds)
           conn.select_all(compiled[0], query_name, compiled[1])
         end
       end
@@ -398,8 +400,6 @@ module ActiveRecord
           _ractor_insert_sql(arel, name)
         end
       end
-
-      private
 
       def _ractor_insert_arel(arel, name)
         ast = arel.instance_variable_get(:@ast)
@@ -438,50 +438,6 @@ module ActiveRecord
         end
       end
 
-      public
-
-      def update(arel, name = nil, binds = [])
-        if arel.respond_to?(:to_sql)
-          _ractor_write_arel(:update, arel, name, binds)
-        else
-          _ractor_write_sql(:update, arel, name, binds)
-        end
-      end
-
-      def delete(arel, name = nil, binds = [])
-        if arel.respond_to?(:to_sql)
-          _ractor_write_arel(:delete, arel, name, binds)
-        else
-          _ractor_write_sql(:delete, arel, name, binds)
-        end
-      end
-
-      def _ractor_write_arel(method, arel, name, binds)
-        frozen_ast = arel.ast.make_shareable!
-        write_name = (name || "SQL").freeze
-        write_binds = binds.freeze
-        Ractor::Dispatch.main.run do
-          conn = ActiveRecord::Base.lease_connection
-          ast_dup = Marshal.load(Marshal.dump(frozen_ast))
-          compiled = conn.to_sql_and_binds(ast_dup, write_binds)
-          conn.send(method, compiled[0], write_name, compiled[1])
-        end
-      end
-
-      def _ractor_write_sql(method, sql, name, binds)
-        write_sql = sql.frozen? ? sql : sql.dup.freeze
-        write_name = (name || "SQL").freeze
-        write_binds = binds.freeze
-        Ractor::Dispatch.main.run do
-          ActiveRecord::Base.with_connection { |c| c.send(method, write_sql, write_name, write_binds) }
-        end
-      end
-
-      # Delegate schema queries
-      def schema_cache
-        Ractor::Dispatch.main.run { ActiveRecord::Base.with_connection { |c| c.schema_cache } }
-      end
-
       # Return a pool proxy for transaction isolation level calls
       def pool
         RactorPoolProxy.instance
@@ -493,6 +449,11 @@ module ActiveRecord
 
       def prepared_statements
         false
+      end
+
+      def cacheable_query(klass, arel)
+        # Without prepared statements, build a simple query
+        [arel, []]
       end
 
       def to_sql(arel, binds = [])
@@ -541,6 +502,10 @@ module ActiveRecord
       INSTANCE = new.freeze
       def self.instance = INSTANCE
 
+      def with_connection(&block)
+        yield RactorConnectionProxy.instance
+      end
+
       def with_pool_transaction_isolation_level(level, open, &block)
         yield  # No-op isolation management in Ractor context
       end
@@ -580,7 +545,12 @@ module ActiveRecord
     end
 
     def connection_pool
-      connection_handler.retrieve_connection_pool(connection_specification_name, role: current_role, shard: current_shard, strict: true)
+      handler = connection_handler
+      if handler.nil? && !Ractor.main? && defined?(Ractor::Dispatch)
+        # In non-main Ractors, return a proxy that dispatches pool operations
+        return RactorConnectionProxy.instance.pool
+      end
+      handler.retrieve_connection_pool(connection_specification_name, role: current_role, shard: current_shard, strict: true)
     end
 
     def retrieve_connection
