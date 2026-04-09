@@ -262,10 +262,11 @@ module ActiveRecord
     end
 
     module ClassMethods
-      # Prepare the model for Ractor shareability when frozen by
-      # Ractor.make_shareable. Eagerly initializes all lazy schema
-      # state so it's available after the class is frozen.
-      def freeze
+      # Prepare the model for Ractor shareability. Eagerly initializes
+      # all lazy schema state and makes ivar values shareable, but does
+      # NOT freeze the class (it must remain mutable for creating
+      # instances in the main Ractor).
+      def make_shareable!
         unless abstract_class?
           # Eagerly resolve all lazy schema state
           table_name
@@ -280,31 +281,42 @@ module ActiveRecord
           all_timestamp_attributes_in_model rescue nil
           with_connection { |c| _returning_columns_for_insert(c) } rescue nil
 
-          # Freeze reflections and autosave blocks
+          # Make reflections and autosave blocks shareable
           reflections.each_value { |r| r.make_shareable! rescue nil }
           instance_variables.each do |ivar|
             if ivar.to_s.start_with?("@_ncm_block_")
               val = instance_variable_get(ivar)
-              val.make_shareable! rescue nil unless val.frozen?
+              val.make_shareable! rescue nil unless val.shareable?
             end
           end
 
-          # LAST: generate attribute methods and set lazy flags.
-          # Must be after all other calls because some of them trigger
-          # undefine_attribute_methods which resets the flag.
+          # Generate attribute methods and set lazy flags. Must be
+          # after all other calls because some trigger resets.
+          relation_delegate_class(ActiveRecord::Relation) rescue nil
           define_attribute_methods rescue nil
-          instance_variable_set(:@primary_key, primary_key)
-          instance_variable_set(:@finder_needs_type_condition,
-            descends_from_active_record? ? :false : :true)
+          @primary_key = primary_key
+          @finder_needs_type_condition = descends_from_active_record? ? :false : :true
+
+          # Eagerly resolve default_scope_override (normally lazy)
+          if respond_to?(:default_scope_override) && default_scope_override.nil?
+            self.default_scope_override = !ActiveRecord::Base.is_a?(method(:default_scope).owner)
+          end
         end
 
         # Detach the connection handler -- it must stay mutable.
-        # It will be restored by ractorize! after make_shareable!.
         if self == ActiveRecord::Base
           self.default_connection_handler = nil
         end
 
         super
+
+        # Re-set values that super's traversal may have nilled
+        unless abstract_class?
+          @arel_table ||= Arel::Table.new(table_name, klass: self)
+          @primary_key = primary_key unless @primary_key.is_a?(String)
+          @relation_delegate_cache ||= {}
+          relation_delegate_class(ActiveRecord::Relation) rescue nil
+        end
       end
 
       def initialize_find_by_cache # :nodoc:
@@ -445,7 +457,11 @@ module ActiveRecord
 
       # Returns an instance of +Arel::Table+ loaded with the current table name.
       def arel_table # :nodoc:
-        @arel_table ||= Arel::Table.new(table_name, klass: self)
+        @arel_table || begin
+          table = Arel::Table.new(table_name, klass: self)
+          @arel_table = table if Ractor.main?
+          table
+        end
       end
 
       def predicate_builder # :nodoc:

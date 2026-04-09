@@ -159,25 +159,67 @@ module Rails
         klass.view_context_class if klass.respond_to?(:view_context_class)
       end
 
-      # Freeze model classes (leaf-first)
-      ::ActiveRecord::Base.descendants.sort_by { |m| -m.ancestors.size }.each do |model|
-        model.freeze rescue nil
+      # Controllers (including Base and all ancestor modules)
+      seen_modules = {}
+      [::ActionController::Base, *::ActionController::Base.descendants].each do |klass|
+        klass.make_shareable! rescue nil
+        klass.ancestors.each do |ancestor|
+          next if ancestor == Object || ancestor == Kernel || ancestor == BasicObject
+          next if seen_modules[ancestor]
+          seen_modules[ancestor] = true
+          ancestor.make_shareable! rescue nil
+        end
       end
 
-      # Make all named modules shareable. Module#make_shareable!
-      # handles ivars, cvars, constants, and singleton class ivars.
-      # Skip internal Ruby/bundler/boot infrastructure.
-      ObjectSpace.each_object(Module) do |mod|
-        name = mod.name rescue next
-        next unless name
-        next if name.start_with?("Bootsnap", "Bundler", "RubyVM",
-                                 "Concurrent", "Kernel", "IO", "File",
-                                 "Dir", "Process", "Signal", "Thread",
-                                 "Encoding", "GC", "ObjectSpace",
-                                 "RubyGems", "Gem", "Psych", "JSON",
-                                 "Racc", "RDoc", "IRB", "Monitor")
-        next if name.include?("ConnectionAdapters") || name.include?("ConnectionHandler")
-        mod.make_shareable! rescue nil
+      # Walk the middleware stack and make each middleware's class
+      # shareable (including all ancestor modules).
+      middleware_app = @app
+      seen = {}
+      while middleware_app
+        klass = middleware_app.class
+        unless seen[klass]
+          seen[klass] = true
+          klass.ancestors.each do |ancestor|
+            next if ancestor == Object || ancestor == Kernel || ancestor == BasicObject
+            ancestor.make_shareable! rescue nil
+          end
+        end
+        middleware_app = middleware_app.respond_to?(:app) ? middleware_app.app : nil
+      end
+
+      # Framework classes used during request processing but not
+      # directly in the middleware chain.
+      [::ActionDispatch::Response, ::ActionDispatch::Request,
+       ::ActionView::Base, ::ActionView::LookupContext,
+       ::ActionView::LookupContext::DetailsKey,
+       ::ActionView::Template::Handlers,
+       ::ActionDispatch::ExceptionWrapper,
+       ::ActionDispatch::Http::FilterParameters,
+       ::ActionDispatch::ParamBuilder,
+       ::ActiveSupport::ErrorReporter,
+       ::ActiveSupport::Notifications,
+       ::ActiveSupport::LogSubscriber,
+       ::ActiveSupport::ExecutionContext,
+       ::ActiveSupport::ExecutionWrapper,
+       ::Mime, ::Rails::VERSION, ::ActionText::Content,
+       ::I18n, ::I18n::Config].each do |klass|
+        klass.make_shareable! rescue nil
+      end
+
+      # External gems in the request path
+      require "rack/multipart"
+      [::Rack::Headers, ::Rack::Mime, ::Rack::Utils,
+       ::Rack::MethodOverride, ::Rack::Request,
+       ::Rack::Multipart::Parser].each do |klass|
+        klass.make_shareable! rescue nil
+      end
+
+      ::Turbo.make_shareable! if defined?(::Turbo)
+
+      # Models LAST (other make_shareable! calls may reset model state)
+      ::ActiveRecord::Base.make_shareable! rescue nil
+      ::ActiveRecord::Base.descendants.sort_by { |m| -m.ancestors.size }.each do |model|
+        model.make_shareable! rescue nil
       end
 
       # Nil boot-time state not needed for request handling

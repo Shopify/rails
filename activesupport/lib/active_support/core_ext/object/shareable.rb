@@ -44,17 +44,18 @@ class Module
   # variables may hold non-shareable values. Override make_shareable!
   # to freeze the module (triggering any custom #freeze logic) and
   # then make each ivar value shareable.
+  MADE_SHAREABLE = {}.compare_by_identity # :nodoc:
+
   if defined?(Ractor)
     def make_shareable!
-      return self if @_made_shareable
-      @_made_shareable = true
-      freeze unless frozen?
+      return self if MADE_SHAREABLE.key?(self)
+      MADE_SHAREABLE[self] = true
+
       [self, singleton_class].each do |target|
         target.instance_variables.each do |ivar|
-          next if ivar == :@_made_shareable
           # Skip the connection handler -- it must stay mutable
           next if ivar.to_s.include?("connection_handler")
-          val = target.instance_variable_get(ivar)
+          val = target.instance_variable_get(ivar) rescue next
           next if val.equal?(nil) || val.shareable?
           val.make_shareable! rescue nil
         end
@@ -67,8 +68,11 @@ class Module
       constants(false).each do |const|
         next if autoload?(const)
         val = const_get(const, false) rescue next
-        next if val.is_a?(Module) || val.shareable?
-        val.make_shareable! rescue nil
+        if val.is_a?(Module)
+          val.make_shareable! rescue nil
+        elsif !val.shareable?
+          val.make_shareable! rescue nil
+        end
       end
       self
     end
