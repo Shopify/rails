@@ -208,6 +208,7 @@ module Rails
       end
       ::ActionController::Base.descendants.each do |klass|
         klass._prefixes if klass.respond_to?(:_prefixes)
+        klass.view_context_class if klass.respond_to?(:view_context_class)
       end
 
       # Freeze all class/module instance variables and class variables

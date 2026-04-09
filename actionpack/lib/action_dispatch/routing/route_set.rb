@@ -614,20 +614,45 @@ module ActionDispatch
             extend path_helpers
           end
 
+          # Store the route set and supports_path as module instance
+          # variables so methods can access them without closures
+          # (closures prevent methods from being called in non-main Ractors).
+          instance_variable_set(:@_url_helpers_routes, routes)
+          instance_variable_set(:@_url_helpers_supports_path, supports_path)
+
           # plus a singleton class method called _routes ...
           included do
-            redefine_singleton_method(:_routes) { routes }
+            class_eval <<~RUBY, __FILE__, __LINE__ + 1
+              def self._routes
+                ancestors.each do |mod|
+                  if mod.instance_variable_defined?(:@_url_helpers_routes)
+                    return mod.instance_variable_get(:@_url_helpers_routes)
+                  end
+                end
+                nil
+              end
+            RUBY
           end
 
-          # And an instance method _routes. Note that UrlFor (included in this module) add
-          # extra conveniences for working with @_routes.
-          define_method(:_routes) { @_routes || routes }
+          # And an instance method _routes.
+          module_eval <<~RUBY, __FILE__, __LINE__ + 1
+            def _routes
+              @_routes || self.class.ancestors.each do |mod|
+                if mod.instance_variable_defined?(:@_url_helpers_routes)
+                  return mod.instance_variable_get(:@_url_helpers_routes)
+                end
+              end
+            end
 
-          define_method(:_generate_paths_by_default) do
-            supports_path
-          end
-
-          private :_generate_paths_by_default
+            private def _generate_paths_by_default
+              self.class.ancestors.each do |mod|
+                if mod.instance_variable_defined?(:@_url_helpers_supports_path)
+                  return mod.instance_variable_get(:@_url_helpers_supports_path)
+                end
+              end
+              false
+            end
+          RUBY
 
           # If the module is included more than once (for example, in a subclass of an
           # ancestor that includes the module), ensure that the `_routes` singleton and
