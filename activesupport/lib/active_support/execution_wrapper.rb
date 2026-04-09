@@ -111,8 +111,10 @@ module ActiveSupport
       ActiveSupport.error_reporter
     end
 
+    @active_key = :"active_execution_wrapper_#{object_id}"
+
     def self.active_key # :nodoc:
-      @active_key ||= :"active_execution_wrapper_#{object_id}"
+      @active_key
     end
 
     def self.active? # :nodoc:
