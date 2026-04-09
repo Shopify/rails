@@ -59,7 +59,12 @@ module ActionView
       @view_context_mutex = Mutex.new
 
       def self.digest_cache(details)
-        @digest_cache[details_cache_key(details)] ||= Concurrent::Map.new
+        key = details_cache_key(details)
+        if @digest_cache.frozen?
+          @digest_cache.fetch(key) { Concurrent::Map.new }
+        else
+          @digest_cache[key] ||= Concurrent::Map.new
+        end
       end
 
       def self.details_cache_key(details)
@@ -70,7 +75,12 @@ module ActionView
               details[:formats] &= Template::Types.symbols
             end
           end
-          @details_keys[details] ||= TemplateDetails::Requested.new(**details)
+          requested = TemplateDetails::Requested.new(**details)
+          if @details_keys.frozen?
+            requested
+          else
+            @details_keys[details] ||= requested
+          end
         end
       end
 

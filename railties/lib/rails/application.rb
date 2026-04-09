@@ -147,6 +147,9 @@ module Rails
       # Freeze ActionView lookup context defaults
       ::ActionView::LookupContext::Accessors::DEFAULT_PROCS.make_shareable! rescue nil
 
+      # Eagerly initialize I18n available_locales
+      I18n.available_locales
+
       # I18n uses @@fallbacks class variable. Initialize it if unset,
       # and pre-compute fallbacks for the default locale so the
       # Fallbacks hash is populated before freezing.
