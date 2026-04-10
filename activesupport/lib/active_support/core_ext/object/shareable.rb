@@ -54,6 +54,7 @@ class Module
           val = target.instance_variable_get(ivar) rescue next
           next if val.equal?(nil) || val.shareable?
           next if val.is_a?(Thread::Mutex) || val.is_a?(Monitor) || val.is_a?(Proc)
+          next if defined?(ActiveRecord) && val.is_a?(ActiveRecord::Reflection::AbstractReflection)
           val.make_shareable! rescue nil
         end
       end
