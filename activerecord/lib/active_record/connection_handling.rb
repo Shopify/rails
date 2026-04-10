@@ -532,6 +532,14 @@ module ActiveRecord
       def pool_transaction_isolation_level
         nil
       end
+
+      def db_config
+        Ractor::Dispatch.main.run { ActiveRecord::Base.connection_pool.db_config }
+      end
+
+      def schema_cache
+        Ractor::Dispatch.main.run { ActiveRecord::Base.connection_pool.schema_cache }
+      end
     end
 
     attr_writer :connection_specification_name
