@@ -204,13 +204,6 @@ module ActiveModel
           algorithm
         end
 
-        # Store algorithm in a class-level registry so instance methods
-        # (defined via string eval) can look it up without closures.
-        unless respond_to?(:_secure_password_algorithms)
-          class_attribute :_secure_password_algorithms, default: {}
-        end
-        self._secure_password_algorithms = _secure_password_algorithms.merge(attribute => algorithm)
-
         include InstanceMethodsOnActivation.new(attribute, reset_token: reset_token, algorithm: algorithm)
 
         if validations
@@ -247,12 +240,9 @@ module ActiveModel
           reset_token_expires_in = reset_token.is_a?(Hash) ? reset_token[:expires_in] : DEFAULT_RESET_TOKEN_EXPIRES_IN
 
           silence_redefinition_of_method(:"#{attribute}_reset_token_expires_in")
-          expires_seconds = reset_token_expires_in.to_i
-          class_eval <<~RUBY, __FILE__, __LINE__ + 1
-            def #{attribute}_reset_token_expires_in
-              #{expires_seconds}
-            end
-          RUBY
+          rte = reset_token_expires_in.make_shareable!
+          define_method(:"#{attribute}_reset_token_expires_in",
+            -> { rte }.make_shareable!)
 
           generates_token_for :"#{attribute}_reset", expires_in: reset_token_expires_in do
             public_send(:"#{attribute}_salt")&.last(10)
@@ -278,49 +268,43 @@ module ActiveModel
         attr_reader attribute
         attr_accessor :"#{attribute}_confirmation", :"#{attribute}_challenge"
 
-        # Store the algorithm in a class-level registry so string-eval
-        # methods can look it up without capturing it in a closure
-        # (closures make define_method procs non-shareable across Ractors).
-        algorithm_key = :"_secure_password_algorithm_#{attribute}"
+        # Make the algorithm shareable so it can be captured by
+        # the lambdas below.
+        algorithm.make_shareable!
+        attr = attribute.to_sym
 
-        # Use string eval for all methods to avoid non-shareable Procs.
-        module_eval <<~RUBY, __FILE__, __LINE__ + 1
-          def #{attribute}=(unencrypted_password)
+        define_method("#{attribute}=",
+          -> (unencrypted_password) {
             if unencrypted_password.nil?
-              @#{attribute} = nil
-              self.#{attribute}_digest = nil
+              instance_variable_set(:"@#{attr}", nil)
+              public_send(:"#{attr}_digest=", nil)
             elsif !unencrypted_password.empty?
-              @#{attribute} = unencrypted_password
-              algo = self.class._secure_password_algorithms[:#{attribute}]
-              self.#{attribute}_digest = algo.hash_password(unencrypted_password)
+              instance_variable_set(:"@#{attr}", unencrypted_password)
+              public_send(:"#{attr}_digest=", algorithm.hash_password(unencrypted_password))
             end
-          end
+          }.make_shareable!)
 
-          def authenticate_#{attribute}(unencrypted_password)
-            attribute_digest = #{attribute}_digest
-            algo = self.class._secure_password_algorithms[:#{attribute}]
-            attribute_digest.present? && algo.verify_password(unencrypted_password, attribute_digest) && self
-          end
+        define_method("authenticate_#{attribute}",
+          -> (unencrypted_password) {
+            attribute_digest = public_send(:"#{attr}_digest")
+            attribute_digest.present? && algorithm.verify_password(unencrypted_password, attribute_digest) && self
+          }.make_shareable!)
 
-          def #{attribute}_salt
-            attribute_digest = #{attribute}_digest
-            algo = self.class._secure_password_algorithms[:#{attribute}]
-            attribute_digest.present? ? algo.password_salt(attribute_digest) : nil
-          end
+        define_method("#{attribute}_salt",
+          -> {
+            attribute_digest = public_send(:"#{attr}_digest")
+            attribute_digest.present? ? algorithm.password_salt(attribute_digest) : nil
+          }.make_shareable!)
 
-          def #{attribute}_algorithm
-            self.class._secure_password_algorithms[:#{attribute}].algorithm_name
-          end
-        RUBY
+        define_method("#{attribute}_algorithm",
+          -> { algorithm.algorithm_name }.make_shareable!)
 
         alias_method :authenticate, :authenticate_password if attribute == :password
 
         if reset_token
-          module_eval <<~RUBY, __FILE__, __LINE__ + 1
-            def #{attribute}_reset_token
-              generate_token_for(:#{attribute}_reset)
-            end
-          RUBY
+          reset_attr = :"#{attribute}_reset"
+          define_method("#{attribute}_reset_token",
+            -> { generate_token_for(reset_attr) }.make_shareable!)
         end
       end
     end

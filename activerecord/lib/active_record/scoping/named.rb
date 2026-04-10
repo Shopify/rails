@@ -170,38 +170,26 @@ module ActiveRecord
 
           extension = Module.new(&block) if block
 
-          # Store the body and extension in a class-level registry so
-          # the scope method can be defined with string eval (no
-          # captured Proc in the closure — Ractor-safe).
-          scope_key = name.to_s.freeze
-          @_scope_bodies ||= {}
-          @_scope_bodies[scope_key] = body.frozen? ? body : (Ractor.make_shareable(body) rescue body)
-          @_scope_extensions ||= {}
-          @_scope_extensions[scope_key] = extension if extension
+          # Make the scope body shareable so the define_method lambda
+          # can be shared across Ractors.
+          body.make_shareable! rescue nil
 
           if body.respond_to?(:to_proc)
-            singleton_class.class_eval <<~RUBY, __FILE__, __LINE__ + 1
-              def #{name}(*args)
-                body = @_scope_bodies["#{name}"]
+            singleton_class.define_method(name,
+              -> (*args) {
                 scope = all._exec_scope(*args, &body)
-                ext = @_scope_extensions && @_scope_extensions["#{name}"]
-                scope = scope.extending(ext) if ext
+                scope = scope.extending(extension) if extension
                 scope
-              end
-              ruby2_keywords :#{name}
-            RUBY
+              }.make_shareable!)
           else
-            singleton_class.class_eval <<~RUBY, __FILE__, __LINE__ + 1
-              def #{name}(*args)
-                body = @_scope_bodies["#{name}"]
+            singleton_class.define_method(name,
+              -> (*args) {
                 scope = body.call(*args) || all
-                ext = @_scope_extensions && @_scope_extensions["#{name}"]
-                scope = scope.extending(ext) if ext
+                scope = scope.extending(extension) if extension
                 scope
-              end
-              ruby2_keywords :#{name}
-            RUBY
+              }.make_shareable!)
           end
+          singleton_class.send(:ruby2_keywords, name)
 
           generate_relation_method(name)
         end
