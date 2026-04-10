@@ -14,6 +14,15 @@ module ActiveModel
 
     alias_method :cache_key, :collection
 
+    def freeze
+      begin
+        i18n_keys
+        human
+      rescue
+      end
+      super
+    end
+
     ##
     # :method: ==
     #

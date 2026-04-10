@@ -21,7 +21,14 @@ module ActionView
           def field_type
             @field_type ||= name.split("::").last.sub("Field", "").downcase
           end
+
+          def inherited(subclass)
+            super
+            subclass.field_type  # eagerly compute for Ractor safety
+          end
         end
+
+        field_type  # eagerly compute for this class too
 
         private
           def field_type
