@@ -173,17 +173,18 @@ module ActiveRecord
           # Store the body and extension in a class-level registry so
           # the scope method can be defined with string eval (no
           # captured Proc in the closure — Ractor-safe).
+          scope_key = name.to_s.freeze
           @_scope_bodies ||= {}
-          @_scope_bodies[name] = body.frozen? ? body : (Ractor.make_shareable(body) rescue body)
+          @_scope_bodies[scope_key] = body.frozen? ? body : (Ractor.make_shareable(body) rescue body)
           @_scope_extensions ||= {}
-          @_scope_extensions[name] = extension if extension
+          @_scope_extensions[scope_key] = extension if extension
 
           if body.respond_to?(:to_proc)
             singleton_class.class_eval <<~RUBY, __FILE__, __LINE__ + 1
               def #{name}(*args)
-                body = @_scope_bodies[:#{name}]
+                body = @_scope_bodies["#{name}"]
                 scope = all._exec_scope(*args, &body)
-                ext = @_scope_extensions && @_scope_extensions[:#{name}]
+                ext = @_scope_extensions && @_scope_extensions["#{name}"]
                 scope = scope.extending(ext) if ext
                 scope
               end
@@ -192,9 +193,9 @@ module ActiveRecord
           else
             singleton_class.class_eval <<~RUBY, __FILE__, __LINE__ + 1
               def #{name}(*args)
-                body = @_scope_bodies[:#{name}]
+                body = @_scope_bodies["#{name}"]
                 scope = body.call(*args) || all
-                ext = @_scope_extensions && @_scope_extensions[:#{name}]
+                ext = @_scope_extensions && @_scope_extensions["#{name}"]
                 scope = scope.extending(ext) if ext
                 scope
               end

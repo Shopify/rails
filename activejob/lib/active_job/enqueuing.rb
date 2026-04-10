@@ -78,13 +78,24 @@ module ActiveJob
       #  class NotificationJob < ApplicationJob
       #    self.enqueue_after_transaction_commit = false
       #  end
-      def perform_later(...)
-        job = job_or_instantiate(...)
-        enqueue_result = job.enqueue
+      def perform_later(*args, **kwargs, &block)
+        if !Ractor.main?
+          # Queue adapters hold stateful connections that aren't
+          # Ractor-safe. Dispatch enqueueing to the main Ractor.
+          klass = self
+          frozen_args = args.map { |a| a.frozen? ? a : a.dup.freeze }.freeze
+          frozen_kwargs = kwargs.transform_values { |v| v.frozen? ? v : v.dup.freeze }.freeze
+          ::Ractor::Dispatch.main.run do
+            klass.perform_later(*frozen_args, **frozen_kwargs)
+          end
+        else
+          job = job_or_instantiate(*args, **kwargs)
+          enqueue_result = job.enqueue
 
-        yield job if block_given?
+          yield job if block_given?
 
-        enqueue_result
+          enqueue_result
+        end
       end
 
       private

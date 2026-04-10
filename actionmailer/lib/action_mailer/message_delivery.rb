@@ -143,9 +143,18 @@ module ActionMailer
     #   Notifier.welcome(User.first).deliver_now!
     #
     def deliver_now!
-      processed_mailer.handle_exceptions do
-        processed_mailer.run_callbacks(:deliver) do
-          message.deliver!
+      if !Ractor.main?
+        mailer_class = @mailer_class
+        action = @action
+        args = @args.map { |a| a.frozen? ? a : a.dup.freeze }.freeze
+        ::Ractor::Dispatch.main.run do
+          mailer_class.public_send(action, *args).deliver_now!
+        end
+      else
+        processed_mailer.handle_exceptions do
+          processed_mailer.run_callbacks(:deliver) do
+            message.deliver!
+          end
         end
       end
     end
@@ -155,9 +164,21 @@ module ActionMailer
     #   Notifier.welcome(User.first).deliver_now
     #
     def deliver_now
-      processed_mailer.handle_exceptions do
-        processed_mailer.run_callbacks(:deliver) do
-          message.deliver
+      if !Ractor.main?
+        # The mail gem's Mail::Configuration singleton is not
+        # Ractor-safe. Dispatch the entire delivery to the main
+        # Ractor where the singleton is accessible.
+        mailer_class = @mailer_class
+        action = @action
+        args = @args.map { |a| a.frozen? ? a : a.dup.freeze }.freeze
+        ::Ractor::Dispatch.main.run do
+          mailer_class.public_send(action, *args).deliver_now
+        end
+      else
+        processed_mailer.handle_exceptions do
+          processed_mailer.run_callbacks(:deliver) do
+            message.deliver
+          end
         end
       end
     end

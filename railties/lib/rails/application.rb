@@ -136,6 +136,16 @@ module Rails
 
       # Restore the connection handler
       ::ActiveRecord::Base.default_connection_handler = saved_handler
+
+      # Make mailer and job classes shareable
+      if defined?(::ActionMailer::Base)
+        ::ActionMailer::Base.descendants.each { |m| m.make_shareable! rescue nil }
+        ::ActionMailer::Base.make_shareable! rescue nil
+      end
+      if defined?(::ActiveJob::Base)
+        ::ActiveJob::Base.descendants.each { |j| j.make_shareable! rescue nil }
+        ::ActiveJob::Base.make_shareable! rescue nil
+      end
     end
 
     def freeze
@@ -148,6 +158,10 @@ module Rails
       ::ActiveSupport.error_reporter.make_shareable!
       ::ActiveSupport.event_reporter.make_shareable! rescue nil
       ::ActiveSupport::Inflector::Inflections.make_shareable!
+
+      # Warm up the I18n transliterator cache so it's populated before
+      # the backend gets frozen. Otherwise, lazy init fails in Ractors.
+      I18n.transliterate("test") rescue nil
       ::ActiveSupport::Messages::Metadata::ENVELOPE_SERIALIZERS.freeze
       ::ActiveSupport::Messages::Metadata::TIMESTAMP_SERIALIZERS.freeze
       ::ActionView::PathRegistry.make_shareable!
