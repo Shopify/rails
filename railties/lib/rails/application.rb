@@ -121,6 +121,12 @@ module Rails
       ractor_logger = ActiveSupport::RactorLocalLogger.new(Rails.logger)
       Rails.logger = ractor_logger
       @app_env_config["action_dispatch.logger"] = ractor_logger
+      # Update component loggers that cached the old BroadcastLogger
+      ::ActiveRecord::Base.logger = ractor_logger if defined?(::ActiveRecord::Base)
+      ::ActionController::Base.logger = ractor_logger if defined?(::ActionController::Base)
+      ::ActionMailer::Base.logger = ractor_logger if defined?(::ActionMailer::Base)
+      ::ActiveJob::Base.logger = ractor_logger if defined?(::ActiveJob::Base)
+      ::ActionView::Base.logger = ractor_logger if defined?(::ActionView::Base)
 
       # Save the connection handler (nilled during AR::Base.make_shareable!)
       saved_handler = ::ActiveRecord::Base.default_connection_handler
