@@ -143,6 +143,16 @@ module Rails
       # Restore the connection handler
       ::ActiveRecord::Base.default_connection_handler = saved_handler
 
+      # Eagerly resolve CurrentAttributes keys before freeze
+      if defined?(::ActiveSupport::CurrentAttributes)
+        ::ActiveSupport::CurrentAttributes.descendants.each do |klass|
+          klass.send(:current_instances_key)
+          klass.send(:generated_attribute_methods)
+          klass.make_shareable! rescue nil
+        end
+        ::ActiveSupport::CurrentAttributes.make_shareable! rescue nil
+      end
+
       # Make mailer and job classes shareable
       if defined?(::ActionMailer::Base)
         ::ActionMailer::Base.descendants.each { |m| m.make_shareable! rescue nil }
@@ -161,6 +171,7 @@ module Rails
       # Prepare framework components for sharing. Each class's
       # freeze/make_shareable! handles its own internal state.
       require "rack/multipart"
+
       ::ActiveSupport.error_reporter.make_shareable!
       ::ActiveSupport.event_reporter.make_shareable! rescue nil
       ::ActiveSupport::Inflector::Inflections.make_shareable!
