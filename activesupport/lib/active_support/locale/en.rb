@@ -4,7 +4,7 @@
   en: {
     number: {
       nth: {
-        ordinals: lambda do |_key, options|
+        ordinals: shareable_proc { |_key, options|
           number = options[:number]
           case number
           when 1; "st"
@@ -21,12 +21,12 @@
             else    "th"
             end
           end
-        end,
+        },
 
-        ordinalized: lambda do |_key, options|
+        ordinalized: shareable_proc { |_key, options|
           number = options[:number]
           "#{number}#{ActiveSupport::Inflector.ordinal(number)}"
-        end
+        }
       }
     }
   }

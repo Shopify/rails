@@ -150,6 +150,14 @@ module Rails
       ::ActiveRecord::Relation::FromClause.empty
       ::ActionView::Template::Handlers.extensions
       I18n.available_locales = I18n.available_locales
+      # Force I18n lazy class variables to be populated
+      I18n.locale_available?(:en)
+      I18n.backend  # forces @@backend
+      I18n.default_separator  # forces @@default_separator
+      I18n.exception_handler  # forces @@exception_handler
+      I18n.reserved_keys_pattern  # forces @reserved_keys_pattern
+      I18n.const_get(:INTERPOLATION_PATTERNS_CACHE).make_shareable! rescue nil
+      I18n.config.interpolation_patterns  # forces @@interpolation_patterns
       if I18n.class_variable_defined?(:@@fallbacks)
         fallbacks = I18n.class_variable_get(:@@fallbacks)
         if fallbacks.respond_to?(:[])
@@ -205,6 +213,24 @@ module Rails
        ::ActionView::Template,
        ::ActionView::Template::Handlers,
        ::ActionView::Helpers::TagHelper,
+       ::ActionView::Helpers::UrlHelper,
+       ::ActionView::Helpers::ControllerHelper,
+       ::ActionView::Helpers::FormHelper,
+       ::ActionView::Helpers::FormTagHelper,
+       ::ActionView::Helpers::Tags::TextField,
+       ::ActionView::Helpers::Tags::TextArea,
+       ::ActionView::Helpers::Tags::NumberField,
+       ::ActionView::Helpers::Tags::DateField,
+       ::ActionView::Helpers::Tags::TimeField,
+       ::ActionView::Helpers::Tags::DatetimeLocalField,
+       ::ActionView::Helpers::Tags::MonthField,
+       ::ActionView::Helpers::Tags::WeekField,
+       ::ActionView::Helpers::Tags::EmailField,
+       ::ActionView::Helpers::Tags::UrlField,
+       ::ActionView::Helpers::Tags::SearchField,
+       ::ActionView::Helpers::Tags::TelField,
+       ::ActionView::Helpers::Tags::PasswordField,
+       ::ActionView::Helpers::Tags::ColorField,
        ::ActionView::AbstractRenderer,
        ::ActionController::Parameters,
        ::ActiveRecord::Relation::WhereClause, ::Time,

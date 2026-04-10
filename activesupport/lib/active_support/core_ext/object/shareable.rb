@@ -115,7 +115,7 @@ Concurrent::Map.prepend(Module.new do
 
   def [](key)
     if frozen?
-      @backend[key] || {}
+      @backend[key]
     else
       super
     end
