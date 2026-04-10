@@ -278,6 +278,7 @@ module Rails
        ::ActiveSupport::ExecutionContext,
        ::ActiveSupport::ExecutionWrapper,
        ::Mime, ::Rails::VERSION, ::ActionText::Content,
+       ::ActiveSupport::JSON::Encoding,
        ::I18n, ::I18n::Config].each do |klass|
         klass.make_shareable! rescue nil
       end
