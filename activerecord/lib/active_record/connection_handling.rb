@@ -466,6 +466,22 @@ module ActiveRecord
         Ractor::Dispatch.main.run { engine.with_connection { |c| c.to_sql(arel, binds) }.freeze }
       end
 
+      def update(arel, name = nil, binds = [])
+        sql = arel.respond_to?(:to_sql) ? arel.to_sql.freeze : (arel.frozen? ? arel : arel.dup.freeze)
+        write_name = (name || "SQL").freeze
+        Ractor::Dispatch.main.run do
+          ActiveRecord::Base.with_connection { |c| c.update(sql, write_name) }
+        end
+      end
+
+      def delete(arel, name = nil, binds = [])
+        sql = arel.respond_to?(:to_sql) ? arel.to_sql.freeze : (arel.frozen? ? arel : arel.dup.freeze)
+        write_name = (name || "SQL").freeze
+        Ractor::Dispatch.main.run do
+          ActiveRecord::Base.with_connection { |c| c.delete(sql, write_name) }
+        end
+      end
+
       def visitor
         Ractor::Dispatch.main.run { ActiveRecord::Base.with_connection { |c| c.visitor } }
       end

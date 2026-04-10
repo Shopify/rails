@@ -363,10 +363,15 @@ module ActiveRecord
         end
 
         def execute(values, connection, async: false, &block)
-          relation = @block.call(StatementCache::Params.new)
-          # Build the WHERE clause from bind values
-          relation.to_a.each(&block) if block
-          relation
+          # Build a substitute that returns actual values instead of
+          # bind param placeholders.
+          flat_values = values.flatten
+          sub = Object.new
+          sub.define_singleton_method(:bind) { flat_values.shift }
+          relation = @block.call(sub)
+          records = relation.to_a
+          records.each(&block) if block
+          records
         end
       end
 
