@@ -487,7 +487,10 @@ module ActiveRecord
       end
 
       def transaction(**options, &block)
-        yield if block
+        return unless block
+        yield
+      rescue ActiveRecord::Rollback
+        # Swallow Rollback like a real transaction does.
       end
 
       # Transaction record tracking -- no-op in Ractor context
