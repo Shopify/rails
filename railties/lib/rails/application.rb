@@ -156,8 +156,37 @@ module Rails
       I18n.default_separator  # forces @@default_separator
       I18n.exception_handler  # forces @@exception_handler
       I18n.reserved_keys_pattern  # forces @reserved_keys_pattern
-      I18n.const_get(:INTERPOLATION_PATTERNS_CACHE).make_shareable! rescue nil
+      # Warm up and patch the I18n interpolation pattern cache.
+      # It uses a Hash with a default proc that computes Regexp.union.
+      # After freeze, the default proc is stripped. Patch the lookup
+      # to compute inline for unseen patterns.
+      cache = I18n.const_get(:INTERPOLATION_PATTERNS_CACHE)
+      cache[I18n.config.interpolation_patterns]  # warm up default
+      cache.make_shareable! rescue nil
       I18n.config.interpolation_patterns  # forces @@interpolation_patterns
+
+      # Patch I18n.normalize_key to handle frozen caches.
+      ::I18n.instance_eval <<~RUBY
+        def normalize_key(key, separator)
+          cache = (@@normalized_key_cache[separator] rescue nil)
+          if cache
+            cached = (cache[key] rescue nil)
+            return cached if cached
+          end
+
+          case key
+          when Array
+            key.flat_map { |k| normalize_key(k, separator) }
+          else
+            keys = key.to_s.split(separator)
+            keys.delete("")
+            keys.map! { |k| k =~ /\\A[-+]?([1-9]\\d*|0)\\z/ ? k.to_i : k.to_sym }
+            keys
+          end
+        end
+      RUBY
+
+
       if I18n.class_variable_defined?(:@@fallbacks)
         fallbacks = I18n.class_variable_get(:@@fallbacks)
         if fallbacks.respond_to?(:[])
