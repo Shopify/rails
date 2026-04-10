@@ -131,7 +131,27 @@ module ActiveRecord
 
       def self.connection_handler
         ActiveSupport::IsolatedExecutionState[:active_record_connection_handler] ||
-          (Ractor.main? ? default_connection_handler : nil)
+          (Ractor.main? ? default_connection_handler : NullConnectionHandler)
+      end
+
+      # Null object returned by connection_handler in non-main Ractors
+      # where the real handler (with Mutexes and pools) isn't accessible.
+      # Responds to all handler methods as no-ops so callers don't need
+      # nil guards.
+      module NullConnectionHandler # :nodoc:
+        extend self
+
+        def each_connection_pool
+          [].each
+        end
+
+        def retrieve_connection_pool(*)
+          ConnectionHandling::RactorPoolProxy.instance
+        end
+
+        def establish_connection(*); end
+        def connected?(*) = false
+        def clear_all_connections!(*); end
       end
 
       def self.connection_handler=(handler)
