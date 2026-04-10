@@ -86,7 +86,7 @@ module ActionController
     #       end
     #     end
     def self.add(key, &block)
-      define_method(_render_with_renderer_method_name(key), &block)
+      define_method(_render_with_renderer_method_name(key), &shareable_proc(&block))
       RENDERERS << key.to_sym
     end
 
@@ -166,41 +166,47 @@ module ActionController
       nil
     end
 
-    add :json do |json, options|
-      json_options = options.except(:callback, :content_type, :status)
-      json_options[:escape] ||= false if !self.class.escape_json_responses? && options[:callback].blank?
-      json = json.to_json(json_options) unless json.kind_of?(String)
+    # Built-in renderers defined with string eval for Ractor safety
+    # (define_method with a block creates non-shareable Procs).
+    RENDERERS << :json
+    class_eval <<~RUBY, __FILE__, __LINE__ + 1
+      def _render_with_renderer_json(json, options)
+        json_options = options.except(:callback, :content_type, :status)
+        json_options[:escape] ||= false if !self.class.escape_json_responses? && options[:callback].blank?
+        json = json.to_json(json_options) unless json.kind_of?(String)
 
-      if options[:callback].present?
-        if media_type.nil? || media_type == Mime[:json]
-          self.content_type = :js
+        if options[:callback].present?
+          if media_type.nil? || media_type == Mime[:json]
+            self.content_type = :js
+          end
+
+          "/**/\#{options[:callback]}(\#{json})"
+        else
+          self.content_type = :json if media_type.nil?
+          json
         end
-
-        "/**/#{options[:callback]}(#{json})"
-      else
-        self.content_type = :json if media_type.nil?
-        json
       end
-    end
 
-    add :js do |js, options|
-      self.content_type = :js if media_type.nil?
-      js.respond_to?(:to_js) ? js.to_js(options) : js
-    end
+      def _render_with_renderer_js(js, options)
+        self.content_type = :js if media_type.nil?
+        js.respond_to?(:to_js) ? js.to_js(options) : js
+      end
 
-    add :xml do |xml, options|
-      self.content_type = :xml if media_type.nil?
-      xml.respond_to?(:to_xml) ? xml.to_xml(options) : xml
-    end
+      def _render_with_renderer_xml(xml, options)
+        self.content_type = :xml if media_type.nil?
+        xml.respond_to?(:to_xml) ? xml.to_xml(options) : xml
+      end
 
-    add :markdown do |md, options|
-      self.content_type = :md if media_type.nil?
-      md.respond_to?(:to_markdown) ? md.to_markdown : md
-    end
+      def _render_with_renderer_markdown(md, options)
+        self.content_type = :md if media_type.nil?
+        md.respond_to?(:to_markdown) ? md.to_markdown : md
+      end
 
-    add :svg do |svg, options|
-      self.content_type = :svg if media_type.nil?
-      svg.respond_to?(:to_svg) ? svg.to_svg : svg
-    end
+      def _render_with_renderer_svg(svg, options)
+        self.content_type = :svg if media_type.nil?
+        svg.respond_to?(:to_svg) ? svg.to_svg : svg
+      end
+    RUBY
+    RENDERERS.merge([:js, :xml, :markdown, :svg])
   end
 end
