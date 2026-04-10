@@ -83,19 +83,19 @@ module ActiveJob
           # Queue adapters hold stateful connections that aren't
           # Ractor-safe. Dispatch enqueueing to the main Ractor.
           klass = self
-          frozen_args = args.map { |a| a.frozen? ? a : a.dup.freeze }.freeze
-          frozen_kwargs = kwargs.transform_values { |v| v.frozen? ? v : v.dup.freeze }.freeze
-          ::Ractor::Dispatch.main.run do
-            klass.perform_later(*frozen_args, **frozen_kwargs)
+          shareable_args = args.dup.make_shareable!
+          shareable_kwargs = kwargs.dup.make_shareable!
+          return ::Ractor::Dispatch.main.run do
+            klass.perform_later(*shareable_args, **shareable_kwargs)
           end
-        else
-          job = job_or_instantiate(*args, **kwargs)
-          enqueue_result = job.enqueue
-
-          yield job if block_given?
-
-          enqueue_result
         end
+
+        job = job_or_instantiate(*args, **kwargs)
+        enqueue_result = job.enqueue
+
+        yield job if block_given?
+
+        enqueue_result
       end
 
       private

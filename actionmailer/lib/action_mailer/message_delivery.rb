@@ -144,17 +144,19 @@ module ActionMailer
     #
     def deliver_now!
       if !Ractor.main?
-        mailer_class = @mailer_class
-        action = @action
-        args = @args.map { |a| a.frozen? ? a : a.dup.freeze }.freeze
-        ::Ractor::Dispatch.main.run do
-          mailer_class.public_send(action, *args).deliver_now!
+        # The mail gem's Mail::Configuration singleton is not
+        # Ractor-safe. Dispatch delivery to the main Ractor,
+        # reconstructing the mailer from its class, action, and args.
+        klass, action = @mailer_class, @action
+        args = @args.dup.make_shareable!
+        return ::Ractor::Dispatch.main.run do
+          klass.public_send(action, *args).deliver_now!
         end
-      else
-        processed_mailer.handle_exceptions do
-          processed_mailer.run_callbacks(:deliver) do
-            message.deliver!
-          end
+      end
+
+      processed_mailer.handle_exceptions do
+        processed_mailer.run_callbacks(:deliver) do
+          message.deliver!
         end
       end
     end
@@ -165,20 +167,16 @@ module ActionMailer
     #
     def deliver_now
       if !Ractor.main?
-        # The mail gem's Mail::Configuration singleton is not
-        # Ractor-safe. Dispatch the entire delivery to the main
-        # Ractor where the singleton is accessible.
-        mailer_class = @mailer_class
-        action = @action
-        args = @args.map { |a| a.frozen? ? a : a.dup.freeze }.freeze
-        ::Ractor::Dispatch.main.run do
-          mailer_class.public_send(action, *args).deliver_now
+        klass, action = @mailer_class, @action
+        args = @args.dup.make_shareable!
+        return ::Ractor::Dispatch.main.run do
+          klass.public_send(action, *args).deliver_now
         end
-      else
-        processed_mailer.handle_exceptions do
-          processed_mailer.run_callbacks(:deliver) do
-            message.deliver
-          end
+      end
+
+      processed_mailer.handle_exceptions do
+        processed_mailer.run_callbacks(:deliver) do
+          message.deliver
         end
       end
     end
