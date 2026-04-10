@@ -170,20 +170,37 @@ module ActiveRecord
 
           extension = Module.new(&block) if block
 
+          # Store the body and extension in a class-level registry so
+          # the scope method can be defined with string eval (no
+          # captured Proc in the closure — Ractor-safe).
+          @_scope_bodies ||= {}
+          @_scope_bodies[name] = body.frozen? ? body : (Ractor.make_shareable(body) rescue body)
+          @_scope_extensions ||= {}
+          @_scope_extensions[name] = extension if extension
+
           if body.respond_to?(:to_proc)
-            singleton_class.define_method(name) do |*args|
-              scope = all._exec_scope(*args, &body)
-              scope = scope.extending(extension) if extension
-              scope
-            end
+            singleton_class.class_eval <<~RUBY, __FILE__, __LINE__ + 1
+              def #{name}(*args)
+                body = @_scope_bodies[:#{name}]
+                scope = all._exec_scope(*args, &body)
+                ext = @_scope_extensions && @_scope_extensions[:#{name}]
+                scope = scope.extending(ext) if ext
+                scope
+              end
+              ruby2_keywords :#{name}
+            RUBY
           else
-            singleton_class.define_method(name) do |*args|
-              scope = body.call(*args) || all
-              scope = scope.extending(extension) if extension
-              scope
-            end
+            singleton_class.class_eval <<~RUBY, __FILE__, __LINE__ + 1
+              def #{name}(*args)
+                body = @_scope_bodies[:#{name}]
+                scope = body.call(*args) || all
+                ext = @_scope_extensions && @_scope_extensions[:#{name}]
+                scope = scope.extending(ext) if ext
+                scope
+              end
+              ruby2_keywords :#{name}
+            RUBY
           end
-          singleton_class.send(:ruby2_keywords, name)
 
           generate_relation_method(name)
         end
