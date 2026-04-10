@@ -161,6 +161,22 @@ module ActiveRecord
     #     PolymorphicReflection
     #     RuntimeReflection
     class AbstractReflection # :nodoc:
+      # Eagerly resolve all lazy fields before freezing so they're
+      # available after the reflection is made Ractor-shareable.
+      def freeze
+        class_name rescue nil
+        klass rescue nil
+        foreign_key rescue nil
+        association_foreign_key rescue nil
+        has_inverse? rescue nil
+        inverse_of rescue nil
+        check_validity_of_inverse! rescue nil
+        check_validity! rescue nil
+        active_record_primary_key rescue nil
+        join_foreign_key rescue nil
+        super
+      end
+
       def initialize
         @class_name = nil
         @counter_cache_column = nil
