@@ -22,8 +22,8 @@ module ActiveSupport
       ]
 
       ActiveSupport.on_load(:message_pack) do
-        ENVELOPE_SERIALIZERS << ActiveSupport::MessagePack
-        TIMESTAMP_SERIALIZERS << ActiveSupport::MessagePack
+        ENVELOPE_SERIALIZERS << ActiveSupport::MessagePack unless ENVELOPE_SERIALIZERS.frozen?
+        TIMESTAMP_SERIALIZERS << ActiveSupport::MessagePack unless TIMESTAMP_SERIALIZERS.frozen?
       end
 
       private

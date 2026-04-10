@@ -9,10 +9,10 @@ module Rails
 
     def initialize
       super
+      # Eagerly resolve @root so the filter Proc doesn't need to
+      # mutate self (which fails after freeze/Ractor.make_shareable).
+      @root = Rails.root && "#{Rails.root}/"
       add_filter do |line|
-        # We may be called before Rails.root is assigned.
-        # When that happens we fallback to not truncating.
-        @root ||= Rails.root && "#{Rails.root}/"
         @root && line.start_with?(@root) ? line.from(@root.size) : line
       end
       add_filter do |line|

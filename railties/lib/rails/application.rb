@@ -144,6 +144,8 @@ module Rails
       ::ActiveSupport.error_reporter.make_shareable!
       ::ActiveSupport.event_reporter.make_shareable! rescue nil
       ::ActiveSupport::Inflector::Inflections.make_shareable!
+      ::ActiveSupport::Messages::Metadata::ENVELOPE_SERIALIZERS.freeze
+      ::ActiveSupport::Messages::Metadata::TIMESTAMP_SERIALIZERS.freeze
       ::ActionView::PathRegistry.make_shareable!
       ::ActionView::LookupContext::DetailsKey.view_context_class
       ::ActionView::LookupContext::Accessors::DEFAULT_PROCS.make_shareable! rescue nil
@@ -233,7 +235,7 @@ module Rails
             ancestor.make_shareable! rescue nil
           end
         end
-        middleware_app = middleware_app.respond_to?(:app) ? middleware_app.app : nil
+        middleware_app = middleware_app.instance_variable_get(:@app) rescue nil
       end
 
       # Clear the constant-traversal guard so framework classes

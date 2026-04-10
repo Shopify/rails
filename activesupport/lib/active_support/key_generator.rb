@@ -64,7 +64,13 @@ module ActiveSupport
 
     # Returns a derived key suitable for use.
     def generate_key(*args)
-      @cache_keys[args.join("|")] ||= @key_generator.generate_key(*args)
+      cache_key = args.join("|")
+      @cache_keys[cache_key] || if frozen?
+        # After freeze the cache is immutable; derive on demand.
+        @key_generator.generate_key(*args)
+      else
+        @cache_keys[cache_key] = @key_generator.generate_key(*args)
+      end
     end
 
     def freeze
