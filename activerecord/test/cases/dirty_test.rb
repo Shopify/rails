@@ -993,6 +993,41 @@ class DirtyTest < ActiveRecord::TestCase
     assert parrot.breed_changed?(from: 0, to: 1)
   end
 
+  private
+    def with_partial_writes(klass, on = true)
+      old_inserts = klass.partial_inserts?
+      old_updates = klass.partial_updates?
+      klass.partial_inserts = on
+      klass.partial_updates = on
+      yield
+    ensure
+      klass.partial_inserts = old_inserts
+      klass.partial_updates = old_updates
+    end
+
+    def check_pirate_after_save_failure(pirate)
+      assert_predicate pirate, :changed?
+      assert_predicate pirate, :parrot_id_changed?
+      assert_equal %w(parrot_id), pirate.changed
+      assert_nil pirate.parrot_id_was
+    end
+end
+
+class TransactionChangesDirtyTest < ActiveRecord::TestCase
+  # These tests require real transaction boundaries so that committed! is
+  # called between independent operations.  Transactional test wrapping
+  # encloses the entire test in a single joinable transaction, which means
+  # committed! is never called and transaction_changes accumulates from the
+  # very first save — correct behaviour, but incompatible with assertions
+  # that assume each save/transaction block is independent.
+  self.use_transactional_tests = false
+
+  setup do
+    Person.delete_all
+    Parrot.delete_all
+    Topic.delete_all
+  end
+
   test "transaction_change_to_attribute? returns whether a change occurred in the transaction" do
     person = Person.create!(first_name: "Sean")
 
@@ -1189,23 +1224,4 @@ class DirtyTest < ActiveRecord::TestCase
     # transaction_changes spans the full transaction: Sean -> Final
     assert_equal ["Sean", "Final"], person.transaction_changes[:first_name]
   end
-
-  private
-    def with_partial_writes(klass, on = true)
-      old_inserts = klass.partial_inserts?
-      old_updates = klass.partial_updates?
-      klass.partial_inserts = on
-      klass.partial_updates = on
-      yield
-    ensure
-      klass.partial_inserts = old_inserts
-      klass.partial_updates = old_updates
-    end
-
-    def check_pirate_after_save_failure(pirate)
-      assert_predicate pirate, :changed?
-      assert_predicate pirate, :parrot_id_changed?
-      assert_equal %w(parrot_id), pirate.changed
-      assert_nil pirate.parrot_id_was
-    end
 end
