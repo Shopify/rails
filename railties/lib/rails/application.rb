@@ -142,6 +142,7 @@ module Rails
       # freeze/make_shareable! handles its own internal state.
       require "rack/multipart"
       ::ActiveSupport.error_reporter.make_shareable!
+      ::ActiveSupport.event_reporter.make_shareable! rescue nil
       ::ActiveSupport::Inflector::Inflections.make_shareable!
       ::ActionView::PathRegistry.make_shareable!
       ::ActionView::LookupContext::DetailsKey.view_context_class
@@ -201,6 +202,11 @@ module Rails
         klass._prefixes if klass.respond_to?(:_prefixes)
         klass.view_context_class if klass.respond_to?(:view_context_class)
       end
+
+      # Make the Executor and Reloader shareable (anonymous subclasses
+      # of ExecutionWrapper with their own callback chains).
+      executor.make_shareable! rescue nil
+      reloader.make_shareable! rescue nil
 
       # Controllers (including Base and all ancestor modules)
       seen_modules = {}

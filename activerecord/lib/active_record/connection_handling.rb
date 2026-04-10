@@ -561,12 +561,7 @@ module ActiveRecord
     end
 
     def connection_pool
-      handler = connection_handler
-      if handler.nil? && !Ractor.main? && defined?(Ractor::Dispatch)
-        # In non-main Ractors, return a proxy that dispatches pool operations
-        return RactorConnectionProxy.instance.pool
-      end
-      handler.retrieve_connection_pool(connection_specification_name, role: current_role, shard: current_shard, strict: true)
+      connection_handler.retrieve_connection_pool(connection_specification_name, role: current_role, shard: current_shard, strict: true)
     end
 
     def retrieve_connection
