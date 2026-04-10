@@ -204,6 +204,13 @@ module ActiveModel
           algorithm
         end
 
+        # Store algorithm in a class-level registry so instance methods
+        # (defined via string eval) can look it up without closures.
+        unless respond_to?(:_secure_password_algorithms)
+          class_attribute :_secure_password_algorithms, default: {}
+        end
+        self._secure_password_algorithms = _secure_password_algorithms.merge(attribute => algorithm)
+
         include InstanceMethodsOnActivation.new(attribute, reset_token: reset_token, algorithm: algorithm)
 
         if validations
@@ -240,7 +247,12 @@ module ActiveModel
           reset_token_expires_in = reset_token.is_a?(Hash) ? reset_token[:expires_in] : DEFAULT_RESET_TOKEN_EXPIRES_IN
 
           silence_redefinition_of_method(:"#{attribute}_reset_token_expires_in")
-          define_method(:"#{attribute}_reset_token_expires_in") { reset_token_expires_in }
+          expires_seconds = reset_token_expires_in.to_i
+          class_eval <<~RUBY, __FILE__, __LINE__ + 1
+            def #{attribute}_reset_token_expires_in
+              #{expires_seconds}
+            end
+          RUBY
 
           generates_token_for :"#{attribute}_reset", expires_in: reset_token_expires_in do
             public_send(:"#{attribute}_salt")&.last(10)
@@ -264,52 +276,51 @@ module ActiveModel
     class InstanceMethodsOnActivation < Module
       def initialize(attribute, reset_token:, algorithm:)
         attr_reader attribute
-
-        define_method("#{attribute}=") do |unencrypted_password|
-          if unencrypted_password.nil?
-            instance_variable_set("@#{attribute}", nil)
-            self.public_send("#{attribute}_digest=", nil)
-          elsif !unencrypted_password.empty?
-            instance_variable_set("@#{attribute}", unencrypted_password)
-            password_digest = algorithm.hash_password(unencrypted_password)
-            self.public_send("#{attribute}_digest=", password_digest)
-          end
-        end
-
         attr_accessor :"#{attribute}_confirmation", :"#{attribute}_challenge"
 
-        # Returns +self+ if the password is correct, otherwise +false+.
-        #
-        #   class User < ActiveRecord::Base
-        #     has_secure_password validations: false
-        #   end
-        #
-        #   user = User.new(name: 'david', password: 'mUc3m00RsqyRe')
-        #   user.save
-        #   user.authenticate_password('notright')      # => false
-        #   user.authenticate_password('mUc3m00RsqyRe') # => user
-        define_method("authenticate_#{attribute}") do |unencrypted_password|
-          attribute_digest = public_send("#{attribute}_digest")
-          attribute_digest.present? && algorithm.verify_password(unencrypted_password, attribute_digest) && self
-        end
+        # Store the algorithm in a class-level registry so string-eval
+        # methods can look it up without capturing it in a closure
+        # (closures make define_method procs non-shareable across Ractors).
+        algorithm_key = :"_secure_password_algorithm_#{attribute}"
 
-        # Returns the salt, a small chunk of random data added to the password before it's hashed.
-        define_method("#{attribute}_salt") do
-          attribute_digest = public_send("#{attribute}_digest")
-          attribute_digest.present? ? algorithm.password_salt(attribute_digest) : nil
-        end
+        # Use string eval for all methods to avoid non-shareable Procs.
+        module_eval <<~RUBY, __FILE__, __LINE__ + 1
+          def #{attribute}=(unencrypted_password)
+            if unencrypted_password.nil?
+              @#{attribute} = nil
+              self.#{attribute}_digest = nil
+            elsif !unencrypted_password.empty?
+              @#{attribute} = unencrypted_password
+              algo = self.class._secure_password_algorithms[:#{attribute}]
+              self.#{attribute}_digest = algo.hash_password(unencrypted_password)
+            end
+          end
+
+          def authenticate_#{attribute}(unencrypted_password)
+            attribute_digest = #{attribute}_digest
+            algo = self.class._secure_password_algorithms[:#{attribute}]
+            attribute_digest.present? && algo.verify_password(unencrypted_password, attribute_digest) && self
+          end
+
+          def #{attribute}_salt
+            attribute_digest = #{attribute}_digest
+            algo = self.class._secure_password_algorithms[:#{attribute}]
+            attribute_digest.present? ? algo.password_salt(attribute_digest) : nil
+          end
+
+          def #{attribute}_algorithm
+            self.class._secure_password_algorithms[:#{attribute}].algorithm_name
+          end
+        RUBY
 
         alias_method :authenticate, :authenticate_password if attribute == :password
 
         if reset_token
-          # Returns the class-level configured reset token for the password.
-          define_method("#{attribute}_reset_token") do
-            generate_token_for(:"#{attribute}_reset")
-          end
-        end
-
-        define_method("#{attribute}_algorithm") do
-          algorithm.algorithm_name
+          module_eval <<~RUBY, __FILE__, __LINE__ + 1
+            def #{attribute}_reset_token
+              generate_token_for(:#{attribute}_reset)
+            end
+          RUBY
         end
       end
     end
