@@ -206,7 +206,11 @@ module ActiveSupport
       end
 
       def add_stdlib_silencer
-        add_silencer { |line| line.start_with?(RbConfig::CONFIG["rubylibdir"]) }
+        # Eagerly resolve and freeze the rubylibdir so the proc
+        # doesn't need to access RbConfig::CONFIG at call time (not
+        # Ractor-safe) and the captured local is shareable.
+        rubylibdir = RbConfig::CONFIG["rubylibdir"].freeze
+        add_silencer { |line| line.start_with?(rubylibdir) }
       end
 
       def filter_backtrace(backtrace)

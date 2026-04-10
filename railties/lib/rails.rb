@@ -67,6 +67,7 @@ module Rails
 
     def cache_root! # :nodoc:
       @root = root.freeze
+      env.make_shareable!  # Eagerly resolve and freeze @_env for Ractor safety
     end
 
     # Returns the current \Rails environment.

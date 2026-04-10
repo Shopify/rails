@@ -84,6 +84,7 @@ module ActionDispatch
         shareable_proc { |_request| true }
       end
       @secure_cookies = secure_cookies
+      @rack_3_plus = Gem::Version.new(Rack::RELEASE) >= Gem::Version.new("3")
 
       @hsts_header = build_hsts_header(normalize_hsts_options(hsts))
       @ssl_default_redirect_status = ssl_default_redirect_status
@@ -134,7 +135,7 @@ module ActionDispatch
         cookies = headers[Rack::SET_COOKIE]
         return unless cookies
 
-        if Gem::Version.new(Rack::RELEASE) < Gem::Version.new("3")
+        if !@rack_3_plus
           cookies = cookies.split("\n")
           headers[Rack::SET_COOKIE] = cookies.map { |cookie|
             if !/;\s*secure\s*(;|$)/i.match?(cookie)
