@@ -115,8 +115,12 @@ module Rails
       routes
       app
 
-      # Remove the logger from env_config -- IO objects can't be shared
-      @app_env_config.delete("action_dispatch.logger")
+      # Replace the logger with a Ractor-local proxy that creates
+      # per-Ractor loggers with fresh IOs to the same destination.
+      require "active_support/ractor_local_logger"
+      ractor_logger = ActiveSupport::RactorLocalLogger.new(Rails.logger)
+      Rails.logger = ractor_logger
+      @app_env_config["action_dispatch.logger"] = ractor_logger
 
       # Save the connection handler (nilled during AR::Base.make_shareable!)
       saved_handler = ::ActiveRecord::Base.default_connection_handler

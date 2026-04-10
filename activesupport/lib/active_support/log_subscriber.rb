@@ -74,8 +74,11 @@ module ActiveSupport
 
     class << self
       def logger
-        return nil unless Ractor.main?
-        @logger ||= if defined?(Rails) && Rails.respond_to?(:logger)
+        if Ractor.main?
+          @logger ||= if defined?(Rails) && Rails.respond_to?(:logger)
+            Rails.logger
+          end
+        elsif defined?(Rails) && Rails.respond_to?(:logger)
           Rails.logger
         end
       end
@@ -97,9 +100,14 @@ module ActiveSupport
 
       # Flush all log_subscribers' logger.
       def flush_all!
-        return unless Ractor.main?
-        @supports_flush = logger.respond_to?(:flush) if @supports_flush.nil?
-        logger.flush if @supports_flush
+        l = logger
+        return unless l
+        if Ractor.main?
+          @supports_flush = l.respond_to?(:flush) if @supports_flush.nil?
+          l.flush if @supports_flush
+        else
+          l.flush if l.respond_to?(:flush)
+        end
       end
 
       private
