@@ -158,6 +158,17 @@ module Rails
         end
       end
 
+      # Eagerly resolve encryption context keys before freeze.
+      # Calling custom_contexts triggers the lazy @__thread_mattr_
+      # ivar initialization so it's set before the module freezes.
+      if defined?(::ActiveRecord::Encryption)
+        ::ActiveRecord::Encryption.custom_contexts
+        ::ActiveRecord::Encryption.make_shareable!
+      end
+
+      # JSON gem: make dump/load options shareable
+      ::JSON.make_shareable! if defined?(::JSON)
+
       # Make custom validators shareable (app-level EachValidator subclasses)
       if defined?(::ActiveModel::EachValidator)
         ::ActiveModel::EachValidator.descendants.each { |v| v.make_shareable! }

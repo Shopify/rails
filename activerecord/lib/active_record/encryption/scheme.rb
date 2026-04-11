@@ -49,7 +49,15 @@ module ActiveRecord
         @support_unencrypted_data.nil? ? ActiveRecord::Encryption.config.support_unencrypted_data : @support_unencrypted_data
       end
 
+      def freeze
+        # Eagerly resolve lazy key providers before freeze
+        fixed?
+        key_provider
+        super
+      end
+
       def fixed?
+        return @fixed if frozen?
         # by default deterministic encryption is fixed
         @fixed ||= @deterministic && (!@deterministic.is_a?(Hash) || @deterministic[:fixed])
       end
@@ -88,12 +96,14 @@ module ActiveRecord
         end
 
         def key_provider_from_key
+          return @key_provider_from_key if frozen?
           @key_provider_from_key ||= if @key.present?
             DerivedSecretKeyProvider.new(@key)
           end
         end
 
         def deterministic_key_provider
+          return @deterministic_key_provider if frozen?
           @deterministic_key_provider ||= if @deterministic
             DeterministicKeyProvider.new(ActiveRecord::Encryption.config.deterministic_key)
           end

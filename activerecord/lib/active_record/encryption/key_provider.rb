@@ -17,7 +17,13 @@ module ActiveRecord
       # When +ActiveRecord::Encryption.config.store_key_references+ is true, the key will include
       # a public tag referencing the key itself. That key will be stored in the public
       # headers of the encrypted message
+      def freeze
+        encryption_key # eagerly resolve
+        super
+      end
+
       def encryption_key
+        return @encryption_key if frozen?
         @encryption_key ||= @keys.last.tap do |key|
           key.public_tags.encrypted_data_key_id = key.id if ActiveRecord::Encryption.config.store_key_references
         end
@@ -39,6 +45,7 @@ module ActiveRecord
 
       private
         def keys_grouped_by_id
+          return @keys_grouped_by_id if frozen?
           @keys_grouped_by_id ||= @keys.group_by(&:id)
         end
     end

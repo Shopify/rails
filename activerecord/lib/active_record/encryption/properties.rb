@@ -30,13 +30,12 @@ module ActiveRecord
       }.freeze
 
       DEFAULT_PROPERTIES.each do |name, key|
-        define_method name do
-          self[key.to_sym]
-        end
+        k = key.to_sym
+        define_method(name,
+          -> { self[k] }.make_shareable!)
 
-        define_method "#{name}=" do |value|
-          self[key.to_sym] = value
-        end
+        define_method("#{name}=",
+          -> (value) { self[k] = value }.make_shareable!)
       end
 
       def initialize(initial_properties = {})

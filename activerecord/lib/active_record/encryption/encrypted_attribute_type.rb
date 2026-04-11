@@ -28,6 +28,11 @@ module ActiveRecord
         @default = default
       end
 
+      def freeze
+        serialize_with_oldest?
+        super
+      end
+
       def cast(value)
         cast_type.cast(value)
       end
@@ -120,7 +125,11 @@ module ActiveRecord
         end
 
         def serialize_with_oldest?
-          @serialize_with_oldest ||= fixed? && previous_types_without_clean_text.present?
+          if instance_variable_defined?(:@serialize_with_oldest)
+            @serialize_with_oldest
+          else
+            @serialize_with_oldest = fixed? && previous_types_without_clean_text.present?
+          end
         end
 
         def serialize_with_oldest(value)
