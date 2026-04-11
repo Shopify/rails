@@ -143,6 +143,21 @@ module Rails
       # Restore the connection handler
       ::ActiveRecord::Base.default_connection_handler = saved_handler
 
+      # Freeze class_attribute defaults on AR::Base that may have been
+      # reset by sub-model processing. These are empty collections on
+      # the singleton class that just need freezing.
+      ::ActiveRecord::Base.singleton_class.instance_variables.each do |ivar|
+        next unless ivar.to_s.start_with?("@__class_attr_")
+        next if ivar.to_s.include?("connection")
+        begin
+          val = ::ActiveRecord::Base.singleton_class.instance_variable_get(ivar)
+          next if val.nil? || val.shareable?
+          val.make_shareable!
+        rescue Ractor::Error, Ractor::IsolationError, FrozenError => e
+          Rails.logger.warn("[ractorize!] AR::Base singleton #{ivar}: #{e.message[0..100]}") if Rails.logger
+        end
+      end
+
       # Eagerly resolve CurrentAttributes keys before freeze
       if defined?(::ActiveSupport::CurrentAttributes)
         ::ActiveSupport::CurrentAttributes.descendants.each do |klass|
@@ -206,9 +221,9 @@ module Rails
       # Patch I18n.normalize_key to handle frozen caches.
       ::I18n.instance_eval <<~RUBY
         def normalize_key(key, separator)
-          cache = begin; @@normalized_key_cache[separator]; rescue FrozenError, Ractor::IsolationError; nil; end
+          cache = begin; @@normalized_key_cache[separator]; rescue FrozenError, Ractor::IsolationError, NameError; nil; end
           if cache
-            cached = begin; cache[key]; rescue FrozenError, Ractor::IsolationError; nil; end
+            cached = begin; cache[key]; rescue FrozenError, Ractor::IsolationError, NameError; nil; end
             return cached if cached
           end
 
