@@ -170,7 +170,15 @@ module ActiveRecord
               unless @_already_called[:#{name}]
                 begin
                   @_already_called[:#{name}] = true
-                  result = instance_eval(&self.class.instance_variable_get(:@_ncm_block_#{name}))
+                  # Walk up the class hierarchy to find the block (class
+                  # instance variables don't inherit to subclasses).
+                  klass = self.class
+                  block = nil
+                  while klass && block.nil?
+                    block = klass.instance_variable_get(:@_ncm_block_#{name})
+                    klass = klass.superclass
+                  end
+                  result = instance_eval(&block) if block
                 ensure
                   @_already_called[:#{name}] = false
                 end

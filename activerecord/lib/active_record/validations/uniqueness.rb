@@ -81,18 +81,32 @@ module ActiveRecord
       end
 
       def covered_by_unique_index?(klass, record, attribute, scope)
-        @covered ||= self.attributes.map(&:to_s).select do |attr|
-          attributes = scope + [attr]
-          attributes = resolve_attributes(record, attributes)
+        covered = if frozen?
+          # After freeze, use the cached value or compute without caching
+          @covered || self.attributes.map(&:to_s).select do |attr|
+            attributes = scope + [attr]
+            attributes = resolve_attributes(record, attributes)
 
-          klass.schema_cache.indexes(klass.table_name).any? do |index|
-            index.unique &&
-              index.where.nil? &&
-              (Array(index.columns) - attributes).empty?
+            klass.schema_cache.indexes(klass.table_name).any? do |index|
+              index.unique &&
+                index.where.nil? &&
+                (Array(index.columns) - attributes).empty?
+            end
+          end
+        else
+          @covered ||= self.attributes.map(&:to_s).select do |attr|
+            attributes = scope + [attr]
+            attributes = resolve_attributes(record, attributes)
+
+            klass.schema_cache.indexes(klass.table_name).any? do |index|
+              index.unique &&
+                index.where.nil? &&
+                (Array(index.columns) - attributes).empty?
+            end
           end
         end
 
-        @covered.include?(attribute.to_s)
+        covered.include?(attribute.to_s)
       end
 
       def resolve_attributes(record, attributes)

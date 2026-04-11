@@ -140,56 +140,62 @@ module ActiveRecord
         _store_accessors_module.module_eval do
           keys.each do |key|
             accessor_key = "#{accessor_prefix}#{key}#{accessor_suffix}"
+            sa = store_attribute
+            k = key
 
-            define_method("#{accessor_key}=") do |value|
-              write_store_attribute(store_attribute, key, value)
-            end
+            define_method("#{accessor_key}=",
+              -> (value) { write_store_attribute(sa, k, value) }.make_shareable!)
 
-            define_method(accessor_key) do
-              read_store_attribute(store_attribute, key)
-            end
+            define_method(accessor_key,
+              -> { read_store_attribute(sa, k) }.make_shareable!)
 
-            define_method("#{accessor_key}_changed?") do
-              return false unless attribute_changed?(store_attribute)
-              prev_store, new_store = changes[store_attribute]
-              accessor = store_accessor_for(store_attribute)
-              accessor.get(prev_store, key) != accessor.get(new_store, key)
-            end
+            define_method("#{accessor_key}_changed?",
+              -> {
+                return false unless attribute_changed?(sa)
+                prev_store, new_store = changes[sa]
+                accessor = store_accessor_for(sa)
+                accessor.get(prev_store, k) != accessor.get(new_store, k)
+              }.make_shareable!)
 
-            define_method("#{accessor_key}_change") do
-              return unless attribute_changed?(store_attribute)
-              prev_store, new_store = changes[store_attribute]
-              accessor = store_accessor_for(store_attribute)
-              [accessor.get(prev_store, key), accessor.get(new_store, key)]
-            end
+            define_method("#{accessor_key}_change",
+              -> {
+                return unless attribute_changed?(sa)
+                prev_store, new_store = changes[sa]
+                accessor = store_accessor_for(sa)
+                [accessor.get(prev_store, k), accessor.get(new_store, k)]
+              }.make_shareable!)
 
-            define_method("#{accessor_key}_was") do
-              return unless attribute_changed?(store_attribute)
-              prev_store, _new_store = changes[store_attribute]
-              accessor = store_accessor_for(store_attribute)
-              accessor.get(prev_store, key)
-            end
+            define_method("#{accessor_key}_was",
+              -> {
+                return unless attribute_changed?(sa)
+                prev_store, _new_store = changes[sa]
+                accessor = store_accessor_for(sa)
+                accessor.get(prev_store, k)
+              }.make_shareable!)
 
-            define_method("saved_change_to_#{accessor_key}?") do
-              return false unless saved_change_to_attribute?(store_attribute)
-              prev_store, new_store = saved_changes[store_attribute]
-              accessor = store_accessor_for(store_attribute)
-              accessor.get(prev_store, key) != accessor.get(new_store, key)
-            end
+            define_method("saved_change_to_#{accessor_key}?",
+              -> {
+                return false unless saved_change_to_attribute?(sa)
+                prev_store, new_store = saved_changes[sa]
+                accessor = store_accessor_for(sa)
+                accessor.get(prev_store, k) != accessor.get(new_store, k)
+              }.make_shareable!)
 
-            define_method("saved_change_to_#{accessor_key}") do
-              return unless saved_change_to_attribute?(store_attribute)
-              prev_store, new_store = saved_changes[store_attribute]
-              accessor = store_accessor_for(store_attribute)
-              [accessor.get(prev_store, key), accessor.get(new_store, key)]
-            end
+            define_method("saved_change_to_#{accessor_key}",
+              -> {
+                return unless saved_change_to_attribute?(sa)
+                prev_store, new_store = saved_changes[sa]
+                accessor = store_accessor_for(sa)
+                [accessor.get(prev_store, k), accessor.get(new_store, k)]
+              }.make_shareable!)
 
-            define_method("#{accessor_key}_before_last_save") do
-              return unless saved_change_to_attribute?(store_attribute)
-              prev_store, _new_store = saved_changes[store_attribute]
-              accessor = store_accessor_for(store_attribute)
-              accessor.get(prev_store, key)
-            end
+            define_method("#{accessor_key}_before_last_save",
+              -> {
+                return unless saved_change_to_attribute?(sa)
+                prev_store, _new_store = saved_changes[sa]
+                accessor = store_accessor_for(sa)
+                accessor.get(prev_store, k)
+              }.make_shareable!)
           end
         end
 

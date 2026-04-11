@@ -325,14 +325,13 @@ module ActiveRecord
         filter_list << options
 
         if name.in?([:commit, :rollback]) && options[:on]
-          fire_on = Array(options[:on])
+          fire_on = Array(options[:on]).freeze
           assert_valid_transaction_action(fire_on)
           options[:if] = [
-            -> { transaction_include_any_action?(fire_on) },
+            -> { transaction_include_any_action?(fire_on) }.make_shareable!,
             *options[:if]
           ]
         end
-
 
         super(name, *filter_list, &block)
       end
@@ -351,10 +350,10 @@ module ActiveRecord
           args << options
 
           if options[:on]
-            fire_on = Array(options[:on])
+            fire_on = Array(options[:on]).freeze
             assert_valid_transaction_action(fire_on)
             options[:if] = [
-              -> { transaction_include_any_action?(fire_on) },
+              -> { transaction_include_any_action?(fire_on) }.make_shareable!,
               *options[:if]
             ]
           end

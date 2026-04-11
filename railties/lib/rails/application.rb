@@ -158,6 +158,11 @@ module Rails
         end
       end
 
+      # Make custom validators shareable (app-level EachValidator subclasses)
+      if defined?(::ActiveModel::EachValidator)
+        ::ActiveModel::EachValidator.descendants.each { |v| v.make_shareable! }
+      end
+
       # Eagerly resolve CurrentAttributes keys before freeze
       if defined?(::ActiveSupport::CurrentAttributes)
         ::ActiveSupport::CurrentAttributes.descendants.each do |klass|

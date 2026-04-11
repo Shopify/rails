@@ -78,19 +78,21 @@ module ActiveRecord::Associations::Builder # :nodoc:
     end
 
     def self.add_touch_callbacks(model, reflection)
-      foreign_key = reflection.foreign_key
-      name        = reflection.name
-      touch       = reflection.options[:touch]
+      fk    = reflection.foreign_key.freeze
+      assoc = reflection.name
+      touch = reflection.options[:touch]
 
-      callback = lambda { |changes_method| lambda { |record|
-        BelongsTo.touch_record(record, record.send(changes_method), foreign_key, name, touch)
-      }}
+      callback = lambda { |changes_method|
+        -> (record) {
+          BelongsTo.touch_record(record, record.send(changes_method), fk, assoc, touch)
+        }.make_shareable!
+      }
 
       if reflection.counter_cache_column
         touch_callback = callback.(:saved_changes)
-        update_callback = lambda { |record|
-          instance_exec(record, &touch_callback) unless association(reflection.name).saved_change_to_target?
-        }
+        update_callback = -> (record) {
+          record.instance_exec(record, &touch_callback) unless record.association(assoc).saved_change_to_target?
+        }.make_shareable!
         model.after_update update_callback, if: :saved_changes?
       else
         model.after_create callback.(:saved_changes), if: :saved_changes?

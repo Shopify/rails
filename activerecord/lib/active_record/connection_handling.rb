@@ -555,6 +555,45 @@ module ActiveRecord
       end
     end
 
+    # Proxy for SchemaCache in non-main Ractors. The real SchemaCache
+    # includes MonitorMixin and can't cross the Ractor boundary.
+    class RactorSchemaCacheProxy # :nodoc:
+      INSTANCE = new.freeze
+      def self.instance = INSTANCE
+
+      def indexes(table_name)
+        tn = table_name.freeze
+        Ractor::Dispatch.main.run {
+          ActiveRecord::Base.connection_pool.schema_cache.indexes(tn)
+        }
+      end
+
+      def columns(table_name)
+        tn = table_name.freeze
+        Ractor::Dispatch.main.run {
+          ActiveRecord::Base.connection_pool.schema_cache.columns(tn)
+        }
+      end
+
+      def columns_hash(table_name)
+        tn = table_name.freeze
+        Ractor::Dispatch.main.run {
+          ActiveRecord::Base.connection_pool.schema_cache.columns_hash(tn)
+        }
+      end
+
+      def method_missing(name, *args, **kwargs)
+        frozen_args = args.map { |a| a.frozen? ? a : (a.dup.freeze rescue a) }.freeze
+        Ractor::Dispatch.main.run {
+          ActiveRecord::Base.connection_pool.schema_cache.send(name, *frozen_args)
+        }
+      end
+
+      def respond_to_missing?(name, include_private = false)
+        true
+      end
+    end
+
     # Minimal pool proxy for non-main Ractors. Only implements methods
     # called on connection.pool during the save/transaction path.
     class RactorPoolProxy # :nodoc:
@@ -578,7 +617,14 @@ module ActiveRecord
       end
 
       def schema_cache
-        Ractor::Dispatch.main.run { ActiveRecord::Base.connection_pool.schema_cache }
+        # Return a proxy that dispatches individual schema_cache
+        # method calls. The real SchemaCache can't cross the Ractor
+        # boundary (it includes MonitorMixin).
+        RactorSchemaCacheProxy.instance
+      end
+
+      def clear_query_cache
+        # No-op in Ractor context — query caching is per-connection
       end
     end
 
