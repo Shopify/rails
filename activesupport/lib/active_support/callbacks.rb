@@ -627,9 +627,18 @@ module ActiveSupport
           @chain.each do |cb|
             cb.instance_variables.each do |ivar|
               val = cb.instance_variable_get(ivar)
-              val.make_shareable! rescue nil unless val.nil? || val.frozen?
+              next if val.nil? || val.frozen?
+              begin
+                val.make_shareable!
+              rescue Ractor::Error, Ractor::IsolationError, FrozenError => e
+                Rails.logger.warn("[CallbackChain#freeze] #{@name} #{ivar}: #{e.message[0..80]}") if defined?(Rails.logger) && Rails.logger
+              end
             end
-            cb.make_shareable! rescue nil
+            begin
+              cb.make_shareable!
+            rescue Ractor::Error, Ractor::IsolationError, FrozenError => e
+              Rails.logger.warn("[CallbackChain#freeze] #{@name} callback: #{e.message[0..80]}") if defined?(Rails.logger) && Rails.logger
+            end
           end
           super
         end

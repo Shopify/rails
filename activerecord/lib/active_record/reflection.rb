@@ -171,6 +171,7 @@ module ActiveRecord
         foreign_key
         association_foreign_key
         counter_cache_column
+        inverse_which_updates_counter_cache if respond_to?(:inverse_which_updates_counter_cache)
         has_inverse?
         inverse_of
         check_validity_of_inverse!
