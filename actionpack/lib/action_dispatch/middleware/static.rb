@@ -4,34 +4,6 @@
 
 require "rack/utils"
 
-# Rack::Files stores a lambda that captures self (via `get`), which
-# prevents it from being made Ractor-shareable. Override freeze to
-# replace it with a shareable_proc.
-Rack::Files.prepend(Module.new {
-  def freeze
-    # Rack::Files stores a lambda in @head via Rack::Head that
-    # captures self, preventing shareability. Clear it and override
-    # call to handle HEAD requests inline after freeze.
-    @head = nil
-    super
-  end
-
-  def call(env)
-    if frozen?
-      # Inline the Rack::Head logic: serve the response, then
-      # drop the body for HEAD requests.
-      status, headers, body = get(env)
-      if env[Rack::REQUEST_METHOD] == Rack::HEAD
-        body.close if body.respond_to?(:close)
-        body = []
-      end
-      [status, headers, body]
-    else
-      super
-    end
-  end
-})
-
 module ActionDispatch
   # # Action Dispatch Static
   #
