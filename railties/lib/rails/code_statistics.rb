@@ -28,7 +28,7 @@ module Rails
       %w(Channel\ tests     test/channels),
       %w(Integration\ tests test/integration),
       %w(System\ tests      test/system),
-    ]
+    ].freeze
 
     TEST_TYPES = ["Controller tests", # rubocop:disable Style/MutableConstant
                   "Helper tests",
@@ -38,7 +38,7 @@ module Rails
                   "Channel tests",
                   "Job tests",
                   "Integration tests",
-                  "System tests"]
+                  "System tests"].freeze
 
     HEADERS = { lines: " Lines", code_lines: "   LOC", classes: "Classes", methods: "Methods" }.freeze
 

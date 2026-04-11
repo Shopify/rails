@@ -34,7 +34,7 @@ module Rails
         class: /^\s*class\s+[_A-Z]/,
         method: /[-=]>/,
       }
-    }
+    }.freeze
 
     PATTERNS[:minitest] = PATTERNS[:rb].merge method: /^\s*(def|test)\s+['"_a-z]/
     PATTERNS[:rake] = PATTERNS[:rb]
