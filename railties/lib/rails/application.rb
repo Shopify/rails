@@ -98,7 +98,20 @@ module Rails
       public :new
     end
 
-    attr_accessor :assets, :sandbox
+    attr_writer :assets
+    attr_accessor :sandbox
+
+    # Propshaft Assembly is detached during freeze (it needs mutable
+    # state). Access it via dispatch from non-main Ractors.
+    def assets
+      if @assets
+        @assets
+      elsif Ractor.main?
+        defined?(@@_saved_assets) && @@_saved_assets
+      else
+        ::Ractor::Dispatch.main.run { Rails.application.assets }
+      end
+    end
     alias_method :sandbox?, :sandbox
     attr_reader :reloaders, :reloader, :executor, :autoloaders
 
@@ -427,6 +440,14 @@ module Rails
       ::ActiveSupport::XmlMini::TYPE_NAMES.freeze if defined?(::ActiveSupport::XmlMini::TYPE_NAMES)
       ::ActiveSupport::XmlMini::FORMATTING.make_shareable! if defined?(::ActiveSupport::XmlMini::FORMATTING)
       ::ActiveSupport::XmlMini::PARSING.make_shareable! if defined?(::ActiveSupport::XmlMini::PARSING)
+
+      # Detach Propshaft Assembly to prevent deep-freeze — it needs
+      # mutable Asset objects for resolution at request time.
+      # Store it in a class variable so it survives the instance freeze.
+      if defined?(::Propshaft::Assembly) && @assets
+        @@_saved_assets = @assets
+        @assets = nil
+      end
 
       # Nil boot-time state not needed for request handling
       @app_build_lock = nil
