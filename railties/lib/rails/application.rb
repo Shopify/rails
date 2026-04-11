@@ -169,11 +169,27 @@ module Rails
       # JSON gem: make dump/load options shareable
       ::JSON.make_shareable! if defined?(::JSON)
 
+      # ActionView tag helper classes need @field_type shareable
+      if defined?(::ActionView::Helpers::Tags::TextField)
+        ::ActionView::Helpers::Tags::TextField.descendants.each { |t| t.make_shareable! }
+        ::ActionView::Helpers::Tags::TextField.make_shareable!
+      end
+
+      # ActionView::Base holds sanitizer instances and other class config
+      if defined?(::ActionView::Base)
+        ::ActionView::Base.full_sanitizer
+        ::ActionView::Base.safe_list_sanitizer
+        ::ActionView::Base.link_sanitizer
+        ::ActionView::Base.make_shareable!
+      end
+
       # Number helpers — DEFAULTS hash contains nested hashes
       ::ActiveSupport::NumberHelper::NumberConverter.make_shareable! if defined?(::ActiveSupport::NumberHelper::NumberConverter)
 
       # Jbuilder gem
       ::Jbuilder.make_shareable! if defined?(::Jbuilder)
+
+
 
 
 
