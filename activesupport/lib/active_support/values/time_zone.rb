@@ -183,7 +183,7 @@ module ActiveSupport
       "Tokelau Is."                  => "Pacific/Fakaofo",
       "Chatham Is."                  => "Pacific/Chatham",
       "Samoa"                        => "Pacific/Apia"
-    }
+    }.freeze
 
     UTC_OFFSET_WITH_COLON = "%s%02d:%02d" # :nodoc:
     UTC_OFFSET_WITHOUT_COLON = UTC_OFFSET_WITH_COLON.tr(":", "") # :nodoc:

@@ -33,7 +33,7 @@ module ActiveSupport
 
     DEFAULT_ENCODINGS = {
       "binary" => "base64"
-    } unless defined?(DEFAULT_ENCODINGS)
+    }.freeze unless defined?(DEFAULT_ENCODINGS)
 
     unless defined?(TYPE_NAMES)
       TYPE_NAMES = {

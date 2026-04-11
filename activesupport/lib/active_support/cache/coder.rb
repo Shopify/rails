@@ -77,7 +77,7 @@ module ActiveSupport
           0x02 => Encoding::UTF_8,
           0x03 => Encoding::BINARY,
           0x04 => Encoding::US_ASCII,
-        }
+        }.freeze
 
         COMPRESSED_FLAG = 0x80
 
