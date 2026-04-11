@@ -356,6 +356,19 @@ module Rails
 
       ::Turbo.make_shareable! if defined?(::Turbo)
 
+      # Builder gem (used for XML error pages)
+      begin
+        require "builder"
+        ::Builder::XChar.make_shareable!
+      rescue LoadError
+        # builder gem not available
+      end
+
+      # XmlMini constants are populated at require time — freeze after
+      ::ActiveSupport::XmlMini::TYPE_NAMES.freeze if defined?(::ActiveSupport::XmlMini::TYPE_NAMES)
+      ::ActiveSupport::XmlMini::FORMATTING.make_shareable! if defined?(::ActiveSupport::XmlMini::FORMATTING)
+      ::ActiveSupport::XmlMini::PARSING.make_shareable! if defined?(::ActiveSupport::XmlMini::PARSING)
+
       # Nil boot-time state not needed for request handling
       @app_build_lock = nil
       @config = nil
