@@ -13,8 +13,14 @@ module ActionView
           "output_buffer.to_s"
       end
 
+      def freeze
+        require_engine
+        super
+      end
+
       private
         def require_engine # :doc:
+          return if frozen?
           @required ||= begin
             require "builder"
             true
