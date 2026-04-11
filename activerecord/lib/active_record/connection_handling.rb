@@ -513,12 +513,21 @@ module ActiveRecord
       end
 
       def method_missing(name, *args, **kwargs, &block)
-        frozen_args = args.map { |a| a.frozen? ? a : (a.dup.freeze rescue a) }.freeze
-        Ractor::Dispatch.main.run do
-          ActiveRecord::Base.with_connection { |c| c.send(name, *frozen_args) }
+        # If the first arg is an Arel node, it can't cross Ractor
+        # boundaries (visitor dispatch Proc). Marshal it.
+        if args.first.respond_to?(:ast)
+          arel_data = Marshal.dump(args.first).freeze
+          rest = args[1..].map { |a| a.frozen? ? a : (a.dup.freeze rescue a) }.freeze
+          Ractor::Dispatch.main.run do
+            arel = Marshal.load(arel_data)
+            ActiveRecord::Base.with_connection { |c| c.send(name, arel, *rest) }
+          end
+        else
+          frozen_args = args.map { |a| a.frozen? ? a : (a.dup.freeze rescue a) }.freeze
+          Ractor::Dispatch.main.run do
+            ActiveRecord::Base.with_connection { |c| c.send(name, *frozen_args) }
+          end
         end
-      rescue Ractor::Error
-        nil
       end
     end
 
