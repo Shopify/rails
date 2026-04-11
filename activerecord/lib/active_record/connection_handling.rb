@@ -457,13 +457,16 @@ module ActiveRecord
       end
 
       def to_sql(arel, binds = [])
-        # Can't pass Arel across Ractor boundary -- but we need to
-        # compile it. Use the Arel's own table klass to find the
-        # engine and compile.
-        table = arel.instance_variable_get(:@ctx)&.instance_variable_get(:@relation) ||
-                arel.instance_variable_get(:@ast)&.relation
-        engine = table.respond_to?(:klass) ? table.klass : ActiveRecord::Base
-        Ractor::Dispatch.main.run { engine.with_connection { |c| c.to_sql(arel, binds) }.freeze }
+        # Arel objects contain the visitor dispatch hash which has a
+        # Proc that can't cross Ractor boundaries. Marshal the Arel
+        # AST to a frozen string, then deserialize in the main Ractor.
+        arel_data = Marshal.dump(arel).freeze
+        binds_data = binds.empty? ? nil : Marshal.dump(binds).freeze
+        Ractor::Dispatch.main.run {
+          a = Marshal.load(arel_data)
+          b = binds_data ? Marshal.load(binds_data) : []
+          ActiveRecord::Base.with_connection { |c| c.to_sql(a, b) }.freeze
+        }
       end
 
       def update(arel, name = nil, binds = [])
@@ -482,8 +485,12 @@ module ActiveRecord
         end
       end
 
+      # Return a lightweight proxy for the visitor that dispatches
+      # compile calls to the main Ractor. The real visitor object
+      # can't cross Ractor boundaries (it has a dispatch hash with
+      # a default Proc).
       def visitor
-        Ractor::Dispatch.main.run { ActiveRecord::Base.with_connection { |c| c.visitor } }
+        RactorVisitorProxy.instance
       end
 
       def transaction(**options, &block)
@@ -512,6 +519,30 @@ module ActiveRecord
         end
       rescue Ractor::Error
         nil
+      end
+    end
+
+    # Proxy for the Arel visitor in non-main Ractors. The real visitor
+    # has a dispatch hash with a default Proc that can't cross Ractor
+    # boundaries. This proxy dispatches compile calls to the main Ractor.
+    class RactorVisitorProxy # :nodoc:
+      INSTANCE = new.freeze
+      def self.instance = INSTANCE
+
+      def compile(node)
+        node_data = Marshal.dump(node).freeze
+        Ractor::Dispatch.main.run do
+          n = Marshal.load(node_data)
+          ActiveRecord::Base.with_connection { |c| c.visitor.compile(n) }.freeze
+        end
+      end
+
+      def accept(node, collector = nil)
+        node_data = Marshal.dump(node).freeze
+        Ractor::Dispatch.main.run do
+          n = Marshal.load(node_data)
+          ActiveRecord::Base.with_connection { |c| c.visitor.accept(n, collector) }
+        end
       end
     end
 

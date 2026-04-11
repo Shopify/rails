@@ -326,6 +326,7 @@ module Rails
        ::ActionController::Parameters,
        ::ActiveRecord::Relation::WhereClause, ::Time,
        ::ActiveRecord::Type,
+       ::ActiveRecord::ConnectionAdapters::SQLite3::Quoting,
        ::Arel::SelectManager,
        ::ActiveRecord::QueryMethods,
        ::ActiveRecord::Relation::Merger,
