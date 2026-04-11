@@ -115,12 +115,27 @@ module ActionView
       # NOTE: +Rails::HTML5::Sanitizer+ is not supported on JRuby, so on JRuby platforms \Rails will
       # fall back to using +Rails::HTML4::Sanitizer+.
       def sanitize(html, options = {})
-        self.class.safe_list_sanitizer.sanitize(html, options)&.html_safe
+        if !Ractor.main? && defined?(::Ractor::Dispatch)
+          # Nokogiri and the sanitizer scrubber are not Ractor-safe.
+          # Dispatch to main with a fresh sanitizer instance.
+          vendor = self.class.sanitizer_vendor
+          h = html.frozen? ? html : html.dup.freeze
+          o = options.frozen? ? options : options.dup.freeze
+          result = ::Ractor::Dispatch.main.run { vendor.safe_list_sanitizer.new.sanitize(h, o) }
+          result&.html_safe
+        else
+          self.class.safe_list_sanitizer.sanitize(html, options)&.html_safe
+        end
       end
 
       # Sanitizes a block of CSS code. Used by #sanitize when it comes across a style attribute.
       def sanitize_css(style)
-        self.class.safe_list_sanitizer.sanitize_css(style)
+        if !Ractor.main? && defined?(::Ractor::Dispatch)
+          s = style.freeze
+          ::Ractor::Dispatch.main.run { self.class.safe_list_sanitizer.sanitize_css(s) }
+        else
+          self.class.safe_list_sanitizer.sanitize_css(style)
+        end
       end
 
       # Strips all HTML tags from +html+, including comments and special characters.
@@ -179,7 +194,11 @@ module ActionView
         #     config.action_view.full_sanitizer = MySpecialSanitizer.new
         #   end
         def full_sanitizer
-          @full_sanitizer ||= sanitizer_vendor.full_sanitizer.new
+          if Ractor.main?
+            @full_sanitizer ||= sanitizer_vendor.full_sanitizer.new
+          else
+            @full_sanitizer || superclass.full_sanitizer
+          end
         end
 
         # Gets the Rails::HTML::LinkSanitizer instance used by +strip_links+.
@@ -189,7 +208,11 @@ module ActionView
         #     config.action_view.link_sanitizer = MySpecialSanitizer.new
         #   end
         def link_sanitizer
-          @link_sanitizer ||= sanitizer_vendor.link_sanitizer.new
+          if Ractor.main?
+            @link_sanitizer ||= sanitizer_vendor.link_sanitizer.new
+          else
+            @link_sanitizer || superclass.link_sanitizer
+          end
         end
 
         # Gets the Rails::HTML::SafeListSanitizer instance used by sanitize and +sanitize_css+.
@@ -199,7 +222,11 @@ module ActionView
         #     config.action_view.safe_list_sanitizer = MySpecialSanitizer.new
         #   end
         def safe_list_sanitizer
-          @safe_list_sanitizer ||= sanitizer_vendor.safe_list_sanitizer.new
+          if Ractor.main?
+            @safe_list_sanitizer ||= sanitizer_vendor.safe_list_sanitizer.new
+          else
+            @safe_list_sanitizer || superclass.safe_list_sanitizer
+          end
         end
       end
     end

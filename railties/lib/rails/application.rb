@@ -169,18 +169,37 @@ module Rails
       # JSON gem: make dump/load options shareable
       ::JSON.make_shareable! if defined?(::JSON)
 
-      # ActionView tag helper classes need @field_type shareable
+      # ActionView tag helper classes need @field_type/@select_type shareable
       if defined?(::ActionView::Helpers::Tags::TextField)
         ::ActionView::Helpers::Tags::TextField.descendants.each { |t| t.make_shareable! }
         ::ActionView::Helpers::Tags::TextField.make_shareable!
       end
+      if defined?(::ActionView::Helpers::Tags::DateSelect)
+        [::ActionView::Helpers::Tags::DateSelect,
+         ::ActionView::Helpers::Tags::TimeSelect,
+         ::ActionView::Helpers::Tags::DatetimeSelect].each do |klass|
+          klass.select_type
+          klass.make_shareable!
+        end
+      end
 
-      # ActionView::Base holds sanitizer instances and other class config
+      # ActionView::Base and each controller's view context class hold
+      # lazy-initialized sanitizer instances and other class config.
+      # Eagerly init before freeze so they're accessible from Ractors.
       if defined?(::ActionView::Base)
         ::ActionView::Base.full_sanitizer
         ::ActionView::Base.safe_list_sanitizer
         ::ActionView::Base.link_sanitizer
         ::ActionView::Base.make_shareable!
+      end
+
+      # Loofah gem: eagerly resolve document_klass before freeze
+      if defined?(::Loofah::HTML5::DocumentFragment)
+        ::Loofah::HTML5::DocumentFragment.document_klass
+        ::Loofah::HTML5::DocumentFragment.make_shareable!
+      end
+      if defined?(::Loofah::HTML5::Document)
+        ::Loofah::HTML5::Document.make_shareable!
       end
 
       # Number helpers — DEFAULTS hash contains nested hashes
@@ -418,6 +437,7 @@ module Rails
       @ordered_railties = nil
       @railties = nil
       @autoloaders = nil
+
       super
     end
 
