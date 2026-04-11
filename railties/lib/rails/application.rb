@@ -136,9 +136,9 @@ module Rails
       # Models LAST -- after all other make_shareable! calls that
       # might reset model state as a side effect.
       ::ActiveRecord::Base.descendants.sort_by { |m| -m.ancestors.size }.each do |model|
-        model.make_shareable! rescue nil
+        model.make_shareable!
       end
-      ::ActiveRecord::Base.make_shareable! rescue nil
+      ::ActiveRecord::Base.make_shareable!
 
       # Restore the connection handler
       ::ActiveRecord::Base.default_connection_handler = saved_handler
@@ -148,19 +148,19 @@ module Rails
         ::ActiveSupport::CurrentAttributes.descendants.each do |klass|
           klass.send(:current_instances_key)
           klass.send(:generated_attribute_methods)
-          klass.make_shareable! rescue nil
+          klass.make_shareable!
         end
-        ::ActiveSupport::CurrentAttributes.make_shareable! rescue nil
+        ::ActiveSupport::CurrentAttributes.make_shareable!
       end
 
       # Make mailer and job classes shareable
       if defined?(::ActionMailer::Base)
-        ::ActionMailer::Base.descendants.each { |m| m.make_shareable! rescue nil }
-        ::ActionMailer::Base.make_shareable! rescue nil
+        ::ActionMailer::Base.descendants.each { |m| m.make_shareable! }
+        ::ActionMailer::Base.make_shareable!
       end
       if defined?(::ActiveJob::Base)
-        ::ActiveJob::Base.descendants.each { |j| j.make_shareable! rescue nil }
-        ::ActiveJob::Base.make_shareable! rescue nil
+        ::ActiveJob::Base.descendants.each { |j| j.make_shareable! }
+        ::ActiveJob::Base.make_shareable!
       end
     end
 
@@ -173,17 +173,17 @@ module Rails
       require "rack/multipart"
 
       ::ActiveSupport.error_reporter.make_shareable!
-      ::ActiveSupport.event_reporter.make_shareable! rescue nil
+      ::ActiveSupport.event_reporter.make_shareable!
       ::ActiveSupport::Inflector::Inflections.make_shareable!
 
       # Warm up the I18n transliterator cache so it's populated before
       # the backend gets frozen. Otherwise, lazy init fails in Ractors.
-      I18n.transliterate("test") rescue nil
+      I18n.transliterate("test")
       ::ActiveSupport::Messages::Metadata::ENVELOPE_SERIALIZERS.freeze
       ::ActiveSupport::Messages::Metadata::TIMESTAMP_SERIALIZERS.freeze
       ::ActionView::PathRegistry.make_shareable!
       ::ActionView::LookupContext::DetailsKey.view_context_class
-      ::ActionView::LookupContext::Accessors::DEFAULT_PROCS.make_shareable! rescue nil
+      ::ActionView::LookupContext::Accessors::DEFAULT_PROCS.make_shareable!
       ::ActiveRecord::Relation::WhereClause.empty
       ::ActiveRecord::Relation::FromClause.empty
       ::ActionView::Template::Handlers.extensions
@@ -200,15 +200,15 @@ module Rails
       # to compute inline for unseen patterns.
       cache = I18n.const_get(:INTERPOLATION_PATTERNS_CACHE)
       cache[I18n.config.interpolation_patterns]  # warm up default
-      cache.make_shareable! rescue nil
+      cache.make_shareable!
       I18n.config.interpolation_patterns  # forces @@interpolation_patterns
 
       # Patch I18n.normalize_key to handle frozen caches.
       ::I18n.instance_eval <<~RUBY
         def normalize_key(key, separator)
-          cache = (@@normalized_key_cache[separator] rescue nil)
+          cache = begin; @@normalized_key_cache[separator]; rescue FrozenError, Ractor::IsolationError; nil; end
           if cache
-            cached = (cache[key] rescue nil)
+            cached = begin; cache[key]; rescue FrozenError, Ractor::IsolationError; nil; end
             return cached if cached
           end
 
@@ -242,18 +242,18 @@ module Rails
 
       # Make the Executor and Reloader shareable (anonymous subclasses
       # of ExecutionWrapper with their own callback chains).
-      executor.make_shareable! rescue nil
-      reloader.make_shareable! rescue nil
+      executor.make_shareable!
+      reloader.make_shareable!
 
       # Controllers (including Base and all ancestor modules)
       seen_modules = {}
       [::ActionController::Base, *::ActionController::Base.descendants].each do |klass|
-        klass.make_shareable! rescue nil
+        klass.make_shareable!
         klass.ancestors.each do |ancestor|
           next if ancestor == Object || ancestor == Kernel || ancestor == BasicObject
           next if seen_modules[ancestor]
           seen_modules[ancestor] = true
-          ancestor.make_shareable! rescue nil
+          ancestor.make_shareable!
         end
       end
 
@@ -267,10 +267,14 @@ module Rails
           seen[klass] = true
           klass.ancestors.each do |ancestor|
             next if ancestor == Object || ancestor == Kernel || ancestor == BasicObject
-            ancestor.make_shareable! rescue nil
+            ancestor.make_shareable!
           end
         end
-        middleware_app = middleware_app.instance_variable_get(:@app) rescue nil
+        begin
+          middleware_app = middleware_app.instance_variable_get(:@app)
+        rescue Ractor::IsolationError
+          break
+        end
       end
 
       # Clear the constant-traversal guard so framework classes
@@ -323,7 +327,7 @@ module Rails
        ::Mime, ::Rails::VERSION, ::ActionText::Content,
        ::ActiveSupport::JSON::Encoding,
        ::I18n, ::I18n::Config].each do |klass|
-        klass.make_shareable! rescue nil
+        klass.make_shareable!
       end
 
       # External gems in the request path
@@ -331,7 +335,7 @@ module Rails
       [::Rack::Headers, ::Rack::Mime, ::Rack::Utils,
        ::Rack::MethodOverride, ::Rack::Request,
        ::Rack::Multipart::Parser].each do |klass|
-        klass.make_shareable! rescue nil
+        klass.make_shareable!
       end
 
       ::Turbo.make_shareable! if defined?(::Turbo)

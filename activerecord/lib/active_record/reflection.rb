@@ -164,16 +164,18 @@ module ActiveRecord
       # Eagerly resolve all lazy fields before freezing so they're
       # available after the reflection is made Ractor-shareable.
       def freeze
-        class_name rescue nil
-        klass rescue nil
-        foreign_key rescue nil
-        association_foreign_key rescue nil
-        has_inverse? rescue nil
-        inverse_of rescue nil
-        check_validity_of_inverse! rescue nil
-        check_validity! rescue nil
-        active_record_primary_key rescue nil
-        join_foreign_key rescue nil
+        class_name
+        klass
+        foreign_key
+        association_foreign_key
+        counter_cache_column
+        has_inverse?
+        inverse_of
+        check_validity_of_inverse!
+        check_validity!
+        active_record_primary_key
+        join_foreign_key
+        deprecated_nested_reflections if respond_to?(:deprecated_nested_reflections)
         super
       end
 
@@ -258,6 +260,7 @@ module ActiveRecord
       end
 
       def counter_cache_column
+        return @counter_cache_column if frozen?
         @counter_cache_column ||= begin
           counter_cache = options[:counter_cache]
 
