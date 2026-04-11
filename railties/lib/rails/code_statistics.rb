@@ -28,7 +28,7 @@ module Rails
       %w(Channel\ tests     test/channels),
       %w(Integration\ tests test/integration),
       %w(System\ tests      test/system),
-    ]
+    ].freeze
 
     TEST_TYPES = ["Controller tests",
                   "Helper tests",
@@ -38,9 +38,9 @@ module Rails
                   "Channel tests",
                   "Job tests",
                   "Integration tests",
-                  "System tests"]
+                  "System tests"].freeze
 
-    HEADERS = { lines: " Lines", code_lines: "   LOC", classes: "Classes", methods: "Methods" }
+    HEADERS = { lines: " Lines", code_lines: "   LOC", classes: "Classes", methods: "Methods" }.freeze
 
     EXTENSIONS = %w[rb js ts css scss coffee rake erb]
 

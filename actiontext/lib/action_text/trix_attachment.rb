@@ -16,7 +16,7 @@ module ActionText
       "width"       => ->(value) { Integer(value.to_s, exception: false) },
       "height"      => ->(value) { Integer(value.to_s, exception: false) },
       :default      => ->(value) { value.to_s }
-    }
+    }.freeze
 
     class << self
       def from_attributes(attributes)
