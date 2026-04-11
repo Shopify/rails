@@ -33,16 +33,20 @@ module ActiveRecord
       end
 
       %w(key_derivation_salt primary_key deterministic_key).each do |key|
+        k = key.to_sym
+        ivar = :"@#{key}"
+
         silence_redefinition_of_method "has_#{key}?"
-        define_method("has_#{key}?") do
-          instance_variable_get(:"@#{key}").presence
-        end
+        define_method("has_#{key}?",
+          -> { instance_variable_get(ivar).presence }.make_shareable!)
 
         silence_redefinition_of_method key
-        define_method(key) do
-          public_send("has_#{key}?") or
-            raise Errors::Configuration, "Missing Active Record encryption credential: active_record_encryption.#{key}"
-        end
+        has_method = :"has_#{key}?"
+        define_method(key,
+          -> {
+            public_send(has_method) or
+              raise Errors::Configuration, "Missing Active Record encryption credential: active_record_encryption.#{key}"
+          }.make_shareable!)
       end
 
       private

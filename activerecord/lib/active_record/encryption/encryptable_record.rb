@@ -107,19 +107,23 @@ module ActiveRecord
           end
 
           def override_accessors_to_preserve_original(name, original_attribute_name)
+            n = name
+            orig = original_attribute_name
             include(Module.new do
-              define_method name do
-                if ((value = super()) && encrypted_attribute?(name)) || !ActiveRecord::Encryption.config.support_unencrypted_data
-                  send(original_attribute_name)
-                else
-                  value
-                end
-              end
+              define_method(n,
+                -> {
+                  if ((value = super()) && encrypted_attribute?(n)) || !ActiveRecord::Encryption.config.support_unencrypted_data
+                    send(orig)
+                  else
+                    value
+                  end
+                }.make_shareable!)
 
-              define_method "#{name}=" do |value|
-                self.send "#{original_attribute_name}=", value
-                super(value)
-              end
+              define_method("#{n}=",
+                -> (value) {
+                  self.send("#{orig}=", value)
+                  super(value)
+                }.make_shareable!)
             end)
           end
 
