@@ -194,7 +194,7 @@ module ActiveRecord
         interval:    { name: "interval" },
         oid:         { name: "oid" },
         enum:        {} # special type https://www.postgresql.org/docs/current/datatype-enum.html
-      }
+      }.freeze
 
       OID = PostgreSQL::OID # :nodoc:
 

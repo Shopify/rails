@@ -2069,7 +2069,7 @@ module ActiveRecord
       end
 
       VALID_DIRECTIONS = [:asc, :desc, :ASC, :DESC,
-                          "asc", "desc", "ASC", "DESC"].to_set # :nodoc:
+                          "asc", "desc", "ASC", "DESC"].to_set.freeze # :nodoc:
 
       def validate_order_args(args)
         args.each do |arg|
