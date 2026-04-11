@@ -164,8 +164,10 @@ module ActiveRecord
       # Eagerly resolve all lazy fields before freezing so they're
       # available after the reflection is made Ractor-shareable.
       def freeze
-        class_name
-        klass
+        unless respond_to?(:polymorphic?) && polymorphic?
+          class_name
+          klass
+        end
         foreign_key
         association_foreign_key
         counter_cache_column
