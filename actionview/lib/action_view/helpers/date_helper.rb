@@ -889,14 +889,16 @@ module ActionView
 
       private
         %w( sec min hour day month year ).each do |method|
-          define_method(method) do
-            case @datetime
-            when Hash then @datetime[method.to_sym]
-            when Numeric then @datetime
-            when nil then nil
-            else @datetime.send(method)
-            end
-          end
+          m = method.to_sym
+          define_method(method,
+            -> {
+              case @datetime
+              when Hash then @datetime[m]
+              when Numeric then @datetime
+              when nil then nil
+              else @datetime.send(m)
+              end
+            }.make_shareable!)
         end
 
         def prompt_text(prompt, type)
