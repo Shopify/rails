@@ -45,23 +45,37 @@ class Module
   # to freeze the module (triggering any custom #freeze logic) and
   # then make each ivar value shareable.
   if defined?(Ractor)
+    SHAREABLE_SKIP_IVARS = %w[connection_handler].freeze # :nodoc:
+    SHAREABLE_SKIP_TYPES = [Thread::Mutex, Monitor, Proc].freeze # :nodoc:
+
     def make_shareable!
       # Always traverse ivars (they may have been set after a previous call)
       [self, singleton_class].each do |target|
         target.instance_variables.each do |ivar|
-          # Skip the connection handler -- it must stay mutable
-          next if ivar.to_s.include?("connection_handler")
-          val = target.instance_variable_get(ivar) rescue next
+          next if SHAREABLE_SKIP_IVARS.any? { |s| ivar.to_s.include?(s) }
+          begin
+            val = target.instance_variable_get(ivar)
+          rescue Ractor::IsolationError
+            next
+          end
           next if val.equal?(nil) || val.shareable?
-          next if val.is_a?(Thread::Mutex) || val.is_a?(Monitor) || val.is_a?(Proc)
+          next if SHAREABLE_SKIP_TYPES.any? { |t| val.is_a?(t) }
           next if defined?(ActiveRecord) && val.is_a?(ActiveRecord::Reflection::AbstractReflection)
-          val.make_shareable! rescue nil
+          begin
+            val.make_shareable!
+          rescue Ractor::Error, Ractor::IsolationError, FrozenError => e
+            Rails.logger.warn("[make_shareable!] #{self}#{ivar}: #{e.message[0..100]}") if defined?(Rails.logger) && Rails.logger
+          end
         end
       end
       class_variables(false).each do |cvar|
         val = class_variable_get(cvar)
         next if val.equal?(nil) || val.shareable?
-        val.make_shareable! rescue nil
+        begin
+          val.make_shareable!
+        rescue Ractor::Error, Ractor::IsolationError, FrozenError => e
+          Rails.logger.warn("[make_shareable!] #{self}#{cvar}: #{e.message[0..100]}") if defined?(Rails.logger) && Rails.logger
+        end
       end
       # Recurse into nested module constants (with guard to prevent loops)
       in_progress = (Thread.current[:_module_make_shareable] ||= {}.compare_by_identity)
@@ -69,11 +83,19 @@ class Module
         in_progress[self] = true
         constants(false).each do |const|
           next if autoload?(const)
-          val = const_get(const, false) rescue next
-          if val.is_a?(Module)
-            val.make_shareable! rescue nil
-          elsif !val.shareable?
-            val.make_shareable! rescue nil
+          begin
+            val = const_get(const, false)
+          rescue NameError
+            next
+          end
+          begin
+            if val.is_a?(Module)
+              val.make_shareable!
+            elsif !val.shareable?
+              val.make_shareable!
+            end
+          rescue Ractor::Error, Ractor::IsolationError, FrozenError => e
+            Rails.logger.warn("[make_shareable!] #{self}::#{const}: #{e.message[0..100]}") if defined?(Rails.logger) && Rails.logger
           end
         end
       end

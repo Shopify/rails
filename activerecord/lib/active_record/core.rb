@@ -290,34 +290,41 @@ module ActiveRecord
       def make_shareable!
         @_making_shareable = true
         unless abstract_class?
-          # Eagerly resolve all lazy schema state
+          # Eagerly resolve all lazy schema state.
           table_name
           primary_key
-          table_exists? rescue nil
-          columns rescue nil
-          columns_hash rescue nil
-          column_names rescue nil
-          _default_attributes rescue nil
+
+          # If the table doesn't exist (e.g., SolidQueue in a separate
+          # database that hasn't been migrated), skip schema resolution.
+          unless table_exists?
+            Rails.logger.warn("[make_shareable!] #{name}: table '#{table_name}' does not exist, skipping schema resolution") if defined?(Rails.logger) && Rails.logger
+            return self
+          end
+
+          columns
+          columns_hash
+          column_names
+          _default_attributes
           arel_table
-          predicate_builder rescue nil
-          attributes_builder rescue nil
-          query_constraints_list rescue nil
-          _to_partial_path rescue nil
-          all_timestamp_attributes_in_model rescue nil
+          predicate_builder
+          attributes_builder
+          query_constraints_list
+          _to_partial_path
+          all_timestamp_attributes_in_model
 
           # Reflections handle their own freeze (see AbstractReflection#freeze)
-          reflections.each_value { |r| r.make_shareable! rescue nil }
+          reflections.each_value { |r| r.make_shareable! }
           instance_variables.each do |ivar|
             if ivar.to_s.start_with?("@_ncm_block_")
               val = instance_variable_get(ivar)
-              val.make_shareable! rescue nil unless val.shareable?
+              val.make_shareable! unless val.shareable?
             end
           end
 
           # Generate attribute methods and set lazy flags. Must be
           # after all other calls because some trigger resets.
-          relation_delegate_class(ActiveRecord::Relation) rescue nil
-          define_attribute_methods rescue nil
+          relation_delegate_class(ActiveRecord::Relation)
+          define_attribute_methods
           @primary_key = primary_key
           @finder_needs_type_condition = descends_from_active_record? ? :false : :true
 
@@ -334,30 +341,43 @@ module ActiveRecord
 
         # Make ivar values shareable. Only freeze simple data structures
         # that don't contain deep object graphs with Monitors/Procs.
-        # Use freeze instead of make_shareable! to avoid deep traversal
-        # into objects that may reference Monitors or cause deadlocks.
         instance_variables.each do |ivar|
           next if ivar.to_s.include?("connection") || ivar == :@_making_shareable
-          val = instance_variable_get(ivar) rescue next
+          begin
+            val = instance_variable_get(ivar)
+          rescue Ractor::IsolationError
+            next
+          end
           next if val.equal?(nil) || val.shareable?
           next if val.is_a?(Thread::Mutex) || val.is_a?(Monitor) || val.is_a?(Proc)
-          # Simple values: freeze directly. Complex objects: use make_shareable!
           if val.is_a?(String) || val.is_a?(Symbol) || val.is_a?(Numeric) ||
              val.is_a?(TrueClass) || val.is_a?(FalseClass) || val.is_a?(Regexp)
             val.freeze
           else
-            val.make_shareable! rescue nil
+            begin
+              val.make_shareable!
+            rescue Ractor::Error, Ractor::IsolationError, FrozenError => e
+              Rails.logger.warn("[make_shareable!] #{name}#{ivar}: #{e.message[0..100]}") if defined?(Rails.logger) && Rails.logger
+            end
           end
         end
         singleton_class.instance_variables.each do |ivar|
           next if ivar.to_s.include?("connection")
-          val = singleton_class.instance_variable_get(ivar) rescue next
+          begin
+            val = singleton_class.instance_variable_get(ivar)
+          rescue Ractor::IsolationError
+            next
+          end
           next if val.equal?(nil) || val.shareable?
           next if val.is_a?(Thread::Mutex) || val.is_a?(Monitor) || val.is_a?(Proc)
           if val.is_a?(String) || val.is_a?(Symbol) || val.is_a?(Numeric)
             val.freeze
           else
-            val.make_shareable! rescue nil
+            begin
+              val.make_shareable!
+            rescue Ractor::Error, Ractor::IsolationError, FrozenError => e
+              Rails.logger.warn("[make_shareable!] #{name} singleton #{ivar}: #{e.message[0..100]}") if defined?(Rails.logger) && Rails.logger
+            end
           end
         end
       ensure
