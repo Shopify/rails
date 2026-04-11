@@ -169,6 +169,14 @@ module Rails
       # JSON gem: make dump/load options shareable
       ::JSON.make_shareable! if defined?(::JSON)
 
+      # Number helpers — DEFAULTS hash contains nested hashes
+      ::ActiveSupport::NumberHelper::NumberConverter.make_shareable! if defined?(::ActiveSupport::NumberHelper::NumberConverter)
+
+      # Jbuilder gem
+      ::Jbuilder.make_shareable! if defined?(::Jbuilder)
+
+
+
       # Make custom validators shareable (app-level EachValidator subclasses)
       if defined?(::ActiveModel::EachValidator)
         ::ActiveModel::EachValidator.descendants.each { |v| v.make_shareable! }
