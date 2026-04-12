@@ -148,6 +148,22 @@ module Rails
       # Save the connection handler (nilled during AR::Base.make_shareable!)
       saved_handler = ::ActiveRecord::Base.default_connection_handler
 
+      # I18n MUTEX: replace with nil before freeze. The backend is
+      # immutable after freeze — the MUTEX is dead code.
+      if defined?(::I18n::Backend::Simple::Implementation)
+        ::I18n::Backend::Simple::Implementation.send(:remove_const, :MUTEX) if ::I18n::Backend::Simple::Implementation.const_defined?(:MUTEX, false)
+        ::I18n::Backend::Simple::Implementation.const_set(:MUTEX, nil)
+      end
+
+      # Nil out Engine instances BEFORE make_shareable! traversal —
+      # they contain non-shareable boot-time state (file watchers,
+      # thread state) not needed at request time.
+      if defined?(::Rails::Engine)
+        ::Rails::Engine.descendants.each do |engine_class|
+          engine_class.instance_variable_set(:@instance, nil) if engine_class.instance_variable_defined?(:@instance)
+        end
+      end
+
       make_shareable!
 
       # Models LAST -- after all other make_shareable! calls that
@@ -486,15 +502,6 @@ module Rails
       @ordered_railties = nil
       @railties = nil
       @autoloaders = nil
-
-      # Nil out Engine instances — boot-time state not needed at
-      # request time, contain non-shareable objects (thread state,
-      # file watchers, etc.)
-      if defined?(::Rails::Engine)
-        ::Rails::Engine.descendants.each do |engine_class|
-          engine_class.instance_variable_set(:@instance, nil) if engine_class.instance_variable_defined?(:@instance)
-        end
-      end
 
       super
     end
