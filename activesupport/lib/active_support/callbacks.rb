@@ -624,6 +624,7 @@ module ActiveSupport
           # instances) BEFORE freezing the chain itself. This ensures
           # that lambdas' implicit self references are shareable when
           # make_shareable traverses the Proc objects.
+          warned = Module::SHAREABLE_WARNED
           @chain.each do |cb|
             cb.instance_variables.each do |ivar|
               val = cb.instance_variable_get(ivar)
@@ -631,13 +632,19 @@ module ActiveSupport
               begin
                 val.make_shareable!
               rescue Ractor::Error, Ractor::IsolationError, FrozenError => e
-                Rails.logger.warn("[CallbackChain#freeze] #{@name} #{ivar}: #{e.message[0..80]}") if defined?(Rails.logger) && Rails.logger
+                unless warned.key?(val)
+                  warned[val] = true
+                  Rails.logger.warn("[CallbackChain#freeze] #{@name} #{ivar}: #{e.message[0..80]}") if defined?(Rails.logger) && Rails.logger
+                end
               end
             end
             begin
               cb.make_shareable!
             rescue Ractor::Error, Ractor::IsolationError, FrozenError => e
-              Rails.logger.warn("[CallbackChain#freeze] #{@name} callback: #{e.message[0..80]}") if defined?(Rails.logger) && Rails.logger
+              unless warned.key?(cb)
+                warned[cb] = true
+                Rails.logger.warn("[CallbackChain#freeze] #{@name} callback: #{e.message[0..80]}") if defined?(Rails.logger) && Rails.logger
+              end
             end
           end
           super

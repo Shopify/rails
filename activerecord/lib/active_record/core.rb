@@ -358,7 +358,10 @@ module ActiveRecord
             begin
               val.make_shareable!
             rescue Ractor::Error, Ractor::IsolationError, FrozenError => e
-              Rails.logger.warn("[make_shareable!] #{name}#{ivar}: #{e.message[0..100]}") if defined?(Rails.logger) && Rails.logger
+              unless Module::SHAREABLE_WARNED.key?(val)
+                Module::SHAREABLE_WARNED[val] = true
+                Rails.logger.warn("[make_shareable!] #{name}#{ivar}: #{e.message[0..100]}") if defined?(Rails.logger) && Rails.logger
+              end
             end
           end
         end
@@ -377,7 +380,10 @@ module ActiveRecord
             begin
               val.make_shareable!
             rescue Ractor::Error, Ractor::IsolationError, FrozenError => e
-              Rails.logger.warn("[make_shareable!] #{name} singleton #{ivar}: #{e.message[0..100]}") if defined?(Rails.logger) && Rails.logger
+              unless Module::SHAREABLE_WARNED.key?(val)
+                Module::SHAREABLE_WARNED[val] = true
+                Rails.logger.warn("[make_shareable!] #{name} singleton #{ivar}: #{e.message[0..100]}") if defined?(Rails.logger) && Rails.logger
+              end
             end
           end
         end
