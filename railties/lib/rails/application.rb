@@ -155,6 +155,24 @@ module Rails
         ::I18n::Backend::Simple::Implementation.const_set(:MUTEX, nil)
       end
 
+      # Clear the Executor/Reloader :run callback chain — it contains
+      # Procs from finisher.rb whose self is the initializer context
+      # (not shareable). These callbacks are for the reloader which
+      # doesn't fire after ractorize! in production.
+      if executor.respond_to?(:reset_callbacks)
+        executor.reset_callbacks(:run)
+      end
+      if reloader.respond_to?(:reset_callbacks)
+        reloader.reset_callbacks(:run)
+      end
+
+      # Clear Engine load_seed callbacks (same issue).
+      if defined?(::Rails::Engine)
+        ::Rails::Engine.descendants.each do |engine_class|
+          engine_class.reset_callbacks(:load_seed) if engine_class.respond_to?(:reset_callbacks)
+        end
+      end
+
       # Nil out Engine instances BEFORE make_shareable! traversal —
       # they contain non-shareable boot-time state (file watchers,
       # thread state) not needed at request time.
