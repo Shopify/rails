@@ -371,6 +371,14 @@ module ActiveRecord
         end
         singleton_class.instance_variables.each do |ivar|
           next if ivar.to_s.include?("connection")
+          # attachment_reflections contain back-references to model
+          # classes (which we intentionally don't freeze). Freeze the
+          # hash itself but not its contents.
+          if ivar.to_s.include?("attachment_reflections")
+            val = singleton_class.instance_variable_get(ivar) rescue next
+            val.freeze unless val.nil? || val.frozen?
+            next
+          end
           begin
             val = singleton_class.instance_variable_get(ivar)
           rescue Ractor::IsolationError
