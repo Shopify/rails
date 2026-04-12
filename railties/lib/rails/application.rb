@@ -206,6 +206,18 @@ module Rails
         ::ActionView::Base.make_shareable!
       end
 
+      # Action Text: eagerly resolve document classes and class vars
+      if defined?(::ActionText)
+        ::ActionText.html_document_class
+        ::ActionText.html_document_fragment_class
+        if defined?(::ActionText::RichText)
+          # Make @@editor value shareable
+          ::ActionText::RichText.editor.make_shareable!
+          ::ActionText::RichText.make_shareable!
+        end
+        ::ActionText.make_shareable! if defined?(::ActionText)
+      end
+
       # Loofah gem: eagerly resolve document_klass before freeze
       if defined?(::Loofah::HTML5::DocumentFragment)
         ::Loofah::HTML5::DocumentFragment.document_klass

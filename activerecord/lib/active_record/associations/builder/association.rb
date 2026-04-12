@@ -52,7 +52,19 @@ module ActiveRecord::Associations::Builder # :nodoc:
 
     def self.build_scope(scope)
       if scope && scope.arity == 0
-        proc { instance_exec(&scope) }
+        begin
+          scope.make_shareable!
+        rescue Ractor::Error, Ractor::IsolationError, FrozenError
+          # Scope proc captures non-shareable state — will be handled
+          # by the reflection freeze path
+        end
+        wrapper = proc { instance_exec(&scope) }
+        begin
+          wrapper.make_shareable!
+        rescue Ractor::Error, Ractor::IsolationError, FrozenError
+          # Wrapper couldn't be made shareable
+        end
+        wrapper
       else
         scope
       end
