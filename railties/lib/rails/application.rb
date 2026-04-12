@@ -175,6 +175,12 @@ module Rails
         end
       end
 
+      # Clear encryption declaration listeners — boot-time hooks
+      # that contain non-shareable Procs. No longer needed.
+      if defined?(::ActiveRecord::Encryption) && ::ActiveRecord::Encryption.respond_to?(:encrypted_attribute_declaration_listeners=)
+        ::ActiveRecord::Encryption.encrypted_attribute_declaration_listeners = nil
+      end
+
       # Eagerly resolve encryption context keys before freeze.
       # Calling custom_contexts triggers the lazy @__thread_mattr_
       # ivar initialization so it's set before the module freezes.
