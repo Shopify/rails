@@ -83,7 +83,8 @@ module ActionText
         end
 
         rich_text_class_name = encrypted ? "ActionText::EncryptedRichText" : "ActionText::RichText"
-        has_one :"rich_text_#{name}", -> { where(name: name) },
+        frozen_name = name.to_s.freeze
+        has_one :"rich_text_#{name}", -> { where(name: frozen_name) },
           class_name: rich_text_class_name, as: :record, inverse_of: :record, autosave: true, dependent: :destroy,
           strict_loading: strict_loading
 
