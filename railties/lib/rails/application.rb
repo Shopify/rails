@@ -475,6 +475,15 @@ module Rails
       @railties = nil
       @autoloaders = nil
 
+      # Nil out Engine instances — boot-time state not needed at
+      # request time, contain non-shareable objects (thread state,
+      # file watchers, etc.)
+      if defined?(::Rails::Engine)
+        ::Rails::Engine.descendants.each do |engine_class|
+          engine_class.instance_variable_set(:@instance, nil) if engine_class.instance_variable_defined?(:@instance)
+        end
+      end
+
       super
     end
 
