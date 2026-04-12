@@ -267,12 +267,14 @@ module Rails
         ::ActionMailer::Base.descendants.each { |m| m.make_shareable! }
         ::ActionMailer::Base.make_shareable!
       end
-      # Nil out the queue adapter before making job classes shareable
-      # — it has thread state (scheduler) that can't be shared.
-      # Job enqueueing dispatches to the main Ractor anyway.
       if defined?(::ActiveJob::Base)
-        ::ActiveJob::Base.instance_variable_set(:@__class_attr__queue_adapter, nil)
-        ::ActiveJob::Base.descendants.each { |j| j.make_shareable! }
+        # Nil out the queue adapter — it has thread state that can't
+        # be shared. Job enqueueing dispatches to the main Ractor.
+        ::ActiveJob::Base.singleton_class.instance_variable_set(:@__class_attr__queue_adapter, nil)
+        ::ActiveJob::Base.descendants.each do |j|
+          j.singleton_class.instance_variable_set(:@__class_attr__queue_adapter, nil) if j.singleton_class.instance_variable_defined?(:@__class_attr__queue_adapter)
+          j.make_shareable!
+        end
         ::ActiveJob::Base.make_shareable!
       end
     end
