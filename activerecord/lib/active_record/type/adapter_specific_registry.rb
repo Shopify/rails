@@ -18,8 +18,8 @@ module ActiveRecord
 
       def register(type_name, klass = nil, **options, &block)
         unless block_given?
-          block = proc { |_, *args| klass.new(*args) }
-          block.ruby2_keywords if block.respond_to?(:ruby2_keywords)
+          k = klass
+          block = shareable_proc { |_, *args| k.new(*args) }
         end
         registrations << Registration.new(type_name, block, **options)
       end
