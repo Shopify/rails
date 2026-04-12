@@ -131,9 +131,13 @@ module Rails
       # Replace the logger with a Ractor-local proxy that creates
       # per-Ractor loggers with fresh IOs to the same destination.
       require "active_support/ractor_local_logger"
-      ractor_logger = ActiveSupport::RactorLocalLogger.new(Rails.logger)
+      old_logger = Rails.logger
+      ractor_logger = ActiveSupport::RactorLocalLogger.new(old_logger)
       Rails.logger = ractor_logger
       @app_env_config["action_dispatch.logger"] = ractor_logger
+
+
+
       # Update component loggers that cached the old BroadcastLogger
       ::ActiveRecord::Base.logger = ractor_logger if defined?(::ActiveRecord::Base)
       ::ActionController::Base.logger = ractor_logger if defined?(::ActionController::Base)
