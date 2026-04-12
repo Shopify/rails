@@ -64,15 +64,26 @@ module ActiveJob
       #    end
       #  end
       def retry_on(*exceptions, wait: 3.seconds, attempts: 5, queue: nil, priority: nil, jitter: JITTER_DEFAULT, report: false, &retry_block)
+        # Assign to fresh locals so Ruby doesn't consider them
+        # "reassignable" (method params are, locals aren't).
+        r_wait = wait
+        r_attempts = attempts
+        r_queue = queue
+        r_priority = priority
+        r_jitter = jitter
+        r_report = report
+        r_block = retry_block
+        r_exceptions = exceptions.freeze
+
         rescue_from(*exceptions) do |error|
-          executions = executions_for(exceptions)
-          if attempts == :unlimited || executions < attempts
-            ActiveSupport.error_reporter.report(error, source: "application.active_job") if report
-            retry_job wait: determine_delay(seconds_or_duration_or_algorithm: wait, executions: executions, error: error, jitter: jitter), queue: queue, priority: priority, error: error
+          executions = executions_for(r_exceptions)
+          if r_attempts == :unlimited || executions < r_attempts
+            ActiveSupport.error_reporter.report(error, source: "application.active_job") if r_report
+            retry_job wait: determine_delay(seconds_or_duration_or_algorithm: r_wait, executions: executions, error: error, jitter: r_jitter), queue: r_queue, priority: r_priority, error: error
           else
-            if retry_block
+            if r_block
               instrument :retry_stopped, error: error do
-                retry_block.call(self, error)
+                r_block.call(self, error)
               end
               run_after_discard_procs(error)
             else
@@ -109,10 +120,13 @@ module ActiveJob
       #    end
       #  end
       def discard_on(*exceptions, report: false, &discard_block)
+        d_report = report
+        d_block = discard_block
+
         rescue_from(*exceptions) do |error|
           instrument :discard, error: error do
-            ActiveSupport.error_reporter.report(error, source: "application.active_job") if report
-            discard_block.call(self, error) if discard_block
+            ActiveSupport.error_reporter.report(error, source: "application.active_job") if d_report
+            d_block.call(self, error) if d_block
             run_after_discard_procs(error)
           end
         end
@@ -167,7 +181,7 @@ module ActiveJob
     end
 
     private
-      JITTER_DEFAULT = Object.new
+      JITTER_DEFAULT = Object.new.freeze
       private_constant :JITTER_DEFAULT
 
       def determine_delay(seconds_or_duration_or_algorithm:, executions:, error: nil, jitter: JITTER_DEFAULT)
