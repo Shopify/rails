@@ -164,6 +164,7 @@ module Rails
       end
       if reloader.respond_to?(:reset_callbacks)
         reloader.reset_callbacks(:run)
+        reloader.reset_callbacks(:class_unload) if reloader.respond_to?(:_class_unload_callbacks)
       end
 
       # Clear Engine load_seed callbacks (same issue).
