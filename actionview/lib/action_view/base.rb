@@ -203,22 +203,15 @@ module ActionView # :nodoc:
 
       def with_empty_template_cache # :nodoc:
         subclass = Class.new(self)
-        # Use string eval instead of define_method to avoid creating
-        # Proc closures that can't be called from non-main Ractors.
-        # Since instances belong to the subclass, self.class == subclass.
-        subclass.class_eval <<~RUBY, __FILE__, __LINE__ + 1
-          def compiled_method_container
-            self.class
-          end
-
-          def self.compiled_method_container
-            self
-          end
-
-          def inspect
-            "#<ActionView::Base:#{'%#016x' % (object_id << 1)}>"
-          end
-        RUBY
+        # We can't implement these as self.class because subclasses will
+        # share the same template cache as superclasses, so "changed?" won't work
+        # correctly. Use define_method with make_shareable! for Ractor safety.
+        subclass.define_method(:compiled_method_container,
+          -> { subclass }.make_shareable!)
+        subclass.define_singleton_method(:compiled_method_container,
+          -> { subclass }.make_shareable!)
+        subclass.define_method(:inspect,
+          -> { "#<ActionView::Base:#{'%#016x' % (object_id << 1)}>" }.make_shareable!)
         subclass
       end
 
