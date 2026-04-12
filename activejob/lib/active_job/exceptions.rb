@@ -63,16 +63,16 @@ module ActiveJob
       #      # Might raise Net::OpenTimeout or Timeout::Error when the remote service is down
       #    end
       #  end
-      def retry_on(*exceptions, wait: 3.seconds, attempts: 5, queue: nil, priority: nil, jitter: JITTER_DEFAULT, report: false)
+      def retry_on(*exceptions, wait: 3.seconds, attempts: 5, queue: nil, priority: nil, jitter: JITTER_DEFAULT, report: false, &retry_block)
         rescue_from(*exceptions) do |error|
           executions = executions_for(exceptions)
           if attempts == :unlimited || executions < attempts
             ActiveSupport.error_reporter.report(error, source: "application.active_job") if report
             retry_job wait: determine_delay(seconds_or_duration_or_algorithm: wait, executions: executions, error: error, jitter: jitter), queue: queue, priority: priority, error: error
           else
-            if block_given?
+            if retry_block
               instrument :retry_stopped, error: error do
-                yield self, error
+                retry_block.call(self, error)
               end
               run_after_discard_procs(error)
             else
@@ -108,11 +108,11 @@ module ActiveJob
       #      # Might raise CustomAppException for something domain specific
       #    end
       #  end
-      def discard_on(*exceptions, report: false)
+      def discard_on(*exceptions, report: false, &discard_block)
         rescue_from(*exceptions) do |error|
           instrument :discard, error: error do
             ActiveSupport.error_reporter.report(error, source: "application.active_job") if report
-            yield self, error if block_given?
+            discard_block.call(self, error) if discard_block
             run_after_discard_procs(error)
           end
         end

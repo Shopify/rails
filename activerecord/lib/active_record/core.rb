@@ -305,6 +305,10 @@ module ActiveRecord
           columns_hash
           column_names
           _default_attributes
+          # Clear pending modifications — they've been applied to
+          # _default_attributes and may contain non-shareable Procs
+          # (from serialize/encrypts decorators with reassignable vars).
+          @pending_attribute_modifications = [].freeze
           arel_table
           predicate_builder
           attributes_builder
