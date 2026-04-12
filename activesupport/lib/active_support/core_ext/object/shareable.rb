@@ -47,6 +47,7 @@ class Module
   if defined?(Ractor)
     SHAREABLE_SKIP_IVARS = %w[connection_handler].freeze # :nodoc:
     SHAREABLE_SKIP_TYPES = [Thread::Mutex, Monitor, Proc].freeze # :nodoc:
+    SHAREABLE_WARNED = {}.compare_by_identity # :nodoc:
 
     def make_shareable!
       # Always traverse ivars (they may have been set after a previous call)
@@ -64,7 +65,10 @@ class Module
           begin
             val.make_shareable!
           rescue Ractor::Error, Ractor::IsolationError, FrozenError => e
-            Rails.logger.warn("[make_shareable!] #{self}#{ivar}: #{e.message[0..100]}") if defined?(Rails.logger) && Rails.logger
+            unless SHAREABLE_WARNED.key?(val)
+              SHAREABLE_WARNED[val] = true
+              Rails.logger.warn("[make_shareable!] #{self}#{ivar}: #{e.message[0..100]}") if defined?(Rails.logger) && Rails.logger
+            end
           end
         end
       end
@@ -74,7 +78,10 @@ class Module
         begin
           val.make_shareable!
         rescue Ractor::Error, Ractor::IsolationError, FrozenError => e
-          Rails.logger.warn("[make_shareable!] #{self}#{cvar}: #{e.message[0..100]}") if defined?(Rails.logger) && Rails.logger
+          unless SHAREABLE_WARNED.key?(val)
+            SHAREABLE_WARNED[val] = true
+            Rails.logger.warn("[make_shareable!] #{self}#{cvar}: #{e.message[0..100]}") if defined?(Rails.logger) && Rails.logger
+          end
         end
       end
       # Recurse into nested module constants (with guard to prevent loops)
@@ -95,7 +102,10 @@ class Module
               val.make_shareable!
             end
           rescue Ractor::Error, Ractor::IsolationError, FrozenError => e
-            Rails.logger.warn("[make_shareable!] #{self}::#{const}: #{e.message[0..100]}") if defined?(Rails.logger) && Rails.logger
+            unless SHAREABLE_WARNED.key?(val)
+              SHAREABLE_WARNED[val] = true
+              Rails.logger.warn("[make_shareable!] #{self}::#{const}: #{e.message[0..100]}") if defined?(Rails.logger) && Rails.logger
+            end
           end
         end
       end
