@@ -315,4 +315,31 @@ class PathsIntegrationTest < ActiveSupport::TestCase
       end
     end
   end
+
+  test "existent skips File.exist? for paths produced by Dir.glob" do
+    Dir.mktmpdir do |dir|
+      locales_dir = File.join(dir, "config", "locales")
+      FileUtils.mkdir_p(locales_dir)
+      File.write(File.join(locales_dir, "en.yml"), "en: {}")
+      File.write(File.join(locales_dir, "fr.yml"), "fr: {}")
+
+      root = Rails::Paths::Root.new(dir)
+      root.add "config/locales", glob: "**/*.{rb,yml}"
+
+      expected = root["config/locales"].expanded.sort
+      result = root["config/locales"].existent.sort
+
+      assert_equal expected, result
+    end
+  end
+
+  test "existent filters non-glob paths that do not exist" do
+    Dir.mktmpdir do |dir|
+      root = Rails::Paths::Root.new(dir)
+      root.add "config/locales", glob: "**/*.{rb,yml}"
+
+      # The directory does not exist, so existent should return nothing
+      assert_empty root["config/locales"].existent
+    end
+  end
 end

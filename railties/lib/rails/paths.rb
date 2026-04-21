@@ -218,14 +218,27 @@ module Rails
 
       # Returns all expanded paths but only if they exist in the filesystem.
       def existent
-        expanded.select do |f|
-          does_exist = File.exist?(f)
+        raise "You need to set a path root" unless @root.path
+        result = []
 
-          if !does_exist && File.symlink?(f)
-            raise "File #{f.inspect} is a symlink that does not point to a valid file"
+        each do |path|
+          path = File.expand_path(path, @root.path)
+
+          if @glob && File.directory?(path)
+            # Dir.glob only returns entries that exist, so there is no need
+            # to re-stat each one with File.exist?.
+            result.concat files_in(path)
+          else
+            if File.exist?(path)
+              result << path
+            elsif File.symlink?(path)
+              raise "File #{path.inspect} is a symlink that does not point to a valid file"
+            end
           end
-          does_exist
         end
+
+        result.uniq!
+        result
       end
 
       def existent_directories
