@@ -51,6 +51,8 @@ module ActiveJob
         @scheduler.shutdown wait: wait
       end
 
+
+
       # Used for our test suite.
       def immediate=(immediate) # :nodoc:
         @scheduler.immediate = immediate

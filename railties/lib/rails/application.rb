@@ -183,6 +183,16 @@ module Rails
         end
       end
 
+      # Eagerly resolve all timezone objects and make them shareable.
+      # ActiveSupport::TimeZone uses @lazy_zones_map and @country_zones
+      # (Concurrent::Map) as caches, and @zones/@zones_map as lazy state.
+      # Populating them now and freezing makes them Ractor-shareable.
+      if defined?(::ActiveSupport::TimeZone)
+        ::ActiveSupport::TimeZone.all   # populates @zones and @lazy_zones_map
+        ::ActiveSupport::TimeZone.send(:zones_map) # populates @zones_map
+        ::ActiveSupport::TimeZone.make_shareable!
+      end
+
       make_shareable!
 
       # Models LAST -- after all other make_shareable! calls that
