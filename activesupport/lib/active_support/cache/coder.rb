@@ -81,10 +81,10 @@ module ActiveSupport
 
         COMPRESSED_FLAG = 0x80
 
-        PACKED_TEMPLATE = "CEl<"
-        PACKED_TYPE_TEMPLATE = "@#{SIGNATURE.bytesize}C"
-        PACKED_EXPIRES_AT_TEMPLATE = "@#{[0].pack(PACKED_TYPE_TEMPLATE).bytesize}E"
-        PACKED_VERSION_LENGTH_TEMPLATE = "@#{[0].pack(PACKED_EXPIRES_AT_TEMPLATE).bytesize}l<"
+        PACKED_TEMPLATE = "CEl<".freeze
+        PACKED_TYPE_TEMPLATE = "@#{SIGNATURE.bytesize}C".freeze
+        PACKED_EXPIRES_AT_TEMPLATE = "@#{[0].pack(PACKED_TYPE_TEMPLATE).bytesize}E".freeze
+        PACKED_VERSION_LENGTH_TEMPLATE = "@#{[0].pack(PACKED_EXPIRES_AT_TEMPLATE).bytesize}l<".freeze
         PACKED_VERSION_INDEX = [0].pack(PACKED_VERSION_LENGTH_TEMPLATE).bytesize
 
         MARSHAL_SIGNATURE = "\x04\x08".b.freeze
@@ -99,7 +99,7 @@ module ActiveSupport
           end
         end
 
-        STRING_DESERIALIZERS = STRING_ENCODINGS.transform_values { |encoding| StringDeserializer.new(encoding) }
+        STRING_DESERIALIZERS = STRING_ENCODINGS.transform_values { |encoding| StringDeserializer.new(encoding).freeze }.freeze
 
         class LazyEntry < Cache::Entry
           def initialize(serializer, compressor, payload, **options)
