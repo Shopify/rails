@@ -494,6 +494,13 @@ module ActiveRecord
         false
       end
 
+      # unprepared_statement yields to the block. The real adapter
+      # temporarily disables prepared statements, but the proxy never
+      # uses prepared statements, so just yield.
+      def unprepared_statement
+        yield
+      end
+
       def cacheable_query(klass, arel)
         # Without prepared statements, build a simple query
         [arel, []]
@@ -607,9 +614,14 @@ module ActiveRecord
 
       def accept(node, collector = nil)
         node_data = Marshal.dump(node).freeze
+        # The collector (Arel::Collectors::SQLString) can't cross the
+        # Ractor boundary. Create a fresh one in the main Ractor.
         Ractor::Dispatch.main.run do
           n = Marshal.load(node_data)
-          ActiveRecord::Base.with_connection { |c| c.visitor.accept(n, collector) }
+          ActiveRecord::Base.with_connection do |c|
+            col = Arel::Collectors::SQLString.new
+            c.visitor.accept(n, col)
+          end
         end
       end
     end
@@ -684,6 +696,16 @@ module ActiveRecord
 
       def clear_query_cache
         # No-op in Ractor context — query caching is per-connection
+      end
+
+      def disable_query_cache(**)
+        # No-op in Ractor context — query caching is per-connection
+        yield if block_given?
+      end
+
+      def enable_query_cache(**)
+        # No-op in Ractor context — query caching is per-connection
+        yield if block_given?
       end
     end
 

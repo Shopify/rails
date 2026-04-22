@@ -183,6 +183,13 @@ module Rails
         end
       end
 
+      # Make database configurations shareable. @@configurations is a
+      # class variable that must have a shareable value to be readable
+      # from non-main Ractors.
+      if defined?(::ActiveRecord::Base)
+        ::ActiveRecord::Base.configurations.make_shareable!
+      end
+
       # Eagerly resolve all timezone objects and make them shareable.
       # ActiveSupport::TimeZone uses @lazy_zones_map and @country_zones
       # (Concurrent::Map) as caches, and @zones/@zones_map as lazy state.
