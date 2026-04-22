@@ -336,12 +336,39 @@ module ActiveRecord
         INSTANCE
       end
 
+      private
+
+      # Sanitize an ActiveRecord exception so it can cross Ractor
+      # boundaries. Database exceptions (StatementInvalid and its
+      # subclasses) carry a @connection_pool reference which contains
+      # a Thread::Monitor via MonitorMixin. Thread::Monitor objects
+      # can't be copied across Ractors, causing Ractor::Dispatch to
+      # hang silently when the executor thread dies trying to send
+      # the error back.
+      #
+      # Fix: nil out @connection_pool on the exception before
+      # re-raising. This preserves the original exception class
+      # (InvalidForeignKey, RecordNotUnique, etc.) so downstream
+      # rescue clauses and rescue_responses continue to work.
+      def self.sanitize_db_error!(e)
+        if e.respond_to?(:connection_pool)
+          e.instance_variable_set(:@connection_pool, nil)
+        end
+        raise e
+      end
+
+      public
+
       def exec_query(sql, name = "SQL", binds = [], prepare: false)
         frozen_sql = sql.frozen? ? sql : sql.dup.freeze
         frozen_name = name.frozen? ? name : name.dup.freeze
         frozen_binds = binds.freeze
         Ractor::Dispatch.main.run do
-          ActiveRecord::Base.with_connection { |c| c.exec_query(frozen_sql, frozen_name, frozen_binds, prepare: prepare) }
+          begin
+            ActiveRecord::Base.with_connection { |c| c.exec_query(frozen_sql, frozen_name, frozen_binds, prepare: prepare) }
+          rescue => e
+            RactorConnectionProxy.sanitize_db_error!(e)
+          end
         end
       end
 
@@ -349,7 +376,11 @@ module ActiveRecord
         frozen_sql = sql.frozen? ? sql : sql.dup.freeze
         frozen_name = (name || "SQL").freeze
         Ractor::Dispatch.main.run do
-          ActiveRecord::Base.with_connection { |c| c.execute(frozen_sql, frozen_name) }
+          begin
+            ActiveRecord::Base.with_connection { |c| c.execute(frozen_sql, frozen_name) }
+          rescue => e
+            RactorConnectionProxy.sanitize_db_error!(e)
+          end
         end
       end
 
@@ -380,16 +411,24 @@ module ActiveRecord
         # prevents modification during SQL compilation.
         ast_data = Marshal.dump(frozen_ast).freeze
         Ractor::Dispatch.main.run do
-          ast = Marshal.load(ast_data)
-          conn = sql_engine.lease_connection
-          compiled = conn.to_sql_and_binds(ast, query_binds)
-          conn.select_all(compiled[0], query_name, compiled[1])
+          begin
+            ast = Marshal.load(ast_data)
+            conn = sql_engine.lease_connection
+            compiled = conn.to_sql_and_binds(ast, query_binds)
+            conn.select_all(compiled[0], query_name, compiled[1])
+          rescue => e
+            RactorConnectionProxy.sanitize_db_error!(e)
+          end
         end
       end
 
       def _ractor_select_all_sql(sql, query_name, query_binds)
         Ractor::Dispatch.main.run do
-          ActiveRecord::Base.with_connection { |c| c.select_all(sql, query_name, query_binds) }
+          begin
+            ActiveRecord::Base.with_connection { |c| c.select_all(sql, query_name, query_binds) }
+          rescue => e
+            RactorConnectionProxy.sanitize_db_error!(e)
+          end
         end
       end
 
@@ -425,7 +464,7 @@ module ActiveRecord
             end
             [id.is_a?(Integer) ? id : id.to_i]
           rescue => e
-            raise RuntimeError, "INSERT failed: #{e.message}"
+            RactorConnectionProxy.sanitize_db_error!(e)
           end
         end
       end
@@ -434,7 +473,11 @@ module ActiveRecord
         sql = arel.frozen? ? arel : arel.dup.freeze
         insert_name = (name || "SQL").freeze
         Ractor::Dispatch.main.run do
-          ActiveRecord::Base.with_connection { |c| c.insert(sql, insert_name) }
+          begin
+            ActiveRecord::Base.with_connection { |c| c.insert(sql, insert_name) }
+          rescue => e
+            RactorConnectionProxy.sanitize_db_error!(e)
+          end
         end
       end
 
@@ -473,7 +516,11 @@ module ActiveRecord
         sql = arel.respond_to?(:to_sql) ? arel.to_sql.freeze : (arel.frozen? ? arel : arel.dup.freeze)
         write_name = (name || "SQL").freeze
         Ractor::Dispatch.main.run do
-          ActiveRecord::Base.with_connection { |c| c.update(sql, write_name) }
+          begin
+            ActiveRecord::Base.with_connection { |c| c.update(sql, write_name) }
+          rescue => e
+            RactorConnectionProxy.sanitize_db_error!(e)
+          end
         end
       end
 
@@ -481,7 +528,11 @@ module ActiveRecord
         sql = arel.respond_to?(:to_sql) ? arel.to_sql.freeze : (arel.frozen? ? arel : arel.dup.freeze)
         write_name = (name || "SQL").freeze
         Ractor::Dispatch.main.run do
-          ActiveRecord::Base.with_connection { |c| c.delete(sql, write_name) }
+          begin
+            ActiveRecord::Base.with_connection { |c| c.delete(sql, write_name) }
+          rescue => e
+            RactorConnectionProxy.sanitize_db_error!(e)
+          end
         end
       end
 
@@ -519,13 +570,21 @@ module ActiveRecord
           arel_data = Marshal.dump(args.first).freeze
           rest = args[1..].map { |a| a.frozen? ? a : (a.dup.freeze rescue a) }.freeze
           Ractor::Dispatch.main.run do
-            arel = Marshal.load(arel_data)
-            ActiveRecord::Base.with_connection { |c| c.send(name, arel, *rest) }
+            begin
+              arel = Marshal.load(arel_data)
+              ActiveRecord::Base.with_connection { |c| c.send(name, arel, *rest) }
+            rescue => e
+              RactorConnectionProxy.sanitize_db_error!(e)
+            end
           end
         else
           frozen_args = args.map { |a| a.frozen? ? a : (a.dup.freeze rescue a) }.freeze
           Ractor::Dispatch.main.run do
-            ActiveRecord::Base.with_connection { |c| c.send(name, *frozen_args) }
+            begin
+              ActiveRecord::Base.with_connection { |c| c.send(name, *frozen_args) }
+            rescue => e
+              RactorConnectionProxy.sanitize_db_error!(e)
+            end
           end
         end
       end
