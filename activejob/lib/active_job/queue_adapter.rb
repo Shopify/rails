@@ -31,7 +31,15 @@ module ActiveJob
     module ClassMethods
       # Returns the backend queue provider. The default queue adapter
       # is +:async+. See QueueAdapters for more information.
+      #
+      # Queue adapters (e.g., AsyncAdapter) contain thread pool
+      # executors with ConditionVariables that can't cross Ractor
+      # boundaries. In non-main Ractors, return a proxy that
+      # dispatches enqueue calls to the main Ractor.
       def queue_adapter
+        if !Ractor.main? && defined?(Ractor::Dispatch)
+          return RactorQueueAdapterProxy.new(self)
+        end
         self.queue_adapter = :async if _queue_adapter.nil?
         _queue_adapter
       end
@@ -73,6 +81,43 @@ module ActiveJob
         def queue_adapter?(object)
           QUEUE_ADAPTER_METHODS.all? { |meth| object.respond_to?(meth) }
         end
+    end
+
+    # Proxy for the queue adapter in non-main Ractors. The real
+    # adapter (e.g., AsyncAdapter) contains thread pool executors
+    # with ConditionVariables that can't cross Ractor boundaries.
+    # This proxy dispatches enqueue calls to the main Ractor.
+    class RactorQueueAdapterProxy # :nodoc:
+      def initialize(job_class)
+        @job_class_name = job_class.name.freeze
+      end
+
+      def enqueue(job)
+        job_data = job.serialize.freeze
+        class_name = @job_class_name
+        Ractor::Dispatch.main.run do
+          klass = class_name.constantize
+          klass.send(:_queue_adapter).enqueue(
+            ActiveJob::Base.deserialize(job_data)
+          )
+        end
+      end
+
+      def enqueue_at(job, timestamp)
+        job_data = job.serialize.freeze
+        class_name = @job_class_name
+        ts = timestamp
+        Ractor::Dispatch.main.run do
+          klass = class_name.constantize
+          klass.send(:_queue_adapter).enqueue_at(
+            ActiveJob::Base.deserialize(job_data), ts
+          )
+        end
+      end
+
+      def queue_adapter_name
+        "async"
+      end
     end
   end
 end
