@@ -295,11 +295,11 @@ module ActiveRecord
           primary_key
 
           # If the table doesn't exist (e.g., SolidQueue in a separate
-          # database that hasn't been migrated), skip schema resolution.
+          # database that hasn't been migrated), skip schema resolution
+          # but still freeze instance variables below.
           unless table_exists?
             Rails.logger.warn("[make_shareable!] #{name}: table '#{table_name}' does not exist, skipping schema resolution") if defined?(Rails.logger) && Rails.logger
-            return self
-          end
+          else
 
           columns
           columns_hash
@@ -337,6 +337,15 @@ module ActiveRecord
           if respond_to?(:default_scope_override) && default_scope_override.nil?
             self.default_scope_override = !ActiveRecord::Base.is_a?(method(:default_scope).owner)
           end
+          end # unless table_exists?
+        end
+
+        # Eagerly resolve the inspection filter before freezing.
+        # @filter_attributes is set at boot time and never changes;
+        # @inspection_filter is lazily created from it on first inspect.
+        # Resolve both now so they can be frozen.
+        if instance_variable_defined?(:@filter_attributes) && @filter_attributes
+          inspection_filter
         end
 
         # Detach the connection handler -- it must stay mutable.
