@@ -34,6 +34,15 @@ module ActionCable
         @remote_connections = @event_loop = @worker_pool = @pubsub = nil
       end
 
+      # Drops the `Monitor` that guards lazy initialization of remote_connections,
+      # event_loop, worker_pool, and pubsub. After freeze the lazy initializers
+      # cannot run, so the mutex is dead weight; clearing it makes the mounted
+      # server shareable across Ractors at boot.
+      def freeze
+        @mutex = nil
+        super
+      end
+
       # Called by Rack to set up the server.
       def call(env)
         return config.health_check_application.call(env) if env["PATH_INFO"] == config.health_check_path

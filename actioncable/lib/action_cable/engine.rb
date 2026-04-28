@@ -5,6 +5,7 @@
 require "rails"
 require "action_cable"
 require "active_support/core_ext/hash/indifferent_access"
+require "active_support/core_ext/kernel/shareable"
 
 module ActionCable
   class Engine < Rails::Engine # :nodoc:
@@ -33,7 +34,7 @@ module ActionCable
 
     initializer "action_cable.health_check_application" do
       ActiveSupport.on_load(:action_cable) {
-        self.health_check_application = ->(env) { Rails::HealthController.action(:show).call(env) }
+        self.health_check_application = shareable_proc { |env| Rails::HealthController.action(:show).call(env) }
       }
     end
 
@@ -57,7 +58,7 @@ module ActionCable
         end
 
         previous_connection_class = connection_class
-        self.connection_class = -> { "ApplicationCable::Connection".safe_constantize || previous_connection_class.call }
+        self.connection_class = shareable_proc { "ApplicationCable::Connection".safe_constantize || previous_connection_class.call }
         self.filter_parameters += app.config.filter_parameters
 
         options.each { |k, v| send("#{k}=", v) }

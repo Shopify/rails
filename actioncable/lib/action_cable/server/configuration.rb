@@ -3,6 +3,7 @@
 # :markup: markdown
 
 require "rack"
+require "active_support/core_ext/kernel/shareable"
 
 module ActionCable
   module Server
@@ -22,17 +23,20 @@ module ActionCable
       def initialize
         @log_tags = []
 
-        @connection_class = -> { ActionCable::Connection::Base }
+        @connection_class = DEFAULT_CONNECTION_CLASS
         @worker_pool_size = 4
 
         @disable_request_forgery_protection = false
         @allow_same_origin_as_host = true
         @filter_parameters = []
 
-        @health_check_application = ->(env) {
-          [200, { Rack::CONTENT_TYPE => "text/html", "date" => Time.now.httpdate }, []]
-        }
+        @health_check_application = DEFAULT_HEALTH_CHECK_APPLICATION
       end
+
+      DEFAULT_CONNECTION_CLASS = shareable_proc { ActionCable::Connection::Base }
+      DEFAULT_HEALTH_CHECK_APPLICATION = shareable_proc { |env|
+        [200, { Rack::CONTENT_TYPE => "text/html", "date" => Time.now.httpdate }, []]
+      }
 
       # Returns constant of subscription adapter specified in config/cable.yml. If the
       # adapter cannot be found, this will default to the Redis adapter. Also makes
