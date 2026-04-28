@@ -733,6 +733,21 @@ module Rails
       # before the deep-freeze.
       ActiveSupport.error_reporter.make_shareable!
       ActiveSupport.event_reporter.make_shareable!
+      # +ActionView::StructuredEventSubscriber+ registers +Start+
+      # instances on the +ActiveSupport::Notifications+ fanout for
+      # +render_template.action_view+ / +render_layout.action_view+,
+      # plus the subscriber instance itself for the four
+      # +render_*+ events. Each of those callbacks reaches
+      # +Utils.rails_root+ from inside the request Ractor, which lazily
+      # caches +Rails.root+ via +@rails_root ||= ...+ on +Utils+'s
+      # singleton class. After +Notifications.notifier.make_shareable!+
+      # below deep-freezes the +Start+ instances, the lazy write would
+      # raise +Ractor::IsolationError+ ("can not set instance variables
+      # of classes/modules by non-main Ractors").
+      # +StructuredEventSubscriber.make_shareable!+ warms +Utils.@rails_root+
+      # on the main Ractor, deep-freezes +Utils+, and chains via +super+,
+      # so the runtime path only reads a populated, shareable value.
+      ActionView::StructuredEventSubscriber.make_shareable! if defined?(ActionView::StructuredEventSubscriber)
       # +ActiveSupport::Notifications.@notifier+ is read from non-main
       # Ractors by every +Notifications.instrument+ /
       # +Notifications.instrumenter+ call (e.g. +Rails::Rack::Logger+'s
@@ -849,6 +864,24 @@ module Rails
       # to +Callbacks::ClassMethods#make_shareable!+ via +super+ to
       # seal the +__callbacks+ graph for +define_callbacks :reset+.
       ActiveSupport::CurrentAttributes.make_shareable! if defined?(ActiveSupport::CurrentAttributes)
+      # +ActiveRecord::Delegation::DelegateCache+ stores a per-AR-class
+      # +@relation_delegate_cache+ Hash<RelationClass, GeneratedDelegate>
+      # populated at class-definition time by the +inherited+ hook (one
+      # entry per +Delegation.delegated_classes+ entry: +Relation+,
+      # +CollectionProxy+, +AssociationRelation+,
+      # +DisableJoinsAssociationRelation+). +Relation.create+ reads this
+      # cache via +relation_delegate_class+ on every per-request
+      # +Model.relation+ / +default_scoped+ call, which raises
+      # +Ractor::IsolationError+ on the class ivar read until the Hash
+      # and its generated delegate classes are shareable.
+      # +make_relation_delegate_cache_shareable!+ deep-freezes the cache
+      # values and the Hash itself; in production the cache is populated
+      # at boot and never mutated afterwards, so freezing is safe.
+      if defined?(ActiveRecord::Base)
+        [ActiveRecord::Base, *ActiveRecord::Base.descendants].each do |ar_class|
+          ar_class.make_relation_delegate_cache_shareable!
+        end
+      end
       env_config.make_shareable!
       routes.make_shareable!
       make_shareable!

@@ -6,11 +6,6 @@ module ActionView
   class StructuredEventSubscriber < ActiveSupport::StructuredEventSubscriber # :nodoc:
     VIEWS_PATTERN = /^app\/views\//
 
-    def initialize
-      @root = nil
-      super
-    end
-
     def render_template(event)
       emit_debug_event("action_view.render_template",
         identifier: from_rails_root(event.payload[:identifier]),
@@ -54,21 +49,48 @@ module ActionView
     debug_only :render_collection
 
     module Utils # :nodoc:
+      class << self
+        # Cache +Rails.root+ at the module level so per-instance method
+        # calls don't try to memoize through an instance ivar. The Start
+        # and StructuredEventSubscriber instances that include +Utils+ are
+        # registered with +ActiveSupport::Notifications+ at boot and end
+        # up deeply frozen by +Fanout#make_shareable!+, which makes any
+        # +@root ||= ...+ on the instance raise +FrozenError+.
+        #
+        # +Rails.root+ is fixed at boot, so a single shared value is fine.
+        # +StructuredEventSubscriber.make_shareable!+ warms this from the
+        # main Ractor before the subscriber graph is deep-frozen.
+        def rails_root
+          @rails_root ||= Rails.try(:root)
+        end
+      end
+
       private
         def from_rails_root(string)
           return unless string
 
-          string = string.sub("#{rails_root}/", "")
+          if (root = Utils.rails_root)
+            string = string.sub("#{root}/", "")
+          end
           string.sub!(VIEWS_PATTERN, "")
           string
-        end
-
-        def rails_root # :doc:
-          @root ||= Rails.try(:root)
         end
     end
 
     include Utils
+
+    # Warm the boot-time +Rails.root+ cache held on +Utils+ before the
+    # subscriber graph is deep-frozen via +Fanout#make_shareable!+. The
+    # +Start+ instances registered for +render_template.action_view+ /
+    # +render_layout.action_view+ and the +StructuredEventSubscriber+
+    # instance itself all read +Rails.root+ from inside the request
+    # Ractor via +from_rails_root+. Caching it on +Utils+ at boot means
+    # the runtime path only reads a frozen value.
+    def self.make_shareable! # :nodoc:
+      Utils.rails_root
+      Utils.make_shareable!
+      super
+    end
 
     class Start # :nodoc:
       include Utils

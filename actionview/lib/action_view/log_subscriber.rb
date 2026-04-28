@@ -13,6 +13,18 @@ module ActionView
       super
     end
 
+    # +ActiveSupport::EventReporter#make_shareable!+ deep-freezes its
+    # subscribers (this instance among them) so the +@event_reporter+
+    # module ivar can be read from non-main Ractors. Once the instance
+    # is frozen, the lazy +@root ||= "#{Rails.root}/"+ write in
+    # +rails_root+ would raise +FrozenError+ on the first request that
+    # calls +from_rails_root+. Warm +@root+ here so the request-path
+    # +||=+ short-circuits on a populated value.
+    def freeze # :nodoc:
+      rails_root if defined?(Rails) && Rails.respond_to?(:root) && Rails.root
+      super
+    end
+
     def render_template(event)
       info do
         message = +"  Rendered #{from_rails_root(event[:payload][:identifier])}"

@@ -43,6 +43,22 @@ module ActiveRecord
         end
       end
 
+      # Freezes +@relation_delegate_cache+ and its generated delegate
+      # subclasses so that +relation_delegate_class+ can be invoked from a
+      # non-main Ractor without raising +Ractor::IsolationError+ on the
+      # class instance variable read.
+      #
+      # The cache is populated at class-definition time by +inherited+
+      # (one entry per +Delegation.delegated_classes+ entry), and in
+      # production it is never extended afterwards. Deep-freezing the
+      # generated delegate classes plus the Hash itself makes the read
+      # path shareable without changing semantics.
+      def make_relation_delegate_cache_shareable!
+        return if @relation_delegate_cache.frozen?
+        @relation_delegate_cache.each_value(&:make_shareable!)
+        @relation_delegate_cache.freeze
+      end
+
       def inherited(child_class)
         child_class.initialize_relation_delegate_cache
         super
