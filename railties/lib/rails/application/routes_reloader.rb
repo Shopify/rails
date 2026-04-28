@@ -1,10 +1,14 @@
 # frozen_string_literal: true
 
+require "active_support/core_ext/object/shareable"
 
 module Rails
   class Application
     class RoutesReloader
       include ActiveSupport::Callbacks
+
+      NOOP_AFTER_LOAD_PATHS = (-> { }).make_shareable!
+      private_constant :NOOP_AFTER_LOAD_PATHS
 
       attr_reader :route_sets, :paths, :external_routes, :loaded
       attr_accessor :eager_load
@@ -18,6 +22,16 @@ module Rails
         @eager_load = false
         @loaded = false
         @file_watcher = file_watcher
+      end
+
+      # Drop the file watcher and its memoized updater before freezing.
+      # The updater block captures `self` to call `reload!`, which makes it
+      # non-shareable. A frozen application doesn't reload routes, so the
+      # watcher isn't needed after boot.
+      def freeze
+        @updater = nil
+        @file_watcher = nil
+        super
       end
 
       def reload!
@@ -66,7 +80,7 @@ module Rails
       end
 
       def run_after_load_paths
-        @run_after_load_paths ||= -> { }
+        @run_after_load_paths || NOOP_AFTER_LOAD_PATHS
       end
 
       def finalize!
