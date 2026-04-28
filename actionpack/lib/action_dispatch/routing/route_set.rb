@@ -403,6 +403,17 @@ module ActionDispatch
         @polymorphic_mappings = {}
       end
 
+      # Drops the deferred-DSL block buffers (`@prepend` and `@append`) before
+      # freezing. These blocks are replayed by `clear!` to rebuild the route
+      # table; on a shareable (production-frozen) route set `clear!` is not
+      # called, so retaining them would only block shareability without
+      # serving a purpose.
+      def freeze
+        @prepend = [].freeze
+        @append = [].freeze
+        super
+      end
+
       def eager_load!
         router.eager_load!
         routes.each(&:eager_load!)
