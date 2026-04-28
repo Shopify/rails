@@ -2,6 +2,8 @@
 
 # :markup: markdown
 
+require "active_support/core_ext/object/shareable"
+
 module ActionDispatch
   # # Action Dispatch SSL
   #
@@ -69,6 +71,10 @@ module ActionDispatch
 
     PERMANENT_REDIRECT_REQUEST_METHODS = %w[GET HEAD] # :nodoc:
 
+    EXCLUDE_ALL  = ->(_) { true }.make_shareable!
+    EXCLUDE_NONE = ->(_) { false }.make_shareable!
+    private_constant :EXCLUDE_ALL, :EXCLUDE_NONE
+
     def self.default_hsts_options
       { expires: HSTS_EXPIRES_IN, subdomains: true, preload: false }
     end
@@ -78,7 +84,7 @@ module ActionDispatch
 
       @redirect = redirect
 
-      @exclude = @redirect && @redirect[:exclude] || proc { !@redirect }
+      @exclude = (@redirect && @redirect[:exclude]) || (@redirect ? EXCLUDE_NONE : EXCLUDE_ALL)
       @secure_cookies = secure_cookies
 
       @hsts_header = build_hsts_header(normalize_hsts_options(hsts))
