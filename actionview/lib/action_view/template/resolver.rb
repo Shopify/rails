@@ -45,6 +45,16 @@ module ActionView
         )
         ParsedPath.new(path, details)
       end
+
+      # Force compilation of +@regex+ so subsequent +parse+ calls only read,
+      # never write, the lazy ivar. After +ractorize!+ the parser is shared
+      # across Ractors via +FileSystemResolver+, and non-main Ractors may
+      # not write to a frozen object's ivars.
+      def make_shareable! # :nodoc:
+        return self if frozen?
+        @regex ||= build_path_regex
+        super
+      end
     end
 
     cattr_accessor :caching, default: true
@@ -127,13 +137,108 @@ module ActionView
       @unbound_templates.values.flatten.flat_map(&:built_templates)
     end
 
+    # Snapshot the per-resolver template cache so the resolver can be
+    # deeply frozen and shared across Ractors. +@unbound_templates+ is a
+    # +Concurrent::Map+, which doesn't implement +#freeze+ and whose
+    # values (UnboundTemplate / Template) carry their own non-shareable
+    # caches and locks. After +Rails.application.ractorize!+ the
+    # resolver is read from non-main Ractors via +ActionView::PathRegistry+
+    # (see +get_view_paths+, +all_file_system_resolvers+), so its
+    # instance variables must hold shareable values.
+    #
+    # We snapshot the existing cache contents to a frozen +Hash+ and
+    # cascade +make_shareable!+ into every +UnboundTemplate+ inside.
+    # Callers that want post-freeze cache hits (rather than per-request
+    # recomputation, which would defeat +built_templates+ for exception
+    # source mapping and would re-define methods on the shared
+    # +compiled_method_container+) should pre-warm the cache before
+    # calling this — see +PathRegistry.make_shareable!+ and
+    # +#eager_load_paths!+.
+    #
+    # +_find_all+ branches on +@unbound_templates.frozen?+: cache hits
+    # return the warmed shareable +UnboundTemplate+s; cache misses fall
+    # through to a local recompute (uncached, leaks per call).
+    def make_shareable! # :nodoc:
+      return self if frozen?
+      @path_parser.make_shareable!
+
+      snapshot = {}
+      @unbound_templates.each_pair do |key, value|
+        Array(value).each(&:make_shareable!)
+        snapshot[key] = value.is_a?(Array) ? value.freeze : value
+      end
+
+      @unbound_templates = snapshot.freeze
+      super
+    end
+
+    # Walk every template path under this resolver's root and populate
+    # +@unbound_templates+ so subsequent +make_shareable!+ snapshots a
+    # populated cache. Triggered by +PathRegistry.make_shareable!+ at
+    # boot, before the cascade freeze. The eager pass does not bind
+    # locals or compile templates — it just builds and caches the
+    # +UnboundTemplate+ objects so +Resolver#built_templates+ has
+    # entries for exception backtrace mapping and so post-freeze
+    # +_find_all+ hits the cache instead of recomputing per call.
+    #
+    # We bypass +find_all+ here because +find_all+'s
+    # +filter_and_sort_by_details+ wants a +TemplateDetails::Requested+
+    # to match against, which would require speculatively iterating
+    # every locale / format / variant combination. Instead, we replicate
+    # the cache-write portion of +_find_all+ (the +compute_if_absent+
+    # branch) directly: for each disk-discovered virtual path, read or
+    # build the cached +UnboundTemplate+ list. Subsequent request-time
+    # +_find_all+ calls hit the same +virtual_path+ key and skip the
+    # disk glob.
+    def eager_load_paths! # :nodoc:
+      return if frozen?
+      return if @unbound_templates.frozen?
+
+      all_template_paths.each do |template_path|
+        virtual_path = TemplatePath.virtual(template_path.name, template_path.prefix, template_path.partial?)
+        unbound_templates = @unbound_templates.compute_if_absent(virtual_path) do
+          unbound_templates_from_path(template_path)
+        end
+        # Bind with empty locals so each +UnboundTemplate+'s +@templates+
+        # map has at least one +Template+ in it. Without this,
+        # +built_templates+ would still return +[]+ because
+        # +UnboundTemplate#built_templates+ reads +@templates.values+,
+        # not +@unbound_templates+. The empty-locals Template is the
+        # canonical instance for non-strict templates rendered without
+        # explicit locals, and the only Template needed for strict-locals
+        # templates (which short-circuit on the first +bind_locals+ to
+        # populate +@templates+ with a default value).
+        unbound_templates.each { |unbound| unbound.bind_locals([]) }
+      end
+    end
+
     private
       def _find_all(name, prefix, partial, details, key, locals)
         requested_details = key || TemplateDetails::Requested.new(**details)
-        cache = key ? @unbound_templates : Concurrent::Map.new
+        virtual_path = TemplatePath.virtual(name, prefix, partial)
 
         unbound_templates =
-          cache.compute_if_absent(TemplatePath.virtual(name, prefix, partial)) do
+          if @unbound_templates.frozen?
+            # Post-+make_shareable!+: cache is a read-only frozen Hash.
+            # Hits return the warmed UnboundTemplates (already shareable
+            # via the +make_shareable!+ cascade); misses fall through to
+            # a local recompute. The recomputed UnboundTemplates are
+            # used locally by the caller and never stored on the shared
+            # resolver, so they don't need to be shareable themselves —
+            # but their +Template#compile!+ will still mutate the shared
+            # +compiled_method_container+'s method table (one method per
+            # +__id__+), so misses are a known leak source. Pre-warming
+            # in +PathRegistry.make_shareable!+ keeps this branch rare.
+            @unbound_templates[virtual_path] || begin
+              path = TemplatePath.build(name, prefix, partial)
+              unbound_templates_from_path(path)
+            end
+          elsif key
+            @unbound_templates.compute_if_absent(virtual_path) do
+              path = TemplatePath.build(name, prefix, partial)
+              unbound_templates_from_path(path)
+            end
+          else
             path = TemplatePath.build(name, prefix, partial)
             unbound_templates_from_path(path)
           end

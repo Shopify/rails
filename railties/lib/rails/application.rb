@@ -734,6 +734,16 @@ module Rails
       # +Rails.logger+ (a +BroadcastLogger+ wrapping a real I/O) is not
       # shareable and we are intentionally out of scope for that here.
       ActiveSupport::LogSubscriber.make_shareable! if defined?(ActiveSupport::LogSubscriber)
+      # +ActionView::PathRegistry+ holds four module-level ivars
+      # (+@view_paths_by_class+, +@file_system_resolvers+, plus the
+      # boot-only mutex and hooks Array). Both per-request
+      # +ViewPaths#lookup_context+ creation and
+      # +ExceptionWrapper#build_backtrace+ read those ivars from inside
+      # the request Ractor, so their values must be shareable. The
+      # registry's +make_shareable!+ deeply freezes the registered
+      # +FileSystemResolver+s and +PathSet+s, then freezes the hashes
+      # themselves and drops the boot-only mutex.
+      ActionView::PathRegistry.make_shareable! if defined?(ActionView::PathRegistry)
       env_config.make_shareable!
       routes.make_shareable!
       make_shareable!

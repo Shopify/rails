@@ -407,6 +407,49 @@ module ActionView
       end
     end
 
+    # Cascade target for +ActionView::PathRegistry.make_shareable!+. The
+    # Template is held inside a +FileSystemResolver+'s cache (via
+    # +UnboundTemplate+) and read from non-main Ractors at render time, so
+    # its +instance_variables+ must all be shareable values.
+    #
+    # We settle the lazy mutations on +@source+ (the strict-locals
+    # comment strip in +#strict_locals!+ and the encoding normalization
+    # in +#encode!+) so the source is in its final form before the
+    # deep-freeze. We also memoize +@method_name+ (which transitively
+    # settles +@short_identifier+) and +@type+, and drop the boot-only
+    # +@compile_mutex+. Post-freeze, +#compile!+ takes a per-Ractor
+    # fast-path that avoids writing to instance variables of the (now
+    # frozen) Template; see +#compile!+ for details.
+    #
+    # +@strict_local_keys+ is left as +nil+. It is normally populated as
+    # a side effect of +#compile+ when a strict-locals magic comment is
+    # present, but that requires a +compiled_method_container+ which is
+    # not reachable at boot time. The single read site in +#render+
+    # guards on +@strict_local_keys+ being truthy before using it, so a
+    # +nil+ value is safe -- it simply skips the implicit-locals filter
+    # that prunes implicit assigns down to the declared keys. The
+    # assignment in +#compile+ is guarded with +unless frozen?+ so it
+    # does not raise +FrozenError+ post-freeze.
+    #
+    # NOTE: We do not call +#compile!+ here. Compilation requires a
+    # +compiled_method_container+ (an +ActionView::Base+ subclass) which
+    # is owned per-controller and may not be reachable from this leaf at
+    # boot time. Instead, the first render in a given Ractor compiles
+    # against that Ractor's view and the per-Ractor compile cache
+    # deduplicates subsequent renders.
+    def make_shareable! # :nodoc:
+      return self if frozen?
+
+      strict_locals!  # settles @strict_locals (string mutation on @source)
+      encode!         # settles @source encoding so post-freeze compile! hits the no-op branch
+      method_name     # memoizes @method_name (transitively settles @short_identifier)
+      type            # memoizes @type so post-freeze readers do not write to a frozen ivar
+
+      @compile_mutex = nil
+
+      super
+    end
+
     private
       def find_node_by_id(node, node_id)
         return node if node.node_id == node_id
@@ -421,25 +464,59 @@ module ActionView
 
       # Compile a template. This method ensures a template is compiled
       # just once and removes the source after it is compiled.
+      #
+      # There are three modes here:
+      #
+      # 1. Pre-+make_shareable!+, +@compiled+ true: fast return.
+      # 2. Pre-+make_shareable!+, +@compiled+ false: take the per-Template
+      #    +@compile_mutex+ and compile, then set +@compiled = true+. This
+      #    is the original Rails path and handles concurrent compilation
+      #    in threaded servers like Puma.
+      # 3. Post-+make_shareable!+ (frozen Template, +@compile_mutex+ nil):
+      #    use a per-Ractor +(mod, method_name)+ guard to compile at most
+      #    once per Ractor per +(method_name, compiled_method_container)+
+      #    pair. The Template's ivars cannot be written, so +@compiled+
+      #    stays false; the per-Ractor map is the dedup key.
+      #
+      # The post-freeze path is what bounds Ractor::IsolationError #6
+      # (method-table leak on +compiled_method_container+). Within a
+      # Ractor, the same cached Template renders many times but compiles
+      # exactly once. Across Ractors, each Ractor pays the cost once for
+      # each warmed Template + container combination, so the total method
+      # count is bounded by +(templates) * (containers) * (Ractors)+
+      # rather than growing per request.
       def compile!(view)
         return if @compiled
 
-        # Templates can be used concurrently in threaded environments
-        # so compilation and any instance variable modification must
-        # be synchronized
-        @compile_mutex.synchronize do
-          # Any thread holding this lock will be compiling the template needed
-          # by the threads waiting. So re-check the @compiled flag to avoid
-          # re-compilation
-          return if @compiled
-
+        if frozen?
           mod = view.compiled_method_container
+          ractor_compiled = (Ractor.current[:_action_view_compiled_templates] ||= {})
+          key = [mod, method_name]
+          return if ractor_compiled[key]
 
           instrument("!compile_template") do
             compile(mod)
           end
 
-          @compiled = true
+          ractor_compiled[key] = true
+        else
+          # Templates can be used concurrently in threaded environments
+          # so compilation and any instance variable modification must
+          # be synchronized
+          @compile_mutex.synchronize do
+            # Any thread holding this lock will be compiling the template needed
+            # by the threads waiting. So re-check the @compiled flag to avoid
+            # re-compilation
+            return if @compiled
+
+            mod = view.compiled_method_container
+
+            instrument("!compile_template") do
+              compile(mod)
+            end
+
+            @compiled = true
+          end
         end
       end
 
@@ -540,7 +617,14 @@ module ActionView
         unless parameters.any? { |type, _| type == :keyrest }
           parameters.map!(&:last)
           parameters.sort!
-          @strict_local_keys = parameters.freeze
+          # Post-+make_shareable!+ the Template is frozen and this
+          # cache cannot be written. The single read site in +#render+
+          # guards on +@strict_local_keys+ being truthy before using it,
+          # so leaving it +nil+ just skips the implicit-locals filter
+          # (the locals hash flows through unchanged, and the compiled
+          # method's keyword signature still validates the keys at call
+          # time). See +#make_shareable!+.
+          @strict_local_keys = parameters.freeze unless frozen?
         end
       end
 
