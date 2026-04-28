@@ -2,6 +2,8 @@
 
 # :markup: markdown
 
+require "active_support/core_ext/kernel/shareable"
+
 module ActionDispatch
   module Http
     module Parameters
@@ -10,11 +12,11 @@ module ActionDispatch
       PARAMETERS_KEY = "action_dispatch.request.path_parameters"
 
       DEFAULT_PARSERS = {
-        Mime[:json].symbol => -> (raw_post) {
+        Mime[:json].symbol => shareable_proc { |raw_post|
           data = ActiveSupport::JSON.decode(raw_post)
           data.is_a?(Hash) ? data : { _json: data }
         }
-      }
+      }.freeze
 
       # Raised when raw data from the request cannot be parsed by the parser defined
       # for request's content MIME type.
@@ -40,11 +42,15 @@ module ActionDispatch
         # is a proc.
         #
         #     original_parsers = ActionDispatch::Request.parameter_parsers
-        #     xml_parser = -> (raw_post) { Hash.from_xml(raw_post) || {} }
+        #     xml_parser = shareable_proc { |raw_post| Hash.from_xml(raw_post) || {} }
         #     new_parsers = original_parsers.merge(xml: xml_parser)
         #     ActionDispatch::Request.parameter_parsers = new_parsers
+        #
+        # The result is stored frozen so it can be read from non-main Ractors. To
+        # remain readable across Ractors, callers must pass procs that are themselves
+        # shareable (use +shareable_proc+ instead of a bare lambda).
         def parameter_parsers=(parsers)
-          @parameter_parsers = parsers.transform_keys { |key| key.respond_to?(:symbol) ? key.symbol : key }
+          @parameter_parsers = parsers.transform_keys { |key| key.respond_to?(:symbol) ? key.symbol : key }.freeze
         end
       end
 
