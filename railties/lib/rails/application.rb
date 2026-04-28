@@ -96,6 +96,15 @@ module Rails
       # inherits from Rails::Railtie and the +new+ method on Rails::Railtie is
       # private
       public :new
+
+      # Wraps +value+ in a shareable callable that returns the value
+      # regardless of arguments. Used for env_config entries that accept
+      # either a Proc or a static value, where the wrapping proc must be
+      # Ractor-shareable. Defining the lambda here means its self is the
+      # Rails::Application class object (shareable), not a per-app instance.
+      def constant_callable(value) # :nodoc:
+        ->(*) { value }.make_shareable!
+      end
     end
 
     attr_accessor :assets, :sandbox
@@ -794,7 +803,7 @@ module Rails
       end
 
       def coerce_same_site_protection(protection)
-        protection.respond_to?(:call) ? protection : proc { protection }
+        protection.respond_to?(:call) ? protection : self.class.constant_callable(protection)
       end
 
       def filter_parameters
