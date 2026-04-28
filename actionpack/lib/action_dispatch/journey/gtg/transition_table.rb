@@ -13,6 +13,8 @@ module ActionDispatch
         attr_reader :memos
 
         DEFAULT_EXP = /[^.\/?]+/
+        EMPTY_MEMO = [].freeze
+        private_constant :EMPTY_MEMO
 
         def initialize
           @stdparam_states = {}
@@ -20,6 +22,19 @@ module ActionDispatch
           @string_states   = {}
           @accepting       = {}
           @memos           = Hash.new { |h, k| h[k] = [] }
+        end
+
+        # Replaces `@memos`'s default_proc with a frozen empty-array fallback
+        # before freezing. The default_proc auto-vivifies entries during table
+        # construction; once the table is built the cache is read-only, so the
+        # proc is unused at runtime and would otherwise block shareability.
+        def freeze
+          if @memos.default_proc
+            new_memos = Hash.new(EMPTY_MEMO)
+            @memos.each_pair { |k, v| new_memos[k] = v }
+            @memos = new_memos
+          end
+          super
         end
 
         def add_accepting(state)

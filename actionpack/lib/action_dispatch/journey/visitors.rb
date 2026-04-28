@@ -6,8 +6,8 @@ module ActionDispatch
   # :stopdoc:
   module Journey
     class Format
-      ESCAPE_PATH    = ->(value) { Router::Utils.escape_path(value) }
-      ESCAPE_SEGMENT = ->(value) { Router::Utils.escape_segment(value) }
+      ESCAPE_PATH    = ->(value) { Router::Utils.escape_path(value) }.make_shareable!
+      ESCAPE_SEGMENT = ->(value) { Router::Utils.escape_segment(value) }.make_shareable!
 
       Parameter = Struct.new(:name, :escaper) do
         def escape(value); escaper.call value; end
