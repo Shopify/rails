@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "active_support/core_ext/object/shareable"
+
 module ActiveSupport
   # = Backtrace Cleaner
   #
@@ -34,10 +36,10 @@ module ActiveSupport
   class BacktraceCleaner
     def initialize
       @filters, @silencers = [], []
-      add_core_silencer
-      add_gem_filter
-      add_gem_silencer
-      add_stdlib_silencer
+      add_silencer(&CORE_SILENCER)
+      add_filter(&GEM_FILTER) if GEM_FILTER
+      add_silencer(&GEM_SILENCER)
+      add_silencer(&STDLIB_SILENCER)
     end
 
     # Returns the backtrace after all filters and silencers have been run
@@ -178,33 +180,38 @@ module ActiveSupport
       @filters = []
     end
 
-    private
-      FORMATTED_GEMS_PATTERN = /\A[^\/]+ \([\w.]+\) /
+    FORMATTED_GEMS_PATTERN = /\A[^\/]+ \([\w.]+\) /
+    private_constant :FORMATTED_GEMS_PATTERN
 
+    # Default filter/silencer procs are defined at class-body level so their
+    # +self+ is the +BacktraceCleaner+ class (which is shareable). They are
+    # made shareable at load time so a frozen +BacktraceCleaner+ instance can
+    # be reachable from non-main Ractors.
+    #
+    # Public for internal Rails subclasses only (e.g.
+    # +ActionDispatch::Routing::Mapper::BacktraceCleaner+); not part of the
+    # ActiveSupport public API.
+    CORE_SILENCER = ->(line) { line.include?("<internal:") }.make_shareable!
+
+    GEM_SILENCER = ->(line) { FORMATTED_GEMS_PATTERN.match?(line) }.make_shareable!
+
+    STDLIB_SILENCER = ->(line) { line.start_with?(RbConfig::CONFIG["rubylibdir"]) }.make_shareable!
+
+    GEM_FILTER = begin
+      gems_paths = (Gem.path | [Gem.default_dir]).map { |p| Regexp.escape(p) }
+      if gems_paths.empty?
+        nil
+      else
+        gems_regexp = %r{\A(#{gems_paths.join('|')})/(bundler/)?gems/([^/]+)-([\w.]+)/(.*)}
+        gems_result = '\3 (\4) \5'
+        ->(line) { line.sub(gems_regexp, gems_result) }.make_shareable!
+      end
+    end
+
+    private
       def initialize_copy(_other)
         @filters = @filters.dup
         @silencers = @silencers.dup
-      end
-
-      def add_gem_filter
-        gems_paths = (Gem.path | [Gem.default_dir]).map { |p| Regexp.escape(p) }
-        return if gems_paths.empty?
-
-        gems_regexp = %r{\A(#{gems_paths.join('|')})/(bundler/)?gems/([^/]+)-([\w.]+)/(.*)}
-        gems_result = '\3 (\4) \5'
-        add_filter { |line| line.sub(gems_regexp, gems_result) }
-      end
-
-      def add_core_silencer
-        add_silencer { |line| line.include?("<internal:") }
-      end
-
-      def add_gem_silencer
-        add_silencer { |line| FORMATTED_GEMS_PATTERN.match?(line) }
-      end
-
-      def add_stdlib_silencer
-        add_silencer { |line| line.start_with?(RbConfig::CONFIG["rubylibdir"]) }
       end
 
       def filter_backtrace(backtrace)

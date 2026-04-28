@@ -16,8 +16,8 @@ module ActionDispatch
         def initialize
           super
           remove_silencers!
-          add_core_silencer
-          add_stdlib_silencer
+          add_silencer(&ActiveSupport::BacktraceCleaner::CORE_SILENCER)
+          add_silencer(&ActiveSupport::BacktraceCleaner::STDLIB_SILENCER)
         end
       end
 
