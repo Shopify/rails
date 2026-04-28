@@ -2,6 +2,7 @@
 
 require "active_support/core_ext/string/inflections"
 require "active_support/core_ext/array/conversions"
+require "active_support/core_ext/kernel/shareable"
 require "active_support/descendants_tracker"
 require "active_support/dependencies"
 
@@ -155,6 +156,28 @@ module Rails
         end
       end
 
+      # Lifted out of the :set_routes_reloader_hook initializer below so the
+      # block can be made shareable. The previous implementation captured a
+      # `reloader` local at registration time; this constant rebinds to
+      # `Rails.application.routes_reloader` at each callback fire. The
+      # routes_reloader is a memoized lazy attribute with no setter, so the
+      # two are equivalent in any single-application setup.
+      SET_ROUTES_RELOADER_HOOK = shareable_proc do
+        # We configure #execute rather than #execute_if_updated because if
+        # autoloaded constants are cleared we need to reload routes also in
+        # case any was used there, as in
+        #
+        #   mount MailPreview => 'mail_view'
+        #
+        # This means routes are also reloaded if i18n is updated, which
+        # might not be necessary, but in order to be more precise we need
+        # some sort of reloaders dependency support, to be added.
+        require_unload_lock!
+        Rails.application.routes_reloader.execute
+        ActiveSupport.run_load_hooks(:after_routes_loaded, self)
+      end
+      private_constant :SET_ROUTES_RELOADER_HOOK
+
       # Set routes reload after the finisher hook to ensure routes added in
       # the hook are taken into account.
       initializer :set_routes_reloader_hook do |app|
@@ -162,20 +185,7 @@ module Rails
         reloader.eager_load = app.config.eager_load
         reloaders << reloader
 
-        app.reloader.to_run do
-          # We configure #execute rather than #execute_if_updated because if
-          # autoloaded constants are cleared we need to reload routes also in
-          # case any was used there, as in
-          #
-          #   mount MailPreview => 'mail_view'
-          #
-          # This means routes are also reloaded if i18n is updated, which
-          # might not be necessary, but in order to be more precise we need
-          # some sort of reloaders dependency support, to be added.
-          require_unload_lock!
-          reloader.execute
-          ActiveSupport.run_load_hooks(:after_routes_loaded, self)
-        end
+        app.reloader.to_run(&SET_ROUTES_RELOADER_HOOK)
 
         reloader.execute_unless_loaded if !app.routes.is_a?(Engine::LazyRouteSet) || app.config.eager_load
       end
