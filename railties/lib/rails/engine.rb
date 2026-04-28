@@ -448,6 +448,20 @@ module Rails
       super
     end
 
+    # Drop boot-only state that blocks shareability before freezing. After
+    # boot, the engine no longer needs the Mutex used while building the
+    # middleware stack (`@app_build_lock`), the aggregate Railtie collection
+    # (`@railties`), or the per-instance initializer collection
+    # (`@initializers`); all three are only consumed during initializer
+    # dispatch / app build. A frozen engine cannot rebuild any of these
+    # anyway, so retaining them only blocks `Ractor.make_shareable`.
+    def freeze
+      @app_build_lock = nil
+      @railties = nil
+      @initializers = nil
+      super
+    end
+
     # Load console and invoke the registered hooks.
     # Check Rails::Railtie.console for more info.
     def load_console(app = self)

@@ -704,6 +704,18 @@ module Rails
       self
     end
 
+    # Drop boot-only state that blocks shareability before freezing. The
+    # ordered Railtie list (`@ordered_railties`) and the Zeitwerk autoloader
+    # registry (`@autoloaders`) are only used during initializer dispatch
+    # and lazy autoloading respectively; an eager-loaded, frozen production
+    # application has no further use for either, but both hold non-shareable
+    # references that would otherwise block `Ractor.make_shareable`.
+    def freeze
+      @ordered_railties = nil
+      @autoloaders = nil
+      super
+    end
+
   protected
     alias :build_middleware_stack :app
 
