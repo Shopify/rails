@@ -666,6 +666,30 @@ module Rails
       Rails.autoloaders.each(&:eager_load)
     end
 
+    # Prepares the application for use across Ractors by deeply freezing
+    # its object graph.
+    #
+    # Eagerly loads all autoloaded code, resolves +routes+ and
+    # +env_config+ so they exist, then makes +self+, +env_config+, and
+    # +routes+ shareable via Active Support's +make_shareable!+ helper.
+    #
+    # Idempotent: if the application is already shareable this returns
+    # immediately.
+    def ractorize!
+      return self if shareable?
+
+      eager_load!
+
+      env_config
+      routes
+
+      env_config.make_shareable!
+      routes.make_shareable!
+      make_shareable!
+
+      self
+    end
+
   protected
     alias :build_middleware_stack :app
 
