@@ -3,6 +3,7 @@
 require "rails"
 require "active_record"
 require "active_support/core_ext/object/try"
+require "active_support/core_ext/kernel/shareable"
 require "active_model/railtie"
 
 # For now, action_controller must always be present with
@@ -14,6 +15,16 @@ require "action_controller/railtie"
 module ActiveRecord
   # = Active Record Railtie
   class Railtie < Rails::Railtie # :nodoc:
+    LEGACY_SIGNED_ID_OPTIONS = { digest: "SHA256", serializer: JSON, url_safe: true }.freeze
+    private_constant :LEGACY_SIGNED_ID_OPTIONS
+
+    # Returns the legacy options only for the `active_record/signed_id` salt;
+    # all other salts fall through unchanged so other rotations are unaffected.
+    LEGACY_SIGNED_ID_PROC = shareable_proc do |salt|
+      LEGACY_SIGNED_ID_OPTIONS if salt == "active_record/signed_id"
+    end
+    private_constant :LEGACY_SIGNED_ID_PROC
+
     config.active_record = ActiveSupport::OrderedOptions.new
     config.active_record.encryption = ActiveSupport::OrderedOptions.new
 
@@ -350,15 +361,15 @@ To keep using the current cache store, you can turn off cache versioning entirel
     initializer "active_record.configure_message_verifiers" do |app|
       ActiveRecord.message_verifiers = app.message_verifiers
 
-      use_legacy_signed_id_verifier = app.config.active_record.use_legacy_signed_id_verifier
-      legacy_options = { digest: "SHA256", serializer: JSON, url_safe: true }
-
-      if use_legacy_signed_id_verifier == :generate_and_verify
-        app.message_verifiers.prepend { |salt| legacy_options if salt == "active_record/signed_id" }
-      elsif use_legacy_signed_id_verifier == :verify
-        app.message_verifiers.rotate { |salt| legacy_options if salt == "active_record/signed_id" }
-      elsif use_legacy_signed_id_verifier
-        raise ArgumentError, "Unrecognized value for config.active_record.use_legacy_signed_id_verifier: #{use_legacy_signed_id_verifier.inspect}"
+      case app.config.active_record.use_legacy_signed_id_verifier
+      when :generate_and_verify
+        app.message_verifiers.prepend(&LEGACY_SIGNED_ID_PROC)
+      when :verify
+        app.message_verifiers.rotate(&LEGACY_SIGNED_ID_PROC)
+      when nil, false
+        # no rotation
+      else
+        raise ArgumentError, "Unrecognized value for config.active_record.use_legacy_signed_id_verifier: #{app.config.active_record.use_legacy_signed_id_verifier.inspect}"
       end
     end
 
