@@ -3,6 +3,7 @@
 # :markup: markdown
 
 require "rack/utils"
+require "active_support/core_ext/object/shareable"
 
 module ActionDispatch
   # # Action Dispatch Static
@@ -49,8 +50,8 @@ module ActionDispatch
     PRECOMPRESSED = {
       "br" => ".br",
       "gzip" => ".gz",
-      "identity" => nil
-    }
+      "identity" => nil,
+    }.make_shareable!
 
     def initialize(root, index: "index", headers: {}, precompressed: %i[ br gzip ], compressible_content_types: /\A(?:text\/|application\/javascript|image\/svg\+xml)/)
       @root = root.chomp("/").b
