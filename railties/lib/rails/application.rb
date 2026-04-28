@@ -698,6 +698,13 @@ module Rails
       routes
 
       AbstractController::Base.make_shareable! if defined?(AbstractController::Base)
+      # +ActiveSupport::ExecutionWrapper+ owns the +__callbacks+
+      # class_attribute graph (Mutex + lazy compile caches per
+      # +CallbackChain+). One call here covers +ExecutionWrapper+ itself,
+      # +Executor+, +Reloader+, and the anonymous +Class.new(Executor)+ /
+      # +Class.new(Reloader)+ this Application instance creates, since
+      # they are all descendants tracked via +Callbacks+.
+      ActiveSupport::ExecutionWrapper.make_shareable! if defined?(ActiveSupport::ExecutionWrapper)
       env_config.make_shareable!
       routes.make_shareable!
       make_shareable!

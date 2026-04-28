@@ -638,6 +638,18 @@ module ActiveSupport
           callbacks.each { |c| prepend_one(c) }
         end
 
+        # Eagerly resolve the lazy compile caches and drop the mutex so the
+        # chain can be deeply frozen and shared across Ractors. After this
+        # call the +compile+ paths short-circuit on the cached
+        # +@all_callbacks+ / +@single_callbacks+ values and never reach the
+        # synchronization block.
+        def make_shareable!
+          compile(nil)
+          CALLBACK_FILTER_TYPES.each { |t| compile(t) }
+          @mutex = nil
+          super
+        end
+
         protected
           attr_reader :chain
 
@@ -676,6 +688,21 @@ module ActiveSupport
       end
 
       module ClassMethods
+        # Make the +__callbacks+ class_attribute graph shareable for +self+ and
+        # every descendant: walks each class, warms and freezes every
+        # +CallbackChain+ on it, then freezes the per-class +__callbacks+ Hash
+        # itself. Includers (e.g. +ActiveSupport::ExecutionWrapper+) call this
+        # at boot to make their callback graph Ractor-shareable.
+        def make_shareable!
+          [self, *descendants].each do |klass|
+            callbacks = klass.__callbacks
+            next if callbacks.nil?
+            callbacks.each_value { |chain| chain.make_shareable! }
+            callbacks.make_shareable!
+          end
+          super
+        end
+
         def normalize_callback_params(filters, block) # :nodoc:
           type = CALLBACK_FILTER_TYPES.include?(filters.first) ? filters.shift : :before
           options = filters.extract_options!
