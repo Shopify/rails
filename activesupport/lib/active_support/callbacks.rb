@@ -338,6 +338,7 @@ module ActiveSupport
         class MethodCall
           def initialize(method)
             @method_name = method
+            freeze
           end
 
           # Return the parts needed to make this call, with the given
@@ -374,6 +375,7 @@ module ActiveSupport
           def initialize(target, method)
             @override_target = target
             @method_name = method
+            freeze
           end
 
           def expand(target, value, block)
@@ -396,6 +398,7 @@ module ActiveSupport
         class InstanceExec0
           def initialize(block)
             @override_block = block
+            freeze
           end
 
           def expand(target, value, block)
@@ -418,6 +421,7 @@ module ActiveSupport
         class InstanceExec1
           def initialize(block)
             @override_block = block
+            freeze
           end
 
           def expand(target, value, block)
@@ -440,6 +444,7 @@ module ActiveSupport
         class InstanceExec2
           def initialize(block)
             @override_block = block
+            freeze
           end
 
           def expand(target, value, block)
@@ -465,6 +470,7 @@ module ActiveSupport
         class ProcCall
           def initialize(target)
             @override_target = target
+            freeze
           end
 
           def expand(target, value, block)
@@ -643,7 +649,14 @@ module ActiveSupport
         # call the +compile+ paths short-circuit on the cached
         # +@all_callbacks+ / +@single_callbacks+ values and never reach the
         # synchronization block.
+        #
+        # Idempotent: a +CallbackChain+ may be reachable from multiple
+        # classes' +__callbacks+ Hashes (because +class_attribute+'s inherited
+        # hook copies the Hash but not the chain values). Once the receiver
+        # is frozen, subsequent invocations short-circuit so we don't try to
+        # mutate +@mutex+ on a frozen object.
         def make_shareable!
+          return self if frozen?
           compile(nil)
           CALLBACK_FILTER_TYPES.each { |t| compile(t) }
           @mutex = nil
@@ -697,7 +710,15 @@ module ActiveSupport
           [self, *descendants].each do |klass|
             callbacks = klass.__callbacks
             next if callbacks.nil?
-            callbacks.each_value { |chain| chain.make_shareable! }
+            callbacks.each do |name, chain|
+              begin
+                chain.make_shareable!
+              rescue Ractor::IsolationError => error
+                raise Ractor::IsolationError,
+                  "While making #{klass.inspect}.__callbacks[#{name.inspect}] shareable: #{error.message}",
+                  error.backtrace
+              end
+            end
             callbacks.make_shareable!
           end
           super

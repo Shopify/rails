@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "active_support/core_ext/kernel/shareable"
 require "active_support/execution_wrapper"
 require "active_support/executor"
 
@@ -45,7 +46,14 @@ module ActiveSupport
       set_callback(:class_unload, :after, *args, &block)
     end
 
-    to_run(:after) { self.class.prepare! }
+    # Lifted to a shareable_proc so the registered callback doesn't capture
+    # +self+ from the registering class (+ActiveSupport::Reloader+). At
+    # runtime the block is run with +instance_exec+ semantics, so
+    # +self.class+ still resolves to the runtime receiver.
+    PREPARE_AFTER_RUN = shareable_proc { self.class.prepare! }
+    private_constant :PREPARE_AFTER_RUN
+
+    to_run(:after, &PREPARE_AFTER_RUN)
 
     # Initiate a manual reload
     def self.reload!
