@@ -2,12 +2,25 @@
 
 require "active_support"
 require "active_support/i18n_railtie"
+require "active_support/core_ext/kernel/shareable"
 
 module ActiveSupport
   class Railtie < Rails::Railtie # :nodoc:
     config.active_support = ActiveSupport::OrderedOptions.new
 
     config.eager_load_namespaces << ActiveSupport
+
+    # Lifted out of the :active_support.reset_execution_context initializer
+    # below so the block can be made shareable. The previous implementation
+    # captured the +ActiveSupport::Railtie+ instance as +self+, which made the
+    # registered callback non-shareable. The body has no captured locals, so a
+    # module-level shareable_proc is equivalent.
+    BEFORE_CLASS_UNLOAD_RESET_HOOK = shareable_proc do
+      ActiveSupport::CurrentAttributes.clear_all
+      ActiveSupport::ExecutionContext.flush
+      ActiveSupport.event_reporter.clear_context
+    end
+    private_constant :BEFORE_CLASS_UNLOAD_RESET_HOOK
 
     guard_load_hooks(:message_pack, :active_support_test_case)
 
@@ -49,11 +62,7 @@ module ActiveSupport
     end
 
     initializer "active_support.reset_execution_context" do |app|
-      app.reloader.before_class_unload do
-        ActiveSupport::CurrentAttributes.clear_all
-        ActiveSupport::ExecutionContext.flush
-        ActiveSupport.event_reporter.clear_context
-      end
+      app.reloader.before_class_unload(&BEFORE_CLASS_UNLOAD_RESET_HOOK)
 
       app.executor.to_run do
         ActiveSupport::ExecutionContext.push
