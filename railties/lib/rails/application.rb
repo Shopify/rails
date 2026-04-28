@@ -698,6 +698,18 @@ module Rails
       routes
 
       AbstractController::Base.make_shareable! if defined?(AbstractController::Base)
+      # +ActionController::Base+ subclasses each carry an
+      # +@_parameter_encodings+ Hash (set up via +ParameterEncoding+'s
+      # +inherited+ hook) whose default proc captures self and which
+      # +CustomParamEncoder+ reads on every routed request via
+      # +action_encoding_template+. Layering this call after the
+      # +AbstractController::Base+ pass swaps each class's storage for a
+      # shareable snapshot that preserves the "missing key returns
+      # ASCII-8BIT" semantic for actions registered via
+      # +skip_parameter_encoding+. Internally chains via +super+ to
+      # +AbstractController::Base.make_shareable!+; the +frozen?+ guards
+      # in both methods keep the doubled descendants walk a no-op.
+      ActionController::Base.make_shareable! if defined?(ActionController::Base)
       # +ActiveSupport::ExecutionWrapper+ owns the +__callbacks+
       # class_attribute graph (Mutex + lazy compile caches per
       # +CallbackChain+). One call here covers +ExecutionWrapper+ itself,
@@ -705,6 +717,13 @@ module Rails
       # +Class.new(Reloader)+ this Application instance creates, since
       # they are all descendants tracked via +Callbacks+.
       ActiveSupport::ExecutionWrapper.make_shareable! if defined?(ActiveSupport::ExecutionWrapper)
+      # +ActionDispatch::Callbacks+ is the request-path equivalent: every
+      # +Rails::Engine#call+ invokes +ActionDispatch::Callbacks#call+,
+      # which runs +run_callbacks(:call)+ from inside the request Ractor
+      # and reads +__callbacks+ off the class. Make its callback graph
+      # shareable so that read does not raise +Ractor::IsolationError+
+      # on the +@__class_attr___callbacks+ ivar.
+      ActionDispatch::Callbacks.make_shareable! if defined?(ActionDispatch::Callbacks)
       # The module-level +ActiveSupport.@error_reporter+ /
       # +@event_reporter+ singletons are read from non-main Ractors by
       # the executor +:run+/+:complete+ callbacks. Make them shareable so
@@ -744,6 +763,92 @@ module Rails
       # +FileSystemResolver+s and +PathSet+s, then freezes the hashes
       # themselves and drops the boot-only mutex.
       ActionView::PathRegistry.make_shareable! if defined?(ActionView::PathRegistry)
+      # +ActionView::Template::Handlers+ owns the +@@template_handlers+,
+      # +@@default_template_handlers+, and +@@template_extensions+ class
+      # variables. +Handlers.extensions+ is invoked by
+      # +LookupContext::Accessors::DEFAULT_PROCS[:handlers]+ on every
+      # per-request +initialize_details+ call, which reads
+      # +@@template_extensions+ from inside the request Ractor. Per Aaron
+      # Patterson's class-variable rules (+ab32c0e690+), reading a class
+      # variable from a non-main Ractor only succeeds when its value is
+      # shareable. +Handlers.make_shareable!+ deep-freezes each registered
+      # handler instance, the +@@template_handlers+ registry, and the
+      # +@@template_extensions+ Array.
+      ActionView::Template::Handlers.make_shareable! if defined?(ActionView::Template::Handlers)
+      # +ActionView::LookupContext+ holds two class-level ivars
+      # (+@registered_details+, +Accessors::DEFAULT_PROCS+) that are
+      # populated at boot by +register_detail+ (locale, formats,
+      # variants, handlers) and read on every request via
+      # +LookupContext#initialize_details+ (called from
+      # +ViewPaths#lookup_context+ for each new request). Make them
+      # shareable so those reads don't raise +Ractor::IsolationError+.
+      # Cascades into +DetailsKey.make_shareable!+ for the
+      # +@details_keys+ / +@digest_cache+ caches and the
+      # +@view_context_class+ singleton.
+      ActionView::LookupContext.make_shareable! if defined?(ActionView::LookupContext)
+      # +I18n.@@fallbacks+ is read by the +LookupContext+
+      # +Accessors::DEFAULT_PROCS[:locale]+ proc on every per-request
+      # +initialize_details+ call (via +I18n.fallbacks+ in the i18n
+      # gem's +backend/fallbacks.rb+). Per Aaron Patterson's class-variable
+      # rules (+ab32c0e690+), reading a class variable from a non-main
+      # Ractor only succeeds when its value is shareable, so eagerly
+      # build the +I18n::Locale::Fallbacks+ instance and deep-freeze it
+      # at boot. +I18n.make_shareable!+ is defined alongside the
+      # +@@fallbacks+ cvar in +i18n/backend/fallbacks.rb+.
+      I18n.make_shareable! if defined?(I18n) && I18n.respond_to?(:make_shareable!)
+      # +Mime::SET+, +Mime::LOOKUP+, and +Mime::EXTENSION_LOOKUP+ are
+      # read from non-main Ractors on every request via
+      # +ActionDispatch::Http::MimeNegotiation#formats+ /+#accepts+
+      # (+Mime::Type.lookup+, +Mime::Type.parse+, +Mime[:sym]+). Make
+      # the constants and the registered +Mime::Type+ instances
+      # shareable so those reads do not raise +Ractor::IsolationError+
+      # on the module constants. Post-shareability,
+      # +Mime::Type.register+ / +register_alias+ / +register_callback+ /
+      # +unregister+ raise +FrozenError+ pointing back here.
+      Mime::Type.make_shareable! if defined?(Mime::Type)
+      # +ActiveSupport::JSON::Encoding+ caches two encoder instances on
+      # its singleton (+@encoder_without_options+ / +@encoder_without_escape+)
+      # that +ActiveSupport::JSON.encode+ reads from non-main Ractors on
+      # every options-less or +escape: false+ call (e.g. failsafe-path
+      # JSON responses). Make those cached encoders shareable so the
+      # singleton ivars themselves do not raise +Ractor::IsolationError+.
+      ActiveSupport::JSON::Encoding.make_shareable! if defined?(ActiveSupport::JSON::Encoding)
+      # +ActiveSupport::Inflector::Inflections+ holds the per-locale
+      # inflection registry on its singleton (+@__en_instance__+ /
+      # +@__instance__+). +String#camelize+ →
+      # +Inflector.inflections+ → +Inflections.instance_or_fallback+
+      # reads both ivars from inside the request Ractor (e.g.
+      # +ActionDispatch::Request#controller_class_for+ on every dispatch),
+      # so they must be shareable. +Inflections.make_shareable!+ warms
+      # the +:en+ singleton, snapshots the +Concurrent::Map+ of
+      # non-+:en+ locales to a frozen +Hash+, and deep-freezes each
+      # registered +Inflections+ (cascading into +Uncountables+ to warm
+      # its lazy +@pattern+ Regexp).
+      ActiveSupport::Inflector::Inflections.make_shareable! if defined?(ActiveSupport::Inflector::Inflections)
+      # +ActiveSupport::ExecutionContext+ owns the +@after_change_callbacks+
+      # module ivar that +ExecutionContext.[]=+ and +ExecutionContext.set+
+      # iterate on every per-request +Instrumentation#process_action+ (via
+      # +ActionController::Instrumentation#process_action+ writing the
+      # +:controller+ key). +ActiveRecord::QueryLogs+ registers a
+      # +clear_cache+ callback into this Array at boot, so non-main Ractors
+      # would otherwise raise +Ractor::IsolationError+ when reading the
+      # module ivar. +ExecutionContext.make_shareable!+ deep-freezes each
+      # registered callback Proc and freezes the Array. After this call
+      # +ExecutionContext.after_change+ raises +FrozenError+ pointing back
+      # to +ractorize!+ if a late registration is attempted.
+      ActiveSupport::ExecutionContext.make_shareable! if defined?(ActiveSupport::ExecutionContext)
+      # +ActiveSupport::CurrentAttributes+ and its app-level subclasses
+      # (typically +Current+) lazily wrote two class ivars on first use:
+      # +@current_instances_key+ via +current_instances_key+ (touched by
+      # +instance+ on every per-request +Current.foo+ access) and
+      # +@generated_attribute_methods+ via the +attribute+ macro. The
+      # +current_instances_key+ cache has been removed at the source and
+      # +CurrentAttributes.make_shareable!+ walks +self+ and every
+      # descendant to force-build +@generated_attribute_methods+ and
+      # freeze each subclass's merged +defaults+ Hash, then delegates
+      # to +Callbacks::ClassMethods#make_shareable!+ via +super+ to
+      # seal the +__callbacks+ graph for +define_callbacks :reset+.
+      ActiveSupport::CurrentAttributes.make_shareable! if defined?(ActiveSupport::CurrentAttributes)
       env_config.make_shareable!
       routes.make_shareable!
       make_shareable!

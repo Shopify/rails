@@ -43,11 +43,13 @@ module ActiveSupport
         end
 
         def delete(entry)
+          raise FrozenError, "ActiveSupport::Inflector::Inflections::Uncountables has been frozen for Ractor safety; inflection rules must be configured during boot, before Rails.application.ractorize!." if frozen?
           @members.delete(entry)
           @pattern = nil
         end
 
         def <<(word)
+          raise FrozenError, "ActiveSupport::Inflector::Inflections::Uncountables has been frozen for Ractor safety; inflection rules must be configured during boot, before Rails.application.ractorize!." if frozen?
           word = word.downcase
           @members << word
           @pattern = nil
@@ -59,6 +61,7 @@ module ActiveSupport
         end
 
         def add(words)
+          raise FrozenError, "ActiveSupport::Inflector::Inflections::Uncountables has been frozen for Ractor safety; inflection rules must be configured during boot, before Rails.application.ractorize!." if frozen?
           words = words.flatten.map(&:downcase)
           @members.concat(words)
           @pattern = nil
@@ -71,6 +74,16 @@ module ActiveSupport
             @pattern = /\b#{members_pattern}\Z/i
           end
           @pattern.match?(str)
+        end
+
+        # Force the lazy +@pattern+ Regexp build before deep-freezing so the
+        # first non-main-Ractor +uncountable?+ does not try to mutate the
+        # frozen ivar.
+        def make_shareable! # :nodoc:
+          return self if frozen?
+          uncountable?("")
+          @members.freeze
+          super
         end
       end
 
@@ -88,6 +101,34 @@ module ActiveSupport
           return @__instance__[k] if @__instance__.key?(k)
         end
         instance(locale)
+      end
+
+      # Make the per-locale inflection registry shareable so the
+      # singleton-class ivars (+@__en_instance__+, +@__instance__+) can be
+      # read from non-main Ractors. +String#camelize+ →
+      # +Inflector.inflections+ → +Inflections.instance_or_fallback+
+      # touches both ivars on every request.
+      #
+      # The +Concurrent::Map+ holding non-+:en+ locales is snapshotted to
+      # a frozen +Hash+ (matching the +Fanout+ / +PathRegistry+ pattern);
+      # post-shareability, +instance(non_en)+ raises +FrozenError+ if the
+      # locale isn't already registered. Each registered +Inflections+
+      # instance is deep-frozen via +Inflections#make_shareable!+, which
+      # warms the lazy +Uncountables@pattern+ before the freeze.
+      def self.make_shareable! # :nodoc:
+        return self if defined?(@shareable) && @shareable
+
+        instance(:en)
+        @__en_instance__.make_shareable!
+        snapshot = {}
+        @__instance__.each_pair do |locale, inflections|
+          inflections.make_shareable!
+          snapshot[locale] = inflections
+        end
+        @__instance__ = snapshot.freeze
+
+        @shareable = true
+        self
       end
 
       attr_reader :plurals, :singulars, :uncountables, :humans, :acronyms
@@ -157,6 +198,7 @@ module ActiveSupport
       #   underscore 'McDonald' # => 'mcdonald'
       #   camelize 'mcdonald'   # => 'McDonald'
       def acronym(word)
+        raise FrozenError, "ActiveSupport::Inflector::Inflections has been frozen for Ractor safety; inflection rules must be configured during boot, before Rails.application.ractorize!." if frozen?
         @acronyms[word.downcase] = word
         define_acronym_regex_patterns
       end
@@ -166,6 +208,7 @@ module ActiveSupport
       # always be a string that may include references to the matched data from
       # the rule.
       def plural(rule, replacement)
+        raise FrozenError, "ActiveSupport::Inflector::Inflections has been frozen for Ractor safety; inflection rules must be configured during boot, before Rails.application.ractorize!." if frozen?
         @uncountables.delete(rule) if rule.is_a?(String)
         @uncountables.delete(replacement)
         @plurals.prepend([rule, replacement])
@@ -176,6 +219,7 @@ module ActiveSupport
       # always be a string that may include references to the matched data from
       # the rule.
       def singular(rule, replacement)
+        raise FrozenError, "ActiveSupport::Inflector::Inflections has been frozen for Ractor safety; inflection rules must be configured during boot, before Rails.application.ractorize!." if frozen?
         @uncountables.delete(rule) if rule.is_a?(String)
         @uncountables.delete(replacement)
         @singulars.prepend([rule, replacement])
@@ -189,6 +233,7 @@ module ActiveSupport
       #   irregular 'cactus', 'cacti'
       #   irregular 'person', 'people'
       def irregular(singular, plural)
+        raise FrozenError, "ActiveSupport::Inflector::Inflections has been frozen for Ractor safety; inflection rules must be configured during boot, before Rails.application.ractorize!." if frozen?
         @uncountables.delete(singular)
         @uncountables.delete(plural)
 
@@ -223,6 +268,7 @@ module ActiveSupport
       #   uncountable 'money', 'information'
       #   uncountable %w( money information rice )
       def uncountable(*words)
+        raise FrozenError, "ActiveSupport::Inflector::Inflections has been frozen for Ractor safety; inflection rules must be configured during boot, before Rails.application.ractorize!." if frozen?
         @uncountables.add(words)
       end
 
@@ -235,6 +281,7 @@ module ActiveSupport
       #   human /_cnt$/i, '\1_count'
       #   human 'legacy_col_person_name', 'Name'
       def human(rule, replacement)
+        raise FrozenError, "ActiveSupport::Inflector::Inflections has been frozen for Ractor safety; inflection rules must be configured during boot, before Rails.application.ractorize!." if frozen?
         @humans.prepend([rule, replacement])
       end
 
@@ -246,6 +293,7 @@ module ActiveSupport
       #   clear :all
       #   clear :plurals
       def clear(scope = :all)
+        raise FrozenError, "ActiveSupport::Inflector::Inflections has been frozen for Ractor safety; inflection rules must be configured during boot, before Rails.application.ractorize!." if frozen?
         case scope
         when :all
           clear(:acronyms)
@@ -261,6 +309,19 @@ module ActiveSupport
         when :plurals, :singulars, :humans
           instance_variable_set "@#{scope}", []
         end
+      end
+
+      # Cascade into +@uncountables+ to warm its lazy +@pattern+, then
+      # deep-freeze the rule arrays and the acronym map before +super+
+      # deep-freezes +self+. Idempotent.
+      def make_shareable! # :nodoc:
+        return self if frozen?
+        @uncountables.make_shareable!
+        @plurals.freeze
+        @singulars.freeze
+        @humans.freeze
+        @acronyms.freeze
+        super
       end
 
       private

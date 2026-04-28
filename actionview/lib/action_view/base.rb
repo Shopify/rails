@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "active_support/core_ext/kernel/shareable"
 require "active_support/core_ext/module/attr_internal"
 require "active_support/core_ext/module/attribute_accessors"
 require "active_support/ordered_options"
@@ -203,16 +204,35 @@ module ActionView # :nodoc:
 
       def with_empty_template_cache # :nodoc:
         subclass = Class.new(self) {
-          # We can't implement these as self.class because subclasses will
-          # share the same template cache as superclasses, so "changed?" won't work
-          # correctly.
-          define_method(:compiled_method_container)           { subclass }
-          define_singleton_method(:compiled_method_container) { subclass }
-
           def inspect
             "#<ActionView::Base:#{'%#016x' % (object_id << 1)}>"
           end
         }
+        # Store +subclass+ in a class-level ivar so the +compiled_method_container+
+        # methods can recover the cache-owning class without capturing it in a
+        # closure. Using +Ractor.shareable_proc+ here means the method bodies
+        # cannot lexically close over +subclass+ (the proc detaches from its
+        # enclosing scope), so we walk the ancestor chain to find the owning
+        # class instead. The behaviour matches the closure form: the method
+        # returns the +ActionView::Base+ subclass produced by this call, even
+        # when invoked on further subclasses (so a single template cache is
+        # shared per +with_empty_template_cache+ invocation).
+        subclass.instance_variable_set(:@_compiled_method_container, subclass)
+
+        compiled_method_container_for_class = shareable_proc {
+          klass = self
+          klass = klass.superclass until klass.nil? || klass.instance_variable_defined?(:@_compiled_method_container)
+          klass&.instance_variable_get(:@_compiled_method_container)
+        }
+        compiled_method_container_for_instance = shareable_proc {
+          klass = self.class
+          klass = klass.superclass until klass.nil? || klass.instance_variable_defined?(:@_compiled_method_container)
+          klass&.instance_variable_get(:@_compiled_method_container)
+        }
+        subclass.singleton_class.define_method(:compiled_method_container, compiled_method_container_for_class)
+        subclass.define_method(:compiled_method_container, compiled_method_container_for_instance)
+
+        subclass
       end
 
       def changed?(other) # :nodoc:

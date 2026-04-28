@@ -83,7 +83,7 @@ module ActionDispatch
 
       ActiveSupport.on_load(:action_dispatch_response) do
         self.default_charset = app.config.action_dispatch.default_charset || app.config.encoding
-        self.default_headers = app.config.action_dispatch.default_headers
+        self.default_headers = app.config.action_dispatch.default_headers.dup.freeze
       end
 
       ActionDispatch::ExceptionWrapper.rescue_responses =

@@ -42,26 +42,28 @@ class Module
     syms.each do |sym|
       raise NameError.new("invalid attribute name: #{sym}") unless /^[_A-Za-z]\w*$/.match?(sym)
 
-      # The following generated method concatenates `object_id` because we want
-      # subclasses to maintain independent values.
+      # The generated key concatenates `object_id` because we want subclasses to
+      # maintain independent values. The key is computed on each call rather than
+      # cached in a module instance variable so that the reader can be invoked
+      # safely from non-main Ractors (writing a class/module ivar from a
+      # non-main Ractor raises Ractor::IsolationError).
       if default.nil?
         class_eval(<<~RUBY, __FILE__, __LINE__ + 1)
           def self.#{sym}
-            @__thread_mattr_#{sym} ||= "attr_#{sym}_\#{object_id}"
-            ::ActiveSupport::IsolatedExecutionState[@__thread_mattr_#{sym}]
+            ::ActiveSupport::IsolatedExecutionState["attr_#{sym}_\#{object_id}"]
           end
         RUBY
       else
         default = default.dup.freeze unless default.frozen?
-        singleton_class.define_method("#{sym}_default_value") { default }
+        singleton_class.define_method("#{sym}_default_value", -> { default }.make_shareable!)
 
         class_eval(<<~RUBY, __FILE__, __LINE__ + 1)
           def self.#{sym}
-            @__thread_mattr_#{sym} ||= "attr_#{sym}_\#{object_id}"
-            value = ::ActiveSupport::IsolatedExecutionState[@__thread_mattr_#{sym}]
+            key = "attr_#{sym}_\#{object_id}"
+            value = ::ActiveSupport::IsolatedExecutionState[key]
 
-            if value.nil? && !::ActiveSupport::IsolatedExecutionState.key?(@__thread_mattr_#{sym})
-              ::ActiveSupport::IsolatedExecutionState[@__thread_mattr_#{sym}] = #{sym}_default_value
+            if value.nil? && !::ActiveSupport::IsolatedExecutionState.key?(key)
+              ::ActiveSupport::IsolatedExecutionState[key] = #{sym}_default_value
             else
               value
             end
@@ -102,12 +104,14 @@ class Module
     syms.each do |sym|
       raise NameError.new("invalid attribute name: #{sym}") unless /^[_A-Za-z]\w*$/.match?(sym)
 
-      # The following generated method concatenates `object_id` because we want
-      # subclasses to maintain independent values.
+      # The generated key concatenates `object_id` because we want subclasses to
+      # maintain independent values. The key is computed on each call rather than
+      # cached in a module instance variable so that the writer can be invoked
+      # safely from non-main Ractors (writing a class/module ivar from a
+      # non-main Ractor raises Ractor::IsolationError).
       class_eval(<<~RUBY, __FILE__, __LINE__ + 1)
         def self.#{sym}=(obj)
-          @__thread_mattr_#{sym} ||= "attr_#{sym}_\#{object_id}"
-          ::ActiveSupport::IsolatedExecutionState[@__thread_mattr_#{sym}] = obj
+          ::ActiveSupport::IsolatedExecutionState["attr_#{sym}_\#{object_id}"] = obj
         end
       RUBY
 

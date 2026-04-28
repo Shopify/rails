@@ -17,7 +17,7 @@ module ActionDispatch
     end
 
     cattr_accessor :default
-    self.default = make_default(100)
+    self.default = make_default(100).make_shareable!
 
     class << self
       delegate :from_query_string, :from_pairs, :from_hash, to: :default

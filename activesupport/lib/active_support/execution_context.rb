@@ -45,7 +45,26 @@ module ActiveSupport
       attr_accessor :nestable
 
       def after_change(&block)
+        if @after_change_callbacks.frozen?
+          raise FrozenError, "ActiveSupport::ExecutionContext.after_change cannot register " \
+            "callbacks after Rails::Application#ractorize! has frozen @after_change_callbacks. " \
+            "Register the callback at boot time, before ractorize! runs."
+        end
         @after_change_callbacks << block
+      end
+
+      # Snapshot +@after_change_callbacks+ into a shareable, frozen Array so
+      # the +[]=+ and +set+ paths can read it from non-main Ractors. Each
+      # registered callback Proc is deep-frozen via +make_shareable!+, then
+      # the Array itself is frozen.
+      #
+      # Idempotent: calling this twice is a no-op.
+      def make_shareable! # :nodoc:
+        return self if @after_change_callbacks.frozen?
+
+        @after_change_callbacks.each(&:make_shareable!)
+        @after_change_callbacks.freeze
+        self
       end
 
       # Updates the execution context. If a block is given, it resets the provided keys to their

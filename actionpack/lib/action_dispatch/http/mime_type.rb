@@ -41,6 +41,21 @@ module Mime
     def valid_symbols?(symbols) # :nodoc
       symbols.all? { |s| @symbols_set.include?(s) }
     end
+
+    # Cascade target for +Mime::Type.make_shareable!+. Each registered
+    # +Mime::Type+ instance is deep-frozen so its +@symbol+, +@synonyms+,
+    # +@string+, and +@hash+ ivars are shareable; +@symbols+ and
+    # +@symbols_set+ are then frozen and +self+ is deep-frozen via +super+.
+    def make_shareable! # :nodoc:
+      return self if frozen?
+
+      @mimes.each(&:make_shareable!)
+      @mimes.freeze
+      @symbols.freeze
+      @symbols_set.freeze
+
+      super
+    end
   end
 
   SET              = Mimes.new
@@ -85,6 +100,7 @@ module Mime
     attr_reader :symbol
 
     @register_callbacks = []
+    @shareable = false
 
     # A simple helper class used in parsing the accept header.
     class AcceptItem # :nodoc:
@@ -161,6 +177,11 @@ module Mime
       ACCEPT_HEADER_REGEXP = /[^,\s"](?:[^,"]|"[^"]*")*/
 
       def register_callback(&block)
+        if @shareable
+          raise FrozenError,
+            "Mime::Type has been frozen for Ractor safety; register_callback " \
+            "must be called during boot, before Rails.application.ractorize!."
+        end
         @register_callbacks << block
       end
 
@@ -184,6 +205,12 @@ module Mime
       end
 
       def register(string, symbol, mime_type_synonyms = [], extension_synonyms = [], skip_lookup = false)
+        if @shareable
+          raise FrozenError,
+            "Mime::Type has been frozen for Ractor safety; register / " \
+            "register_alias must be called during boot, before " \
+            "Rails.application.ractorize!."
+        end
         new_mime = Type.new(string, symbol, mime_type_synonyms)
 
         SET << new_mime
@@ -243,12 +270,55 @@ module Mime
       #
       #     Mime::Type.unregister(:mobile)
       def unregister(symbol)
+        if @shareable
+          raise FrozenError,
+            "Mime::Type has been frozen for Ractor safety; unregister must " \
+            "be called during boot, before Rails.application.ractorize!."
+        end
         symbol = symbol.downcase
         if mime = Mime[symbol]
           SET.delete_if { |v| v.eql?(mime) }
           LOOKUP.delete_if { |_, v| v.eql?(mime) }
           EXTENSION_LOOKUP.delete_if { |_, v| v.eql?(mime) }
         end
+      end
+
+      # Make the +Mime+ module-level constants (+SET+, +LOOKUP+,
+      # +EXTENSION_LOOKUP+, +ALL+, +NullType.instance+) and
+      # +Mime::Type+'s +@register_callbacks+ shareable so non-main
+      # Ractors can call +Mime[:html]+, +Mime::Type.lookup+,
+      # +Mime::Type.parse+, and +Mime::Type.fetch+ without hitting
+      # +Ractor::IsolationError+ on the constant reads (e.g.
+      # +ActionDispatch::Http::MimeNegotiation#formats+ reads +LOOKUP+,
+      # +#format+ reads +Mime::NullType.instance+, and +#negotiate_mime+
+      # reads +Mime::ALL+ on every request).
+      #
+      # +Mime::SET#make_shareable!+ deep-freezes each registered
+      # +Mime::Type+, which covers the values stored in +LOOKUP+ and
+      # +EXTENSION_LOOKUP+ since those Hashes alias the same instances.
+      # We then freeze the two lookup Hashes themselves, the +ALL+ and
+      # +NullType+ singletons, and the +@register_callbacks+ Array
+      # (after deep-freezing each callback; +AbstractController::Collector+
+      # registers one at load time).
+      #
+      # Sets +@shareable+ as a sentinel so post-+make_shareable!+ calls
+      # to +register+, +register_alias+, +register_callback+, and
+      # +unregister+ raise +FrozenError+ pointing at
+      # +Rails.application.ractorize!+ rather than the cryptic
+      # underlying frozen-Hash error.
+      def make_shareable! # :nodoc:
+        return self if @shareable
+
+        Mime::SET.make_shareable!
+        LOOKUP.make_shareable!
+        EXTENSION_LOOKUP.make_shareable!
+        Mime::ALL.make_shareable!
+        Mime::NullType.instance.make_shareable!
+        @register_callbacks.each(&:make_shareable!)
+        @register_callbacks.make_shareable!
+
+        @shareable = true
+        self
       end
     end
 

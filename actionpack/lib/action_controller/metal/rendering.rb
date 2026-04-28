@@ -6,7 +6,8 @@ module ActionController
   module Rendering
     extend ActiveSupport::Concern
 
-    RENDER_FORMATS_IN_PRIORITY = [:body, :plain, :html]
+    RENDER_FORMATS_IN_PRIORITY = [:body, :plain, :html].freeze
+    Ractor.make_shareable(RENDER_FORMATS_IN_PRIORITY)
 
     module ClassMethods
       # Documentation at ActionController::Renderer#render

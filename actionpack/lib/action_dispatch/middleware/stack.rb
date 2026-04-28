@@ -47,6 +47,18 @@ module ActionDispatch
       def build_instrumented(app)
         InstrumentationProxy.new(build(app), inspect)
       end
+
+      # Deep-freeze the boot-time payload of this entry. +@args+ is an
+      # opaque user-supplied Array; +@block+, when present, is a user
+      # block. Both must be shareable for +MiddlewareStack#build+ (which
+      # runs at request time on subclasses such as
+      # +ActionController::MiddlewareStack#build+) to read them from a
+      # non-main Ractor.
+      def make_shareable!
+        @args.make_shareable!
+        @block&.make_shareable!
+        super
+      end
     end
 
     # This class is used to instrument the execution of a single middleware. It
@@ -78,6 +90,16 @@ module ActionDispatch
       yield(self) if block_given?
     end
 
+    # Freeze every entry in +@middlewares+ and the surrounding stack so
+    # this object can be read (e.g. via +any?+, +each+, or +build+) from
+    # non-main Ractors. Boot-only mutators (+use+, +insert+, +swap+,
+    # +delete+, +move+ ...) raise +FrozenError+ once this has run.
+    def make_shareable!
+      @middlewares.each(&:make_shareable!)
+      @middlewares.freeze
+      super
+    end
+
     def each(&block)
       @middlewares.each(&block)
     end
@@ -95,6 +117,7 @@ module ActionDispatch
     end
 
     def unshift(klass, *args, &block)
+      assert_not_frozen!(:unshift)
       middlewares.unshift(build_middleware(klass, args, block))
     end
     ruby2_keywords(:unshift)
@@ -104,6 +127,7 @@ module ActionDispatch
     end
 
     def insert(index, klass, *args, &block)
+      assert_not_frozen!(:insert)
       index = assert_index(index, :before)
       middlewares.insert(index, build_middleware(klass, args, block))
     end
@@ -112,12 +136,14 @@ module ActionDispatch
     alias_method :insert_before, :insert
 
     def insert_after(index, *args, &block)
+      assert_not_frozen!(:insert_after)
       index = assert_index(index, :after)
       insert(index + 1, *args, &block)
     end
     ruby2_keywords(:insert_after)
 
     def swap(target, *args, &block)
+      assert_not_frozen!(:swap)
       index = assert_index(target, :before)
       insert(index, *args, &block)
       middlewares.delete_at(index + 1)
@@ -129,6 +155,7 @@ module ActionDispatch
     # Returns the array of middlewares not including the deleted item, or returns
     # nil if the target is not found.
     def delete(target)
+      assert_not_frozen!(:delete)
       middlewares.reject! { |m| m.name == target.name }
     end
 
@@ -141,6 +168,7 @@ module ActionDispatch
     end
 
     def move(target, source)
+      assert_not_frozen!(:move)
       source_index = assert_index(source, :before)
       source_middleware = middlewares.delete_at(source_index)
 
@@ -151,6 +179,7 @@ module ActionDispatch
     alias_method :move_before, :move
 
     def move_after(target, source)
+      assert_not_frozen!(:move_after)
       source_index = assert_index(source, :after)
       source_middleware = middlewares.delete_at(source_index)
 
@@ -159,6 +188,7 @@ module ActionDispatch
     end
 
     def use(klass, *args, &block)
+      assert_not_frozen!(:use)
       middlewares.push(build_middleware(klass, args, block))
     end
     ruby2_keywords(:use)
@@ -175,6 +205,12 @@ module ActionDispatch
     end
 
     private
+      def assert_not_frozen!(method_name)
+        if frozen?
+          raise FrozenError, "can't modify frozen #{self.class.name} (#{method_name}) after Rails.application.ractorize!"
+        end
+      end
+
       def assert_index(index, where)
         i = index.is_a?(Integer) ? index : index_of(index)
         raise "No such middleware to insert #{where}: #{index.inspect}" unless i

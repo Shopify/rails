@@ -2,6 +2,7 @@
 
 require "concurrent/map"
 require "active_support/core_ext/module/attribute_accessors"
+require "active_support/core_ext/object/shareable"
 require "action_view/template/resolver"
 
 module ActionView
@@ -19,6 +20,12 @@ module ActionView
     self.registered_details = []
 
     def self.register_detail(name, &block)
+      if defined?(@shareable) && @shareable
+        raise FrozenError,
+          "ActionView::LookupContext has been frozen for Ractor safety; " \
+          "details must be registered during boot, before " \
+          "Rails.application.ractorize!."
+      end
       registered_details << name
       Accessors::DEFAULT_PROCS[name] = block
 
@@ -59,22 +66,51 @@ module ActionView
       @view_context_mutex = Mutex.new
 
       def self.digest_cache(details)
-        @digest_cache[details_cache_key(details)] ||= Concurrent::Map.new
+        if @digest_cache.frozen?
+          # Post-+make_shareable!+: caches are read-only frozen Hashes.
+          # Hits return the warmed entry; misses return a fresh
+          # +Concurrent::Map+ that is never stored on the shared class
+          # (so the per-request +LookupContext#digest_cache+ memoization
+          # still works for the duration of the request).
+          @digest_cache[details_cache_key(details)] || Concurrent::Map.new
+        else
+          @digest_cache[details_cache_key(details)] ||= Concurrent::Map.new
+        end
       end
 
       def self.details_cache_key(details)
-        @details_keys.fetch(details) do
-          if formats = details[:formats]
-            unless Template::Types.valid_symbols?(formats)
-              details = details.dup
-              details[:formats] &= Template::Types.symbols
+        if @details_keys.frozen?
+          # Post-+make_shareable!+: cache is a read-only frozen Hash.
+          # Hits return the warmed +TemplateDetails::Requested+; misses
+          # build a fresh value used by the caller but not stored.
+          @details_keys[details] || begin
+            if formats = details[:formats]
+              unless Template::Types.valid_symbols?(formats)
+                details = details.dup
+                details[:formats] &= Template::Types.symbols
+              end
             end
+            @details_keys[details] || TemplateDetails::Requested.new(**details)
           end
-          @details_keys[details] ||= TemplateDetails::Requested.new(**details)
+        else
+          @details_keys.fetch(details) do
+            if formats = details[:formats]
+              unless Template::Types.valid_symbols?(formats)
+                details = details.dup
+                details[:formats] &= Template::Types.symbols
+              end
+            end
+            @details_keys[details] ||= TemplateDetails::Requested.new(**details)
+          end
         end
       end
 
       def self.clear
+        if @details_keys.frozen? || @digest_cache.frozen?
+          raise FrozenError,
+            "ActionView::LookupContext::DetailsKey has been frozen for Ractor safety; " \
+            "the lookup cache cannot be cleared after Rails.application.ractorize!."
+        end
         ActionView::PathRegistry.all_resolvers.each do |resolver|
           resolver.clear_cache
         end
@@ -88,9 +124,58 @@ module ActionView
       end
 
       def self.view_context_class
+        if @view_context_mutex.nil?
+          # Post-+make_shareable!+: the boot-only mutex has been
+          # dropped. +@view_context_class+ was warmed before freeze.
+          return @view_context_class
+        end
         @view_context_mutex.synchronize do
           @view_context_class ||= ActionView::Base.with_empty_template_cache
         end
+      end
+
+      # Make the +DetailsKey+ class-level state shareable so non-main
+      # Ractors can read +@details_keys+, +@digest_cache+, and
+      # +@view_context_class+ without hitting +Ractor::IsolationError+.
+      #
+      # +@view_context_class+ is warmed by calling +view_context_class+
+      # (which lazily builds +ActionView::Base.with_empty_template_cache+)
+      # and made shareable in place. The boot-only +@view_context_mutex+
+      # is dropped (set to +nil+) since the class is now memoized and
+      # the lookup is no longer racy.
+      #
+      # +@details_keys+ and +@digest_cache+ are runtime caches written
+      # by +details_cache_key+ / +digest_cache+ on every request. We
+      # snapshot the boot-time entries (typically empty) to frozen
+      # +Hash+es; the runtime methods branch on +.frozen?+ to fall
+      # through to a per-call uncached path on cache miss, mirroring
+      # the +FileSystemResolver+ pattern.
+      def self.make_shareable! # :nodoc:
+        return self if @details_keys.frozen?
+
+        view_context_class
+        @view_context_class.make_shareable! if @view_context_class
+        @view_context_mutex = nil
+
+        details_keys_snapshot = {}
+        @details_keys.each_pair do |details, requested|
+          requested.make_shareable!
+          details_keys_snapshot[details.freeze] = requested
+        end
+        @details_keys = details_keys_snapshot.freeze
+
+        digest_cache_snapshot = {}
+        @digest_cache.each_pair do |key, map|
+          # Per-request +Concurrent::Map+ instances; they aren't
+          # +make_shareable!+-able, so we just keep references in the
+          # frozen outer Hash. Hits will return them; reads of those
+          # maps from non-main Ractors would still raise, but in
+          # practice the boot-time cache is empty.
+          digest_cache_snapshot[key] = map
+        end
+        @digest_cache = digest_cache_snapshot.freeze
+
+        self
       end
     end
 
@@ -228,6 +313,38 @@ module ActionView
     include Accessors
     include DetailsCache
     include ViewPaths
+
+    # Make the class-level state of +LookupContext+ shareable so non-main
+    # Ractors can read +@registered_details+ and +Accessors::DEFAULT_PROCS+
+    # without hitting +Ractor::IsolationError+. Both are populated at
+    # boot via +register_detail+ (locale, formats, variants, handlers)
+    # and never mutated afterwards in production.
+    #
+    # +#initialize_details+ walks +LookupContext.registered_details+ and
+    # calls each +DEFAULT_PROCS[k]+ on every new +LookupContext+ (which
+    # is one per request via +ViewPaths#lookup_context+), so both ivars
+    # must hold shareable values.
+    #
+    # The default procs capture +self == ActionView::LookupContext+
+    # (their lexical self at boot in this file). After the class itself
+    # becomes shareable, those procs become shareable too via
+    # +make_shareable!+ on each value.
+    #
+    # Cascades into +DetailsKey.make_shareable!+ for the inner-class
+    # caches (+@details_keys+, +@digest_cache+, +@view_context_class+).
+    # Post-shareability, +register_detail+ raises +FrozenError+.
+    def self.make_shareable! # :nodoc:
+      return self if defined?(@shareable) && @shareable
+
+      DetailsKey.make_shareable!
+
+      registered_details.freeze
+      Accessors::DEFAULT_PROCS.each_value(&:make_shareable!)
+      Accessors::DEFAULT_PROCS.freeze
+
+      @shareable = true
+      self
+    end
 
     def initialize(view_paths, details = {}, prefixes = [])
       @details_key = nil

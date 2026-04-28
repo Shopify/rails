@@ -86,6 +86,9 @@ module ActionController
     #       end
     #     end
     def self.add(key, &block)
+      if RENDERERS.frozen?
+        raise FrozenError, "can't register renderer #{key.inspect} after Rails.application.ractorize!"
+      end
       define_method(_render_with_renderer_method_name(key), &block)
       RENDERERS << key.to_sym
     end
@@ -96,6 +99,9 @@ module ActionController
     #
     #     ActionController::Renderers.remove(:csv)
     def self.remove(key)
+      if RENDERERS.frozen?
+        raise FrozenError, "can't remove renderer #{key.inspect} after Rails.application.ractorize!"
+      end
       RENDERERS.delete(key.to_sym)
       method_name = _render_with_renderer_method_name(key)
       remove_possible_method(method_name)
@@ -106,6 +112,31 @@ module ActionController
     end
 
     module ClassMethods
+      # Walk every controller class and replace its +@__class_attr__renderers+
+      # storage with a shareable snapshot. The +class_attribute :_renderers+
+      # default is a frozen empty +Set+, but +Renderers::All.included do
+      # self._renderers = RENDERERS end+ assigns the unfrozen module-level
+      # +RENDERERS+ constant to +ActionController::Base+ at boot. The
+      # +_renderers+ reader is invoked on every routed render path
+      # (+_render_to_body_with_renderer+), so the ivar must be shareable.
+      #
+      # Also freezes the +RENDERERS+ constant itself so post-+ractorize!+
+      # +Renderers.add+ / +Renderers.remove+ raise +FrozenError+ pointing
+      # back here rather than silently mutating shared state.
+      def make_shareable!
+        ::ActionController::Renderers::RENDERERS.freeze unless ::ActionController::Renderers::RENDERERS.frozen?
+
+        renderers_ivar = :@__class_attr__renderers
+        [self, *self.descendants].each do |klass|
+          singleton = klass.singleton_class
+          next unless singleton.instance_variable_defined?(renderers_ivar)
+          renderers = singleton.instance_variable_get(renderers_ivar)
+          next if renderers.nil? || renderers.frozen?
+          singleton.instance_variable_set(renderers_ivar, renderers.dup.freeze)
+        end
+        super
+      end
+
       # Adds, by name, a renderer or renderers to the `_renderers` available to call
       # within controller actions.
       #

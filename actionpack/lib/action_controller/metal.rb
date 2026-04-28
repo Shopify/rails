@@ -26,6 +26,11 @@ module ActionController
       def valid?(action)
         @strategy.call @actions, action
       end
+
+      def make_shareable!
+        @actions&.make_shareable!
+        super
+      end
     end
 
     def build(action, app = nil, &block)
@@ -37,9 +42,12 @@ module ActionController
     end
 
     private
-      INCLUDE = ->(list, action) { list.include? action }
-      EXCLUDE = ->(list, action) { !list.include? action }
-      NULL    = ->(list, action) { true }
+      # Captureless module-level lambdas; +Ractor.make_shareable+ is
+      # required because the +->+ literal on its own does not produce a
+      # shareable Proc.
+      INCLUDE = Ractor.make_shareable(->(list, action) { list.include? action })
+      EXCLUDE = Ractor.make_shareable(->(list, action) { !list.include? action })
+      NULL    = Ractor.make_shareable(->(list, action) { true })
 
       def build_middleware(klass, args, block)
         options = args.extract_options!

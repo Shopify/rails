@@ -161,6 +161,37 @@ module ActiveSupport
         end
       end
 
+      # Prepare +CurrentAttributes+ and its descendants for use across
+      # Ractors. The original implementation lazily wrote two class
+      # ivars on first use:
+      #
+      # * +@current_instances_key+ via +current_instances_key+, which
+      #   +instance+ touches on every per-request access. The cache has
+      #   been removed (the value is recomputed inline on each call) so
+      #   nothing is written from non-main Ractors.
+      # * +@generated_attribute_methods+ via the +attribute+ macro. That
+      #   only runs at class-definition time on the main Ractor, but we
+      #   force-build it here as a defense in depth so the ivar is in a
+      #   known state before any post-+ractorize!+ +attribute+ call.
+      #
+      # The +defaults+ +class_attribute+ stores its merged Hash on each
+      # subclass's singleton (e.g. +{request_id: NOT_SET, ...}+ on
+      # +Current+). The Hash is built unfrozen by +attribute+ via +merge+,
+      # so we freeze it here before +resolve_defaults+ reads it from a
+      # non-main Ractor.
+      #
+      # Walks +self+ and every descendant. Defers to +super+ (the
+      # +Callbacks::ClassMethods#make_shareable!+ pass) to seal the
+      # +__callbacks+ graph for +define_callbacks :reset+.
+      def make_shareable! # :nodoc:
+        ([self] + descendants).each do |klass|
+          klass.send(:generated_attribute_methods)
+          klass.defaults = klass.defaults.dup.freeze unless klass.defaults.frozen?
+        end
+
+        super
+      end
+
       private
         def generated_attribute_methods
           @generated_attribute_methods ||= Module.new.tap { |mod| include mod }
@@ -170,8 +201,13 @@ module ActiveSupport
           ExecutionContext.current_attributes_instances
         end
 
+        # Returns the per-class key used to look up the singleton +instance+
+        # in +ExecutionContext.current_attributes_instances+. Computed inline
+        # on each call (rather than cached in +@current_instances_key+) so
+        # that +instance+ can be invoked from non-main Ractors without
+        # writing a class ivar (which raises +Ractor::IsolationError+).
         def current_instances_key
-          @current_instances_key ||= name.to_sym
+          name.to_sym
         end
 
         def method_missing(name, ...)

@@ -142,10 +142,46 @@ module AbstractController
       # +ActiveSupport::OrderedOptions+ / +InheritableOptions+ that holds a
       # +default_proc+ and a parent chain, neither of which is shareable
       # by default.
+      #
+      # Also force-memoizes and freezes the lazily-initialized class
+      # ivars on each controller class that the request path reads from
+      # non-main Ractors:
+      #
+      # * +@controller_path+ (set on first call to +.controller_path+) --
+      #   read by +ActionView::ViewPaths::ClassMethods#local_prefixes+.
+      # * +@action_methods+ (set on first call to +.action_methods+) --
+      #   read by +AbstractController::Base#action_method?+ on every
+      #   action dispatch.
+      # * +@_prefixes+ (set on first call to +._prefixes+ via
+      #   +ActionView::ViewPaths+) -- read by +#lookup_context+. Resolved
+      #   here because +._prefixes+ recurses up the superclass chain and
+      #   internally calls +controller_path+, so all three memoizations
+      #   are warmed by the same walk.
       def make_shareable!
         [self, *self.descendants].each do |klass|
           config = klass.singleton_class.instance_variable_get(:@__class_attr_config)
           config&.make_shareable!
+
+          # Force +@controller_path+ memoization and freeze. Anonymous
+          # classes return +nil+ (the +unless anonymous?+ guard); leave
+          # the ivar unset rather than freezing +nil+.
+          path = klass.controller_path
+          path.freeze if path
+
+          # Force +@action_methods+ memoization. The Set is mutable
+          # after creation, so freeze it to make the read shareable.
+          methods = klass.action_methods
+          methods.freeze if methods && !methods.frozen?
+
+          # Force +@_prefixes+ memoization for classes that include
+          # +ActionView::ViewPaths+. Recurses up the superclass chain
+          # via +superclass._prefixes+ and reads +controller_path+ in
+          # +local_prefixes+, so this single call warms the whole
+          # prefix lookup tree.
+          if klass.respond_to?(:_prefixes)
+            prefixes = klass._prefixes
+            prefixes.freeze if prefixes && !prefixes.frozen?
+          end
         end
         self
       end

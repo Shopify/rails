@@ -241,6 +241,20 @@ module ActiveSupport
         def encode_without_escape(value) # :nodoc:
           @encoder_without_escape.encode(value)
         end
+
+        # The two cached encoder instances on this singleton
+        # (+@encoder_without_options+ / +@encoder_without_escape+) are
+        # read from non-main Ractors by every +ActiveSupport::JSON.encode+
+        # call that takes no options or only +escape: false+. Without
+        # this, +Encoding.encode_without_options+ raises
+        # +Ractor::IsolationError+ on the singleton ivars themselves.
+        # Idempotent.
+        def make_shareable!
+          return self if @encoder_without_options.frozen? && @encoder_without_escape.frozen?
+          @encoder_without_options = Ractor.make_shareable(@encoder_without_options)
+          @encoder_without_escape = Ractor.make_shareable(@encoder_without_escape)
+          self
+        end
       end
 
       self.use_standard_json_time_format = true
