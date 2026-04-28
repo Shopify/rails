@@ -9,6 +9,11 @@ require "rack/utils"
 
 module ActionDispatch
   class ExceptionWrapper
+    # The defaults are frozen so the class variables can be read from non-main
+    # Ractors. Callers that previously mutated these collections in place
+    # (e.g. `ExceptionWrapper.rescue_responses.merge!(...)`) must instead
+    # assign a new value (e.g.
+    # `ExceptionWrapper.rescue_responses = ExceptionWrapper.rescue_responses.merge(...).freeze`).
     cattr_accessor :rescue_responses, default: Hash.new(:internal_server_error).merge!(
       "ActionController::RoutingError"                     => :not_found,
       "AbstractController::ActionNotFound"                 => :not_found,
@@ -26,7 +31,7 @@ module ActionDispatch
       "ActionController::TooManyRequests"                  => :too_many_requests,
       "Rack::QueryParser::ParameterTypeError"              => :bad_request,
       "Rack::QueryParser::InvalidParameterError"           => :bad_request
-    )
+    ).freeze
 
     cattr_accessor :rescue_templates, default: Hash.new("diagnostics").merge!(
       "ActionView::MissingTemplate"            => "missing_template",
@@ -35,16 +40,16 @@ module ActionDispatch
       "ActiveRecord::StatementInvalid"         => "invalid_statement",
       "ActionView::Template::Error"            => "template_error",
       "ActionController::MissingExactTemplate" => "missing_exact_template",
-    )
+    ).freeze
 
     cattr_accessor :wrapper_exceptions, default: [
       "ActionView::Template::Error"
-    ]
+    ].freeze
 
     cattr_accessor :silent_exceptions, default: [
       "ActionController::RoutingError",
       "ActionDispatch::Http::MimeNegotiation::InvalidType"
-    ]
+    ].freeze
 
     attr_reader :backtrace_cleaner, :wrapped_causes, :exception_class_name, :exception
 
