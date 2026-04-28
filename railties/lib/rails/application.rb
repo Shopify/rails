@@ -11,6 +11,7 @@ require "active_support/encrypted_configuration"
 require "active_support/hash_with_indifferent_access"
 require "active_support/configuration_file"
 require "active_support/parameter_filter"
+require "active_support/core_ext/kernel/shareable"
 require "rails/engine"
 require "rails/autoloaders"
 
@@ -115,6 +116,12 @@ module Rails
 
     INITIAL_VARIABLES = [:config, :railties, :routes_reloader, :reloaders,
                          :routes, :helpers, :app_env_config] # :nodoc:
+
+    # Detached from per-app self so the proc is Ractor-shareable.
+    MESSAGE_SECRET_GENERATOR = shareable_proc do |salt, secret_key_base: Rails.application.secret_key_base|
+      Rails.application.key_generator(secret_key_base).generate_key(salt)
+    end
+    private_constant :MESSAGE_SECRET_GENERATOR
 
     def initialize(initial_variable_values = {}, &block)
       super()
@@ -223,9 +230,7 @@ module Rails
     #
     def message_verifiers
       @message_verifiers ||=
-        ActiveSupport::MessageVerifiers.new do |salt, secret_key_base: self.secret_key_base|
-          key_generator(secret_key_base).generate_key(salt)
-        end.rotate_defaults
+        ActiveSupport::MessageVerifiers.new(&MESSAGE_SECRET_GENERATOR).rotate_defaults
     end
 
     # Returns a message verifier object.
