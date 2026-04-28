@@ -66,7 +66,55 @@ module ActiveSupport
         "#<#{self.class} (#{total_patterns} patterns)>"
       end
 
+      # Prepare the notifier for cross-Ractor reads of
+      # +ActiveSupport::Notifications.@notifier+ (and the analogous read in
+      # +Notifications.instrumenter+).
+      #
+      # Subscribers are registered at boot via +Notifications.subscribe+ and
+      # +ActiveSupport::Subscriber.attach_to+ (LogSubscribers, etc.). In a
+      # production app, by the time +Rails.application.ractorize!+ runs, no
+      # further subscribe/unsubscribe traffic happens, so the synchronization
+      # mutex and cache-on-miss writes are dead.
+      #
+      # +Concurrent::Map+ does not implement +#freeze+, so we snapshot
+      # +@string_subscribers+, +@all_listeners_for+, and +@groups_for+ into
+      # frozen plain Hashes. +@string_subscribers+'s default-proc returned
+      # +[]+ on miss; we replicate that with +Hash.new([].freeze)+ so existing
+      # call sites that do +@string_subscribers[name] + ...+ keep working.
+      #
+      # The mutex is dropped to +nil+; +all_listeners_for+ and +groups_for+
+      # branch on +@mutex+ to skip cache writes when it's gone.
+      def make_shareable! # :nodoc:
+        return self if frozen?
+
+        @mutex = nil
+
+        string_subscribers = Hash.new([].freeze)
+        @string_subscribers.each_pair { |k, v| string_subscribers[k] = v.freeze }
+        @string_subscribers = string_subscribers.freeze
+
+        @other_subscribers.freeze
+
+        all_listeners_for = {}
+        @all_listeners_for.each_pair { |k, v| all_listeners_for[k] = v.freeze }
+        @all_listeners_for = all_listeners_for.freeze
+
+        groups_for = {}
+        @groups_for.each_pair { |k, v| groups_for[k] = v.freeze }
+        @groups_for = groups_for.freeze
+
+        super
+      end
+
       def subscribe(pattern = nil, callable = nil, monotonic: false, prepend: false, &block)
+        if @mutex.nil?
+          raise FrozenError,
+            "ActiveSupport::Notifications::Fanout has been frozen for Ractor " \
+            "safety; subscribers must be attached during boot, before " \
+            "Rails.application.ractorize!. (e.g. via Rails::Application.config " \
+            "initializers, ActiveSupport::LogSubscriber.attach_to, or " \
+            "ActiveSupport.on_load load hooks.)"
+        end
         subscriber = Subscribers.new(pattern, callable || block, monotonic)
         @mutex.synchronize do
           case pattern
@@ -91,6 +139,14 @@ module ActiveSupport
       end
 
       def unsubscribe(subscriber_or_name)
+        if @mutex.nil?
+          raise FrozenError,
+            "ActiveSupport::Notifications::Fanout has been frozen for Ractor " \
+            "safety; subscribers must be attached during boot, before " \
+            "Rails.application.ractorize!. (e.g. via Rails::Application.config " \
+            "initializers, ActiveSupport::LogSubscriber.attach_to, or " \
+            "ActiveSupport.on_load load hooks.)"
+        end
         @mutex.synchronize do
           case subscriber_or_name
           when String
@@ -201,9 +257,20 @@ module ActiveSupport
       end
 
       def groups_for(name) # :nodoc:
-        silenceable_groups, groups = @groups_for.compute_if_absent(name) do
+        cached = @groups_for[name]
+        if cached
+          silenceable_groups, groups = cached
+        else
           listeners = all_listeners_for(name)
-          listeners.partition(&:silenceable).map { |l| group_listeners(l) }
+          silenceable_groups, groups = listeners.partition(&:silenceable).map { |l| group_listeners(l) }
+
+          if @mutex
+            @mutex.synchronize do
+              @groups_for[name] ||= [silenceable_groups, groups]
+            end
+          end
+          # When @mutex is nil (post-+make_shareable!+), we skip the cache write
+          # because @groups_for is frozen; recompute on every miss.
         end
 
         unless silenceable_groups.empty?
@@ -325,10 +392,22 @@ module ActiveSupport
 
       def all_listeners_for(name)
         # this is correctly done double-checked locking (Concurrent::Map's lookups have volatile semantics)
-        @all_listeners_for[name] || @mutex.synchronize do
+        cached = @all_listeners_for[name]
+        return cached if cached
+
+        listeners = @string_subscribers[name] + @other_subscribers.select { |s| s.subscribed_to?(name) }
+
+        if @mutex
           # use synchronisation when accessing @subscribers
-          @all_listeners_for[name] ||=
-            @string_subscribers[name] + @other_subscribers.select { |s| s.subscribed_to?(name) }
+          @mutex.synchronize do
+            @all_listeners_for[name] ||= listeners
+          end
+        else
+          # Post-+make_shareable!+ (e.g. inside +Rails.application.ractorize!+),
+          # the cache hash and subscriber lists are frozen and no further
+          # subscribe/unsubscribe traffic happens, so we just return the freshly
+          # computed list without writing it back into the cache.
+          listeners
         end
       end
 

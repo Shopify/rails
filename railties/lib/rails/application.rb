@@ -714,6 +714,15 @@ module Rails
       # before the deep-freeze.
       ActiveSupport.error_reporter.make_shareable!
       ActiveSupport.event_reporter.make_shareable!
+      # +ActiveSupport::Notifications.@notifier+ is read from non-main
+      # Ractors by every +Notifications.instrument+ /
+      # +Notifications.instrumenter+ call (e.g. +Rails::Rack::Logger+'s
+      # +start_processing.action_controller+ event). Make the +Fanout+
+      # instance shareable so that read does not raise +Ractor::IsolationError+
+      # for the module ivar itself. +Fanout#make_shareable!+ snapshots its
+      # +Concurrent::Map+ caches into frozen Hashes, drops the boot-only
+      # synchronization mutex, and freezes the subscriber lists.
+      ActiveSupport::Notifications.notifier.make_shareable!
       env_config.make_shareable!
       routes.make_shareable!
       make_shareable!
