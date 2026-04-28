@@ -130,7 +130,18 @@ module ActiveRecord
       self.filter_attributes = []
 
       def self.connection_handler
-        ActiveSupport::IsolatedExecutionState[:active_record_connection_handler] || default_connection_handler
+        if handler = ActiveSupport::IsolatedExecutionState[:active_record_connection_handler]
+          handler
+        elsif Ractor.main?
+          # Reading the class_attribute :default_connection_handler ivar from a
+          # non-main Ractor would raise Ractor::IsolationError because the real
+          # ConnectionHandler holds non-shareable pool/driver state. The main
+          # Ractor still uses the real handler; non-main Ractors get a shareable
+          # stub that responds to the request-path read surface only.
+          default_connection_handler
+        else
+          ConnectionAdapters::RactorConnectionHandler
+        end
       end
 
       def self.connection_handler=(handler)
