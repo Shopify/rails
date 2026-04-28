@@ -723,6 +723,17 @@ module Rails
       # +Concurrent::Map+ caches into frozen Hashes, drops the boot-only
       # synchronization mutex, and freezes the subscriber lists.
       ActiveSupport::Notifications.notifier.make_shareable!
+      # +ActiveSupport::LogSubscriber+ has two singleton-class lazy
+      # ivars (+@logger+, +@supports_flush+) that +flush_all!+ writes on
+      # first use. +Rails::Rack::Logger#finish_request_instrumentation+
+      # calls +flush_all!+ from inside whichever Ractor served the
+      # request, so those writes raise +Ractor::IsolationError+ on the
+      # first request. +LogSubscriber.make_shareable!+ populates both
+      # ivars on the main Ractor at boot so the request-path branches
+      # become no-ops. We don't deep-freeze the class because
+      # +Rails.logger+ (a +BroadcastLogger+ wrapping a real I/O) is not
+      # shareable and we are intentionally out of scope for that here.
+      ActiveSupport::LogSubscriber.make_shareable! if defined?(ActiveSupport::LogSubscriber)
       env_config.make_shareable!
       routes.make_shareable!
       make_shareable!

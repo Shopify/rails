@@ -100,6 +100,31 @@ module ActiveSupport
         logger.flush if @supports_flush
       end
 
+      # Warm the singleton-class lazy ivars +@logger+ and
+      # +@supports_flush+ so the request path never tries to *set* them
+      # from a non-main Ractor.
+      #
+      # +Rails::Rack::Logger#finish_request_instrumentation+ calls
+      # +ActiveSupport::LogSubscriber.flush_all!+ from inside whichever
+      # Ractor served the request. +flush_all!+ does
+      # +@supports_flush = ... if @supports_flush.nil?+ and +.logger+
+      # does +@logger ||= Rails.logger+. Both are class-ivar writes on
+      # the base class's singleton, which Ruby forbids from non-main
+      # Ractors regardless of shareability.
+      #
+      # Populating both ivars from the main Ractor at boot turns the
+      # +||=+ and +if .nil?+ branches into no-ops, so non-main calls
+      # only read.
+      #
+      # +flush_all!+ is only ever invoked on +ActiveSupport::LogSubscriber+
+      # itself (it does not iterate +descendants+ or +subscribers+), so
+      # warming the base class is sufficient.
+      def make_shareable!
+        logger
+        @supports_flush = logger.respond_to?(:flush) if @supports_flush.nil?
+        self
+      end
+
       private
         def fetch_public_methods(subscriber, inherit_all)
           subscriber.public_methods(inherit_all) - LogSubscriber.public_instance_methods(true)
