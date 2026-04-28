@@ -13,6 +13,17 @@ module ActionCable
     config.action_cable.mount_path = ActionCable::INTERNAL[:default_mount_path]
     config.action_cable.precompile_assets = true
 
+    # Lifted out of the :action_cable.set_work_hooks initializer below so the
+    # block can be made shareable. The previous implementation captured the
+    # +ActionCable::Engine+ instance as +self+ via the surrounding
+    # +ActiveSupport.on_load(:action_cable)+ block, which made the registered
+    # callback non-shareable. The body has no captured locals, so a plain
+    # module-level shareable_proc is equivalent.
+    RESTART_SERVER_HOOK = shareable_proc do
+      ActionCable.server.restart
+    end
+    private_constant :RESTART_SERVER_HOOK
+
     guard_load_hooks(
       :action_cable_channel, :action_cable_connection,
       :action_cable_test_case, :action_cable_connection_test_case,
@@ -89,9 +100,7 @@ module ActionCable
           end
         end
 
-        app.reloader.before_class_unload do
-          ActionCable.server.restart
-        end
+        app.reloader.before_class_unload(&RESTART_SERVER_HOOK)
       end
 
       ActiveSupport.on_load(:action_cable_channel) do
