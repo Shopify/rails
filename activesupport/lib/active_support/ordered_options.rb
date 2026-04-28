@@ -87,6 +87,9 @@ module ActiveSupport
   #   h.girl # => 'Mary'
   #   h.boy  # => 'John'
   class InheritableOptions < OrderedOptions
+    EMPTY_PARENT = {}.freeze
+    private_constant :EMPTY_PARENT
+
     def initialize(parent = nil)
       @parent = parent
       if @parent.kind_of?(OrderedOptions)
@@ -98,6 +101,32 @@ module ActiveSupport
         super()
         @parent = {}
       end
+    end
+
+    # Collapse the inherited parent chain into +self+ so the object can be
+    # made Ractor-shareable. The default lookup behavior relies on a
+    # +default_proc+ that closes over +@parent+; both must be removed before
+    # +Ractor.make_shareable+ can deep-freeze this hash.
+    #
+    # We copy any keys from the parent chain that we don't already own (so
+    # +#[]+ continues to return the same values), drop the +default_proc+,
+    # and replace +@parent+ with a frozen empty-Hash sentinel before calling
+    # +super+ to deep-freeze.
+    def make_shareable!
+      return self if frozen?
+
+      @parent.make_shareable! if @parent.is_a?(InheritableOptions)
+
+      if @parent.respond_to?(:each_pair)
+        @parent.each_pair do |key, value|
+          self[key] = value unless own_key?(key.to_sym)
+        end
+      end
+
+      self.default_proc = nil
+      @parent = EMPTY_PARENT
+
+      super
     end
 
     def to_h

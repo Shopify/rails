@@ -134,6 +134,21 @@ module AbstractController
         action_methods
         nil
       end
+
+      # Walk the controller hierarchy and seal each class's
+      # +class_attribute+ config storage so it can be read from non-main
+      # Ractors. The +@__class_attr_config+ ivar lives on each controller
+      # class's singleton class; its default value is an
+      # +ActiveSupport::OrderedOptions+ / +InheritableOptions+ that holds a
+      # +default_proc+ and a parent chain, neither of which is shareable
+      # by default.
+      def make_shareable!
+        [self, *self.descendants].each do |klass|
+          config = klass.singleton_class.instance_variable_get(:@__class_attr_config)
+          config&.make_shareable!
+        end
+        self
+      end
     end
 
     abstract!

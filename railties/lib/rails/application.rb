@@ -697,6 +697,7 @@ module Rails
       env_config
       routes
 
+      AbstractController::Base.make_shareable! if defined?(AbstractController::Base)
       env_config.make_shareable!
       routes.make_shareable!
       make_shareable!
