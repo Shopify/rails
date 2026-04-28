@@ -705,6 +705,15 @@ module Rails
       # +Class.new(Reloader)+ this Application instance creates, since
       # they are all descendants tracked via +Callbacks+.
       ActiveSupport::ExecutionWrapper.make_shareable! if defined?(ActiveSupport::ExecutionWrapper)
+      # The module-level +ActiveSupport.@error_reporter+ /
+      # +@event_reporter+ singletons are read from non-main Ractors by
+      # the executor +:run+/+:complete+ callbacks. Make them shareable so
+      # those reads do not raise +Ractor::IsolationError+ for the module
+      # ivars themselves. Each reporter overrides +make_shareable!+ to
+      # warm lazy caches and freeze its subscriber/middleware lists
+      # before the deep-freeze.
+      ActiveSupport.error_reporter.make_shareable!
+      ActiveSupport.event_reporter.make_shareable!
       env_config.make_shareable!
       routes.make_shareable!
       make_shareable!

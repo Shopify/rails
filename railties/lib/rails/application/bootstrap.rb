@@ -4,6 +4,7 @@ require "fileutils"
 require "active_support/notifications"
 require "active_support/dependencies"
 require "active_support/descendants_tracker"
+require "active_support/core_ext/kernel/shareable"
 
 module Rails
   class Application
@@ -70,12 +71,20 @@ module Rails
           Rails.error.logger = Rails.logger
         end
 
-        Rails.error.add_middleware(->(error, handled:, severity:, context:, source:) {
-          context.reverse_merge(rails: {
-            version: Rails::VERSION::STRING,
-            app_revision: app.revision,
-            environment: Rails.env.to_s,
-          })
+        # Pre-resolve the rails-context values into shareable locals so the
+        # middleware lambda below does not capture +self+ (the bootstrap
+        # block's +Application+ instance) or +app+. Both would otherwise
+        # block +Ractor.make_shareable+ from succeeding on the
+        # +ActiveSupport.error_reporter+ instance, since the captured
+        # +self+ is not shareable.
+        rails_context = {
+          version: Rails::VERSION::STRING.dup.freeze,
+          app_revision: app.revision&.dup&.freeze,
+          environment: Rails.env.to_s.freeze,
+        }.freeze
+
+        Rails.error.add_middleware(shareable_proc { |error, handled:, severity:, context:, source:|
+          context.reverse_merge(rails: rails_context)
         })
       end
 

@@ -274,6 +274,26 @@ module ActiveSupport
       nil
     end
 
+    # Prepare the reporter for cross-Ractor reads of +ActiveSupport.error_reporter+.
+    #
+    # Subscribers and context middlewares are registered during boot
+    # (Bootstrap initializers add the default Rails middleware; subclasses
+    # subscribe via Railtie initializers or test harnesses). In production
+    # all of that has happened by the time +ractorize!+ runs. The
+    # +disable+ method does mutate state, but it does so via
+    # +ActiveSupport::IsolatedExecutionState+ keyed by +self+, not
+    # through the reporter's own ivars, so a frozen reporter is still
+    # compatible with that path.
+    #
+    # Deep-freezing the reporter via +super+ makes the value held by
+    # +ActiveSupport.@error_reporter+ shareable, which in turn makes
+    # reading that module ivar safe from non-main Ractors.
+    def make_shareable! # :nodoc:
+      @subscribers.freeze
+      @context_middlewares.freeze
+      super
+    end
+
     private
       def ensure_backtrace(error)
         return if error.frozen? # re-raising won't add a backtrace or set the cause
@@ -312,6 +332,16 @@ module ActiveSupport
         # Run all middlewares in the stack
         def execute(error, handled:, severity:, context:, source:)
           @stack.inject(context) { |c, middleware| middleware.call(error, context: c, handled:, severity:, source:) }
+        end
+
+        # Middleware is registered at boot (e.g. by the
+        # +initialize_error_reporter+ bootstrap initializer); freezing the
+        # stack lets the surrounding +ErrorReporter+ become shareable so
+        # +ActiveSupport.@error_reporter+ can be read from non-main
+        # Ractors.
+        def freeze
+          @stack.freeze
+          super
         end
       end
   end

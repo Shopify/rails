@@ -550,6 +550,28 @@ module ActiveSupport
       payload_filter
     end
 
+    # Prepare the reporter for cross-Ractor reads of +ActiveSupport.event_reporter+.
+    #
+    # Subscribers are registered at boot via Railtie initializers and are
+    # only mutated through {#subscribe} / {#unsubscribe}; in production
+    # those calls have all completed by the time +ractorize!+ runs. The
+    # payload filter is normally built lazily by the first call to
+    # +notify+ that filters a payload, but the
+    # +active_support.set_filter_parameters+ initializer eagerly populates
+    # it via +reload_payload_filter+ at +after_initialize+ time, so we
+    # only force a build here defensively.
+    #
+    # Once the lazy ivars are warmed and the subscriber list is frozen,
+    # deep-freezing the reporter via +super+ makes the value held by
+    # +ActiveSupport.@event_reporter+ shareable, which in turn makes
+    # reading that module ivar safe from non-main Ractors.
+    def make_shareable! # :nodoc:
+      payload_filter
+      @subscribers.each(&:freeze)
+      @subscribers.freeze
+      super
+    end
+
     private
       def filter_parameters
         self.class.filter_parameters || ActiveSupport.filter_parameters
