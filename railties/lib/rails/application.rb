@@ -811,6 +811,157 @@ module Rails
       # at boot. +I18n.make_shareable!+ is defined alongside the
       # +@@fallbacks+ cvar in +i18n/backend/fallbacks.rb+.
       I18n.make_shareable! if defined?(I18n) && I18n.respond_to?(:make_shareable!)
+      # +I18n::RESERVED_KEYS+ is a mutable Array of Symbols that
+      # +I18n::Backend::Base#translate+ reads on every translation lookup
+      # via +RESERVED_KEYS.include?(k)+. The constant is read from
+      # non-main Ractors on every request through view-helper +translate+
+      # calls, which raises +Ractor::IsolationError+ until it is
+      # shareable. Freeze in place; +I18n.reserve_key+ would raise
+      # +FrozenError+ pointing back here if a late registration is
+      # attempted, but the registry is populated at gem load time.
+      Ractor.make_shareable(I18n::RESERVED_KEYS) if defined?(I18n::RESERVED_KEYS)
+      # +I18n.reserved_keys_pattern+ lazily writes the +@reserved_keys_pattern+
+      # class ivar on +I18n.singleton_class+ via +||=+ on first call from
+      # +I18n::Backend::Base#translate+. Per-request +translate+ from non-main
+      # Ractors raises +Ractor::IsolationError+ ("can not set instance
+      # variables of classes/modules by non-main Ractors") on the lazy write.
+      # Force-resolve on the main Ractor at boot and make the resulting
+      # Regexp shareable.
+      if defined?(I18n) && I18n.respond_to?(:reserved_keys_pattern)
+        pattern = I18n.reserved_keys_pattern
+        if pattern && !Ractor.shareable?(pattern)
+          I18n.singleton_class.instance_variable_set(:@reserved_keys_pattern, Ractor.make_shareable(pattern))
+        end
+      end
+      # +I18n::Config+ holds two class variables (+@@available_locales+ and
+      # +@@available_locales_set+) that +I18n::Config#available_locales+ and
+      # +#available_locales_set+ lazily populate via +||=+ on first call.
+      # +ActionDispatch::HTTP::MimeNegotiation#formats+ and other request-path
+      # code read those cvars from inside the request Ractor, which raises
+      # +Ractor::IsolationError+ ("can not set class variables from non-main
+      # Ractors") on the lazy write. Force-resolve both cvars on the main
+      # Ractor at boot, and assign +@@available_locales+ to a non-nil,
+      # shareable Array so the +@@available_locales ||= nil+ branch in
+      # +available_locales+ short-circuits without writing on subsequent
+      # non-main Ractor reads.
+      if defined?(I18n::Config)
+        I18n.config.available_locales
+        I18n.config.available_locales_set
+        if I18n::Config.class_variable_defined?(:@@available_locales) && I18n::Config.class_variable_get(:@@available_locales)
+          I18n::Config.class_variable_set(:@@available_locales, Ractor.make_shareable(I18n::Config.class_variable_get(:@@available_locales)))
+        else
+          # Force a non-nil shareable value so future +||= nil+ short-circuits.
+          I18n::Config.class_variable_set(:@@available_locales, Ractor.make_shareable(I18n.backend.available_locales))
+        end
+        if I18n::Config.class_variable_defined?(:@@available_locales_set)
+          I18n::Config.class_variable_set(:@@available_locales_set, Ractor.make_shareable(I18n::Config.class_variable_get(:@@available_locales_set)))
+        end
+        # +I18n::Config#backend+ lazily instantiates +Backend::Simple+ on
+        # first call (+@@backend ||= Backend::Simple.new+). Per-request
+        # +I18n.translate+ from view helpers (e.g. +translate+ in ERB
+        # templates) reads +@@backend+ from inside the request Ractor,
+        # which raises +Ractor::IsolationError+ ("can not read non-shareable
+        # class variable @@backend from non-main Ractors") because the
+        # backend's +@translations+ Hash and +@initialized+ flag are
+        # mutated lazily by +init_translations+. Force-instantiate the
+        # backend, eagerly load all translations, and freeze the backend
+        # so +@@backend+ holds a shareable value that request Ractors can
+        # read.
+        backend = I18n.backend
+        if backend.respond_to?(:init_translations, true) && !backend.instance_variable_get(:@initialized)
+          backend.send(:init_translations)
+        end
+        if I18n::Config.class_variable_defined?(:@@backend) && backend && !Ractor.shareable?(backend)
+          I18n::Config.class_variable_set(:@@backend, Ractor.make_shareable(backend))
+        end
+        # +I18n::Config+ holds several other lazy-init class variables that
+        # follow the same +@@cvar ||= default+ pattern as +@@backend+:
+        # +@@default_separator+, +@@exception_handler+,
+        # +@@missing_interpolation_argument_handler+, +@@load_path+, and
+        # +@@interpolation_patterns+. Any first read from a non-main Ractor
+        # would trigger the +||=+ write and raise
+        # +Ractor::IsolationError+. Force-resolve each on the main Ractor
+        # and make the cvar value shareable. Also normalize
+        # +@@enforce_available_locales+ (set in the class body) for
+        # completeness.
+        [:default_separator, :exception_handler, :missing_interpolation_argument_handler, :load_path, :interpolation_patterns].each do |attr|
+          I18n.config.public_send(attr)
+        end
+        # +@@missing_interpolation_argument_handler+ defaults to a lambda
+        # defined inside +I18n::Config#missing_interpolation_argument_handler+
+        # whose +self+ is the +I18n::Config+ instance receiver. That +self+
+        # is not shareable, and +Ractor.make_shareable(lambda, copy: true)+
+        # cannot rebuild it either. Replace the default with a structurally
+        # equivalent shareable proc whose +self+ is +main+ (and therefore
+        # shareable) before the cvar-freezing pass below.
+        if I18n::Config.class_variable_defined?(:@@missing_interpolation_argument_handler)
+          handler = I18n::Config.class_variable_get(:@@missing_interpolation_argument_handler)
+          if handler.is_a?(Proc) && !Ractor.shareable?(handler)
+            # +shareable_proc+ detaches the proc from +self+ so the
+            # resulting Proc is shareable regardless of the enclosing
+            # method's receiver.
+            replacement = shareable_proc do |missing_key, provided_hash, string|
+              raise I18n::MissingInterpolationArgument.new(missing_key, provided_hash, string)
+            end
+            I18n::Config.class_variable_set(:@@missing_interpolation_argument_handler, replacement)
+          end
+        end
+        [
+          :@@default_separator,
+          :@@exception_handler,
+          :@@missing_interpolation_argument_handler,
+          :@@load_path,
+          :@@interpolation_patterns,
+          :@@enforce_available_locales,
+        ].each do |cvar|
+          next unless I18n::Config.class_variable_defined?(cvar)
+          value = I18n::Config.class_variable_get(cvar)
+          next if value.nil? || Ractor.shareable?(value)
+          I18n::Config.class_variable_set(cvar, Ractor.make_shareable(value))
+        end
+      end
+      # +I18n::Base.@@normalized_key_cache+ is a +Concurrent::Map+ of
+      # +Concurrent::Map+s populated lazily by +I18n::Base#normalize_key+
+      # on every +I18n.translate+ call (the +keys[separator][key] ||= ...+
+      # pattern at +i18n-1.14.8/lib/i18n.rb:442+). The +Concurrent::Map+
+      # value is not shareable, so per-request +t(...)+ from a non-main
+      # Ractor (via view helpers) raises +Ractor::IsolationError+ ("can
+      # not read non-shareable class variable @@normalized_key_cache from
+      # non-main Ractors"). Replace the cvar with a frozen empty +Hash+
+      # so cvar reads succeed, and prepend a non-caching +#normalize_key+
+      # override into +I18n::Base+ so the cache is bypassed entirely.
+      # The override is structurally equivalent to the i18n gem's
+      # implementation but skips the +keys[separator][key] ||=+ memoization,
+      # paying a small per-call key-parse cost in exchange for Ractor
+      # safety. Prepended into +I18n::Base+ (which is mixed into
+      # +I18n.singleton_class+), so +I18n.normalize_key+ resolves to the
+      # override before the original.
+      if defined?(I18n::Base)
+        if I18n::Base.class_variable_defined?(:@@normalized_key_cache)
+          I18n::Base.class_variable_set(:@@normalized_key_cache, {}.freeze)
+        end
+        ractor_safe_i18n_keys = Module.new do
+          def normalize_key(key, separator)
+            case key
+            when Array
+              key.flat_map { |k| normalize_key(k, separator) }
+            else
+              keys = key.to_s.split(separator)
+              keys.delete("")
+              keys.map! do |k|
+                case k
+                when /\A[-+]?([1-9]\d*|0)\z/ then k.to_i
+                when "true" then true
+                when "false" then false
+                else k.to_sym
+                end
+              end
+              keys.size == 1 ? keys.first : keys
+            end
+          end
+        end
+        I18n::Base.prepend(ractor_safe_i18n_keys)
+      end
       # +Mime::SET+, +Mime::LOOKUP+, and +Mime::EXTENSION_LOOKUP+ are
       # read from non-main Ractors on every request via
       # +ActionDispatch::Http::MimeNegotiation#formats+ /+#accepts+
@@ -898,6 +1049,13 @@ module Rails
           ar_class.make_arel_table_shareable!
           ar_class.make_predicate_builder_shareable!
         end
+        # +ActiveRecord::Relation::WhereClause.empty+ memoizes the singleton
+        # empty +WhereClause+ in the +@empty+ class ivar via +||=+.
+        # +QueryMethods#where_clause+ reads it on every relation that has
+        # no where conditions yet (fresh +Model.all+ / +Model.where+),
+        # which raises +Ractor::IsolationError+ from non-main Ractors until
+        # the cached value is shareable.
+        ActiveRecord::Relation::WhereClause.make_shareable! if defined?(ActiveRecord::Relation::WhereClause)
       end
       env_config.make_shareable!
       routes.make_shareable!

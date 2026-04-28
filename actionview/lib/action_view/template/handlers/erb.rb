@@ -17,7 +17,7 @@ module ActionView
         class_attribute :erb_implementation, default: Erubi
 
         # Do not escape templates of these mime types.
-        class_attribute :escape_ignore_list, default: ["text/plain"]
+        class_attribute :escape_ignore_list, default: ["text/plain"].freeze
 
         # Strip trailing newlines from rendered output
         class_attribute :strip_trailing_newlines, default: false

@@ -4,7 +4,11 @@
   en: {
     number: {
       nth: {
-        ordinals: lambda do |_key, options|
+        # Use +shareable_proc+ so the lambdas detach from the loader's
+        # +self+ (the I18n backend instance) and become shareable. They
+        # are stored in the backend's +@translations+ Hash and read by
+        # +I18n.translate+ from request Ractors.
+        ordinals: shareable_proc do |_key, options|
           number = options[:number]
           case number
           when 1; "st"
@@ -23,7 +27,7 @@
           end
         end,
 
-        ordinalized: lambda do |_key, options|
+        ordinalized: shareable_proc do |_key, options|
           number = options[:number]
           "#{number}#{ActiveSupport::Inflector.ordinal(number)}"
         end

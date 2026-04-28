@@ -35,13 +35,12 @@ module ActionController # :nodoc:
         types.each do |type|
           next if _flash_types.include?(type)
 
-          define_method(type) do
-            request.flash[type]
-          end
+          handler = shareable_proc { request.flash[type] }
+          define_method(type, &handler)
           private type
           helper_method(type) if respond_to?(:helper_method)
 
-          self._flash_types += [type]
+          self._flash_types = (_flash_types + [type]).freeze
         end
       end
     end

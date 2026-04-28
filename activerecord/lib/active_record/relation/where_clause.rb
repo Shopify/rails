@@ -96,6 +96,10 @@ module ActiveRecord
         @empty ||= new([]).freeze
       end
 
+      def self.make_shareable!
+        @empty = Ractor.make_shareable(empty)
+      end
+
       def contradiction?
         predicates.any? do |x|
           case x

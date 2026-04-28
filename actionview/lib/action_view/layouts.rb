@@ -2,6 +2,8 @@
 
 require "action_view/rendering"
 require "active_support/core_ext/module/redefine_method"
+require "active_support/core_ext/object/shareable"
+require "active_support/core_ext/kernel/shareable"
 
 module ActionView
   # = Action View \Layouts
@@ -308,7 +310,15 @@ module ActionView
               end
             RUBY
           when Proc
-            define_method :_layout_from_proc, &_layout
+            # The Proc must be shareable so the resulting bmethod can be
+            # invoked from non-main Ractors. +define_method+ always treats the
+            # block as the method body and rebinds +self+ to the receiver at
+            # call time, so detaching the proc from its enclosing scope via
+            # +shareable_proc+ is safe: implicit method calls on +self+
+            # (e.g. +turbo_frame_request?+) still resolve against the
+            # controller instance. Already-shareable procs are passed through.
+            layout_proc = _layout.shareable? ? _layout : shareable_proc(&_layout)
+            define_method :_layout_from_proc, &layout_proc
             private :_layout_from_proc
             <<-RUBY
               result = _layout_from_proc(#{_layout.arity == 0 ? '' : 'self'})
