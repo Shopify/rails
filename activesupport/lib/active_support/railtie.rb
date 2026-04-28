@@ -22,6 +22,29 @@ module ActiveSupport
     end
     private_constant :BEFORE_CLASS_UNLOAD_RESET_HOOK
 
+    # Lifted out of the :active_support.reset_execution_context initializer
+    # below for the same reason as +BEFORE_CLASS_UNLOAD_RESET_HOOK+: the inline
+    # block captured the +ActiveSupport::Railtie+ instance as +self+, blocking
+    # shareable conversion of the executor's +:run+ callback chain. The body
+    # has no captured locals, so a module-level shareable_proc is equivalent.
+    EXECUTOR_TO_RUN_PUSH_HOOK = shareable_proc do
+      ActiveSupport::ExecutionContext.push
+    end
+    private_constant :EXECUTOR_TO_RUN_PUSH_HOOK
+
+    # Lifted out of the :active_support.reset_execution_context initializer
+    # below for the same reason as +BEFORE_CLASS_UNLOAD_RESET_HOOK+: the inline
+    # block captured the +ActiveSupport::Railtie+ instance as +self+, blocking
+    # shareable conversion of the executor's +:complete+ callback chain. The
+    # body has no captured locals, so a module-level shareable_proc is
+    # equivalent.
+    EXECUTOR_TO_COMPLETE_HOOK = shareable_proc do
+      ActiveSupport::CurrentAttributes.clear_all
+      ActiveSupport::ExecutionContext.pop
+      ActiveSupport.event_reporter.clear_context
+    end
+    private_constant :EXECUTOR_TO_COMPLETE_HOOK
+
     guard_load_hooks(:message_pack, :active_support_test_case)
 
     initializer "active_support.deprecator", before: :load_environment_config do |app|
@@ -63,16 +86,8 @@ module ActiveSupport
 
     initializer "active_support.reset_execution_context" do |app|
       app.reloader.before_class_unload(&BEFORE_CLASS_UNLOAD_RESET_HOOK)
-
-      app.executor.to_run do
-        ActiveSupport::ExecutionContext.push
-      end
-
-      app.executor.to_complete do
-        ActiveSupport::CurrentAttributes.clear_all
-        ActiveSupport::ExecutionContext.pop
-        ActiveSupport.event_reporter.clear_context
-      end
+      app.executor.to_run(&EXECUTOR_TO_RUN_PUSH_HOOK)
+      app.executor.to_complete(&EXECUTOR_TO_COMPLETE_HOOK)
 
       ActiveSupport.on_load(:active_support_test_case) do
         if app.config.active_support.executor_around_test_case
