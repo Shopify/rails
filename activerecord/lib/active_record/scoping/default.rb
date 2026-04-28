@@ -16,7 +16,7 @@ module ActiveRecord
 
       included do
         # Stores the default scope for the class.
-        class_attribute :default_scopes, instance_writer: false, instance_predicate: false, default: []
+        class_attribute :default_scopes, instance_writer: false, instance_predicate: false, default: [].freeze
         class_attribute :default_scope_override, instance_writer: false, instance_predicate: false, default: nil
       end
 

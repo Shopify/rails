@@ -414,8 +414,30 @@ module ActiveRecord
         @arel_table ||= Arel::Table.new(table_name, klass: self)
       end
 
+      # Force-resolves +@arel_table+ and makes it shareable so that
+      # +arel_table+ can be invoked from a non-main Ractor without raising
+      # +Ractor::IsolationError+ on the class instance variable read.
+      #
+      # The +Arel::Table+ instance holds a back-reference to +self+ (the AR
+      # descendant class) via +@klass+, so we make a shareable copy rather
+      # than deep-freezing in place — deep-freezing would try to freeze the
+      # AR class itself, which still has other lazy ivars (e.g.
+      # +@predicate_builder+, +@find_by_statement_cache+) that are addressed
+      # in their own leaves. The boot-time +arel_table+ call here ensures the
+      # ivar is present on every concrete descendant before the copy.
+      def make_arel_table_shareable!
+        return if @arel_table && Ractor.shareable?(@arel_table)
+        @arel_table = Ractor.make_shareable(arel_table, copy: true)
+      end
+
       def predicate_builder # :nodoc:
         @predicate_builder ||= PredicateBuilder.new(TableMetadata.new(self, arel_table))
+      end
+
+      # Uses +copy: true+ because +PredicateBuilder+/+TableMetadata+ back-reference this class.
+      def make_predicate_builder_shareable!
+        return if @predicate_builder && Ractor.shareable?(@predicate_builder)
+        @predicate_builder = Ractor.make_shareable(predicate_builder, copy: true)
       end
 
       def type_caster # :nodoc:

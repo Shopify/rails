@@ -881,6 +881,23 @@ module Rails
         [ActiveRecord::Base, *ActiveRecord::Base.descendants].each do |ar_class|
           ar_class.make_relation_delegate_cache_shareable!
         end
+        # +ActiveRecord::Core::ClassMethods#arel_table+ lazily writes
+        # +@arel_table+ on first read for each AR descendant. The first
+        # +Model.all+ / +Model.find+ inside a request Ractor reaches this
+        # ivar via +ActiveRecord::Relation#initialize+ ->
+        # +Delegation::ClassMethods#create+ -> +Core::ClassMethods#relation+,
+        # which raises +Ractor::IsolationError+ on the class ivar read until
+        # the +Arel::Table+ has been built and made shareable. Force-resolve
+        # and snapshot a shareable copy on every concrete descendant so that
+        # read path is shareable. The +Arel::Table+ holds a +@klass+
+        # back-reference to the AR class, so we use +copy: true+ to avoid
+        # entangling the AR class's other lazy ivars (addressed in their
+        # own leaves) into the deep-freeze.
+        [ActiveRecord::Base, *ActiveRecord::Base.descendants].each do |ar_class|
+          next if ar_class.abstract_class?
+          ar_class.make_arel_table_shareable!
+          ar_class.make_predicate_builder_shareable!
+        end
       end
       env_config.make_shareable!
       routes.make_shareable!

@@ -63,16 +63,24 @@ module ActiveJob
       #      # Might raise Net::OpenTimeout or Timeout::Error when the remote service is down
       #    end
       #  end
-      def retry_on(*exceptions, wait: 3.seconds, attempts: 5, queue: nil, priority: nil, jitter: JITTER_DEFAULT, report: false)
-        rescue_from(*exceptions) do |error|
-          executions = executions_for(exceptions)
-          if attempts == :unlimited || executions < attempts
-            ActiveSupport.error_reporter.report(error, source: "application.active_job") if report
-            retry_job wait: determine_delay(seconds_or_duration_or_algorithm: wait, executions: executions, error: error, jitter: jitter), queue: queue, priority: priority, error: error
+      def retry_on(*exceptions, wait: 3.seconds, attempts: 5, queue: nil, priority: nil, jitter: JITTER_DEFAULT, report: false, &user_block)
+        shareable_user_block = user_block ? user_block.make_shareable! : nil
+        frozen_exceptions = exceptions.freeze
+        retry_wait = wait.is_a?(Proc) ? wait.make_shareable! : wait
+        retry_attempts = attempts
+        retry_queue = queue
+        retry_priority = priority
+        retry_jitter = jitter
+        retry_report = report
+        handler = shareable_proc do |error|
+          executions = executions_for(frozen_exceptions)
+          if retry_attempts == :unlimited || executions < retry_attempts
+            ActiveSupport.error_reporter.report(error, source: "application.active_job") if retry_report
+            retry_job wait: determine_delay(seconds_or_duration_or_algorithm: retry_wait, executions: executions, error: error, jitter: retry_jitter), queue: retry_queue, priority: retry_priority, error: error
           else
-            if block_given?
+            if shareable_user_block
               instrument :retry_stopped, error: error do
-                yield self, error
+                shareable_user_block.call(self, error)
               end
               run_after_discard_procs(error)
             else
@@ -82,6 +90,7 @@ module ActiveJob
             end
           end
         end
+        rescue_from(*exceptions, &handler)
       end
 
       # Discard the job with no attempts to retry, if the exception is raised. This is useful when the subject of the job,
@@ -108,14 +117,18 @@ module ActiveJob
       #      # Might raise CustomAppException for something domain specific
       #    end
       #  end
-      def discard_on(*exceptions, report: false)
-        rescue_from(*exceptions) do |error|
+      def discard_on(*exceptions, report: false, &user_block)
+        shareable_user_block = user_block ? user_block.make_shareable! : nil
+        frozen_exceptions = exceptions.freeze
+        discard_report = report
+        handler = shareable_proc do |error|
           instrument :discard, error: error do
-            ActiveSupport.error_reporter.report(error, source: "application.active_job") if report
-            yield self, error if block_given?
+            ActiveSupport.error_reporter.report(error, source: "application.active_job") if discard_report
+            shareable_user_block&.call(self, error)
             run_after_discard_procs(error)
           end
         end
+        rescue_from(*exceptions, &handler)
       end
 
       # A block to run when a job is about to be discarded for any reason.
@@ -167,7 +180,7 @@ module ActiveJob
     end
 
     private
-      JITTER_DEFAULT = Object.new
+      JITTER_DEFAULT = Object.new.freeze
       private_constant :JITTER_DEFAULT
 
       def determine_delay(seconds_or_duration_or_algorithm:, executions:, error: nil, jitter: JITTER_DEFAULT)

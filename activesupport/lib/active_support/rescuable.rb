@@ -12,7 +12,7 @@ module ActiveSupport
     extend Concern
 
     included do
-      class_attribute :rescue_handlers, default: []
+      class_attribute :rescue_handlers, default: [].freeze
     end
 
     module ClassMethods
@@ -59,6 +59,8 @@ module ActiveSupport
           end
         end
 
+        with = with.make_shareable! if with.is_a?(Proc)
+
         klasses.each do |klass|
           key = if klass.is_a?(Module) && klass.respond_to?(:===)
             klass.name
@@ -69,7 +71,7 @@ module ActiveSupport
           end
 
           # Put the new handler at the end because the list is read in reverse.
-          self.rescue_handlers += [[key, with]]
+          self.rescue_handlers = Ractor.make_shareable(rescue_handlers + [[key, with]])
         end
       end
 

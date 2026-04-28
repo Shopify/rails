@@ -13,7 +13,7 @@ module ActiveSupport
 
       class << self
         def event_log_level(method_name, level)
-          log_levels[method_name.to_s] = level
+          self.log_levels = log_levels.merge(method_name.to_s => level)
         end
 
         def logger
