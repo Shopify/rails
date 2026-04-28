@@ -64,7 +64,21 @@ module ActiveSupport
 
     # Returns a derived key suitable for use.
     def generate_key(*args)
-      @cache_keys[args.join("|")] ||= @key_generator.generate_key(*args)
+      cache_key = args.join("|")
+      cached = @cache_keys[cache_key]
+      return cached if cached
+      return @key_generator.generate_key(*args) if @cache_keys.frozen?
+      @cache_keys[cache_key] = @key_generator.generate_key(*args)
+    end
+
+    # Convert the Concurrent::Map cache to a frozen Hash before freezing,
+    # so Ractor.make_shareable can recursively freeze the object graph.
+    # Concurrent::Map does not implement #freeze.
+    def freeze
+      hash = {}
+      @cache_keys.each_pair { |k, v| hash[k] = v }
+      @cache_keys = hash.freeze
+      super
     end
   end
 end
