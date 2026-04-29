@@ -18,6 +18,18 @@ module ActiveRecord
           unless @value_before_type_cast.frozen?
             @value_before_type_cast = @value_before_type_cast.deep_dup
           end
+          # After the deep_dup the bind owns a private snapshot of
+          # +@value_before_type_cast+; external code can no longer mutate the
+          # value behind our back. Pre-resolving +@value_for_database+ now is
+          # safe and prevents a +FrozenError+ when the bind crosses the
+          # +RactorConnectionProxy+ / +RactorQueryDispatch+ boundary
+          # (+Ractor.make_shareable(binds, copy: true)+ produces a deep-frozen
+          # copy; the main-side SQL generator then calls
+          # +bind.value_for_database+, and the lazy
+          # +@value_for_database = _value_for_database+ would FrozenError on the
+          # copy). Mirrors the existing pre-resolution in the +serialized?+ and
+          # final +else+ branches.
+          value_for_database
         else
           # Non-mutable, non-serialized values are stable for the lifetime of
           # the QueryAttribute. Pre-resolve +@value_for_database+ at
