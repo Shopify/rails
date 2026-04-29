@@ -39,9 +39,7 @@ module ActionView
       TAG_TYPES.merge! ARIA_PREFIXES.index_with(:aria)
       TAG_TYPES.freeze
 
-      PRE_CONTENT_STRINGS             = Hash.new { "" }
-      PRE_CONTENT_STRINGS[:textarea]  = "\n"
-      PRE_CONTENT_STRINGS["textarea"] = "\n"
+      PRE_CONTENT_STRINGS = { textarea: "\n", "textarea" => "\n" }.freeze
 
       class TagBuilder # :nodoc:
         def self.define_element(name, code_generator:, method_name: name)
