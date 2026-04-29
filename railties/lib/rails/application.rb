@@ -1037,6 +1037,17 @@ module Rails
       # column reads), which raises +Ractor::IsolationError+ from non-main
       # Ractors until the cached value is shareable. Deep-freeze in place.
       Time.make_zone_default_shareable!
+      # +Time::DATE_FORMATS+ and +Date::DATE_FORMATS+ are the formatter
+      # registries +Time#to_fs+ / +Date#to_fs+ look up on every
+      # +cache_version+ / +cache_key+ / +to_fs(:db)+ / etc. They contain
+      # frozen String formats and lambdas (e.g. +:long_ordinal+,
+      # +:rfc822+, +:iso8601+) that capture no outer locals and so can be
+      # made shareable. Initializers extending these hashes (the docstring
+      # in conversions.rb shows +Time::DATE_FORMATS[:foo] = "..."+) run
+      # before +ractorize!+, so freezing here is safe; post-+ractorize!+
+      # writes raise +FrozenError+ pointing back to here.
+      Ractor.make_shareable(Time::DATE_FORMATS) if defined?(Time::DATE_FORMATS) && !Ractor.shareable?(Time::DATE_FORMATS)
+      Ractor.make_shareable(Date::DATE_FORMATS) if defined?(Date::DATE_FORMATS) && !Ractor.shareable?(Date::DATE_FORMATS)
       # +ActiveSupport::ExecutionContext+ owns the +@after_change_callbacks+
       # module ivar that +ExecutionContext.[]=+ and +ExecutionContext.set+
       # iterate on every per-request +Instrumentation#process_action+ (via
