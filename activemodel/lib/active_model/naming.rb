@@ -181,6 +181,32 @@ module ActiveModel
       @route_key          = (namespace ? ActiveSupport::Inflector.pluralize(@param_key, locale) : @plural.dup)
       @singular_route_key = ActiveSupport::Inflector.singularize(@route_key, locale)
       @route_key << "_index" if @uncountable
+
+      # Eagerly compute the I18n lookup memos so +human+ does not need to
+      # mutate +self+ on first call. This is required for non-main Ractor use:
+      # +make_model_name_shareable!+ deep-freezes the +Name+, after which a
+      # lazy +||=+ would raise +FrozenError+. +@i18n_scope+ depends only on
+      # +@klass+; +@i18n_keys+ is filled in by +resolve_i18n_keys!+ once the
+      # owning class's +model_name+ memo is in place (it walks ancestors via
+      # +klass.model_name+, which would recurse into +self+ if called here).
+      @i18n_scope = @klass.respond_to?(:i18n_scope) ? [@klass.i18n_scope, :models] : []
+      @i18n_keys  = nil
+    end
+
+    # Walk +@klass.lookup_ancestors+ to fill +@i18n_keys+. Called by
+    # +ActiveModel::Naming#model_name+ after the +@_model_name+ memo has been
+    # assigned, so the recursive +klass.model_name.i18n_key+ lookup terminates.
+    # Sets +@i18n_keys+ to a sentinel (an empty array) before the +map+ so a
+    # re-entrant call from within +k.model_name+ short-circuits via the guard
+    # at the top of the method instead of recursing.
+    def resolve_i18n_keys! # :nodoc:
+      return unless @i18n_keys.nil?
+      @i18n_keys = []
+      @i18n_keys = if @klass.respond_to?(:lookup_ancestors)
+        @klass.lookup_ancestors.map { |k| k.model_name.i18n_key }
+      else
+        []
+      end
     end
 
     # Transform the model name into a more human format, using I18n. By default,
@@ -217,15 +243,20 @@ module ActiveModel
       end
 
       def i18n_keys
-        @i18n_keys ||= if @klass.respond_to?(:lookup_ancestors)
-          @klass.lookup_ancestors.map { |klass| klass.model_name.i18n_key }
-        else
-          []
-        end
+        # +Naming#model_name+ calls +resolve_i18n_keys!+ after caching the
+        # +@_model_name+ memo, which covers the framework path. User code is
+        # documented to construct +ActiveModel::Name.new+ directly (see the
+        # +ActiveRecord::ModelSchema+ docs and the Active Model Basics guide),
+        # in which case nobody has filled the memo yet. Resolve on first read
+        # so direct callers don't see +nil+. On a frozen, directly-constructed
+        # +Name+ this raises +FrozenError+ — the correct loud failure for a
+        # caller who froze the +Name+ without routing through +model_name+.
+        resolve_i18n_keys! if @i18n_keys.nil?
+        @i18n_keys
       end
 
       def i18n_scope
-        @i18n_scope ||= @klass.respond_to?(:i18n_scope) ? [@klass.i18n_scope, :models] : []
+        @i18n_scope
       end
   end
 
@@ -273,6 +304,12 @@ module ActiveModel
         end
         ActiveModel::Name.new(self, namespace)
       end
+      # Fill +@i18n_keys+ now that +@_model_name+ is assigned. Doing this in
+      # +Name#initialize+ would recurse infinitely because +lookup_ancestors+
+      # includes +self+ and +k.model_name+ on +self+ would re-enter this
+      # method while the memo is still nil. Idempotent after the first call.
+      @_model_name.resolve_i18n_keys! unless @_model_name.frozen?
+      @_model_name
     end
 
     # Force-resolves +@_model_name+ and makes it shareable so that
