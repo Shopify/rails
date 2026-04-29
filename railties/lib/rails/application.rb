@@ -1224,11 +1224,23 @@ module Rails
         # callback reads the Set on every save; from non-main Ractors that
         # raises until the Set is shareable. Snapshot a shareable copy on
         # every AR class for the same reason +__callbacks+ is walked here.
+        # +ActiveRecord::Scoping::Default+ stores +default_scope_override+
+        # as a +class_attribute+ that is left +nil+ at boot. The first
+        # call to +build_default_scope+ on a request lazily writes the
+        # flag (a +!Base.is_a?(method(:default_scope).owner)+ check) via
+        # the generated class_attribute writer, which goes through
+        # +ActiveSupport::ClassAttribute.redefine+ ->
+        # +instance_variable_set+ on the singleton class and raises
+        # +Ractor::IsolationError+ from non-main Ractors. The value is
+        # pure boot-time metadata so warming it on the main side at
+        # +ractorize!+ time is idempotent with the lazy compute. See
+        # +make_default_scope_override_shareable!+ for the full rationale.
         [ActiveRecord::Base, *ActiveRecord::Base.descendants].each do |ar_class|
           ar_class.make_callback_chains_shareable!
           ar_class.make_normalized_attributes_shareable! if ar_class.respond_to?(:make_normalized_attributes_shareable!)
           ar_class.make_counter_cache_shareable! if ar_class.respond_to?(:make_counter_cache_shareable!)
           ar_class.make_attr_readonly_shareable! if ar_class.respond_to?(:make_attr_readonly_shareable!)
+          ar_class.make_default_scope_override_shareable! if ar_class.respond_to?(:make_default_scope_override_shareable!)
         end
         # +ActiveRecord::Relation::WhereClause.empty+ memoizes the singleton
         # empty +WhereClause+ in the +@empty+ class ivar via +||=+.
