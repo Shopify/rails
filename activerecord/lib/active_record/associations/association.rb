@@ -389,7 +389,20 @@ module ActiveRecord
 
         # Returns true if statement cache should be skipped on the association reader.
         def skip_statement_cache?(scope)
-          reflection.has_scope? ||
+          # On non-main Ractors the StatementCache infrastructure is
+          # unreachable: the per-connection cache lives in
+          # @find_by_statement_cache on the AR class (a
+          # { true => Concurrent::Map, false => Concurrent::Map } hash of
+          # StatementCache objects), and reading any class instance variable
+          # from a non-main Ractor raises Ractor::IsolationError. The
+          # StatementCache itself wraps connection-bound bind procs that are
+          # not shareable. Skipping the cache here mirrors the non-main
+          # bypass already in Core::ClassMethods#cached_find_by and routes
+          # find_target through the existing scope.to_a /
+          # Relation#exec_main_query -> RactorQueryDispatch.select_all
+          # boundary.
+          !Ractor.main? ||
+            reflection.has_scope? ||
             scope.eager_loading? ||
             klass.scope_attributes? ||
             reflection.source_reflection.active_record.default_scopes.any?
