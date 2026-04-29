@@ -1171,6 +1171,13 @@ module Rails
           # AR descendant so the non-main read path is connection-free.
           if ar_class != ActiveRecord::Base && ar_class.table_exists?
             ar_class.make_adapter_class_shareable!
+            # +ModelSchema::ClassMethods#prefetch_primary_key?+ does a
+            # +with_connection+ checkout to ask the adapter whether
+            # primary keys must be prefetched for this table. From a
+            # non-main Ractor that hits +RactorConnectionProxy#
+            # prefetch_primary_key?+, which is intentionally not
+            # implemented. Cache the bool on the class at boot.
+            ar_class.make_prefetch_primary_key_shareable!
           end
           # Now that +@attribute_types+ is the deep-copied shareable graph
           # the class will keep, cache +inspect+ off of it.
@@ -1191,6 +1198,37 @@ module Rails
           # shareable. The result is a plain String like +"posts/post"+; just
           # warm and freeze.
           ar_class.make_to_partial_path_shareable!
+        end
+        # +ActiveSupport::Callbacks+ stores the per-class callback graph in
+        # the +__callbacks+ class_attribute on the singleton-class ivar
+        # +@__class_attr___callbacks+. +run_callbacks(:save)+ /
+        # +:create+ / +:update+ / +:destroy+ / +:commit+ during a write
+        # request reads that ivar on every AR descendant via
+        # +ActiveSupport::ClassAttribute.define_namespaced_reader+, which
+        # raises +Ractor::IsolationError+ from non-main Ractors until each
+        # +CallbackChain+ in the Hash and the Hash itself are shareable.
+        # Walk every AR class (including abstract ones, since abstract
+        # parents still install their own +__callbacks+ ivars from
+        # +included+ Concerns) and warm/freeze the chains. Use the narrow
+        # +make_callback_chains_shareable!+ helper rather than
+        # +Callbacks::ClassMethods#make_shareable!+, because the latter
+        # cascades into +Object#make_shareable!+ -> +Ractor.make_shareable+,
+        # which would deep-freeze the AR class object itself and clobber
+        # the lazy schema/attribute state the existing AR warmers
+        # deliberately leave mutable on each class.
+        #
+        # +ActiveModel::Attributes::Normalization+ exposes
+        # +normalized_attributes+ as a +class_attribute+ with a default
+        # +Set.new+ stored on +ActiveRecord::Base+'s singleton class. The
+        # +before_validation :normalize_changed_in_place_attributes+
+        # callback reads the Set on every save; from non-main Ractors that
+        # raises until the Set is shareable. Snapshot a shareable copy on
+        # every AR class for the same reason +__callbacks+ is walked here.
+        [ActiveRecord::Base, *ActiveRecord::Base.descendants].each do |ar_class|
+          ar_class.make_callback_chains_shareable!
+          ar_class.make_normalized_attributes_shareable! if ar_class.respond_to?(:make_normalized_attributes_shareable!)
+          ar_class.make_counter_cache_shareable! if ar_class.respond_to?(:make_counter_cache_shareable!)
+          ar_class.make_attr_readonly_shareable! if ar_class.respond_to?(:make_attr_readonly_shareable!)
         end
         # +ActiveRecord::Relation::WhereClause.empty+ memoizes the singleton
         # empty +WhereClause+ in the +@empty+ class ivar via +||=+.

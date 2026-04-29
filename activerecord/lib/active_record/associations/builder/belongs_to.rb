@@ -27,15 +27,21 @@ module ActiveRecord::Associations::Builder # :nodoc:
 
     def self.add_counter_cache_callbacks(model, reflection)
       cache_column = reflection.counter_cache_column
+      # Snapshot +reflection.name+ into a single-assignment Symbol local
+      # so the +after_update+ lambda doesn't capture +reflection+ itself
+      # (mutable +@klass+ / +@validated+, not shareable).
+      reflection_name = reflection.name
 
-      model.after_update lambda { |record|
-        association = association(reflection.name)
+      counter_cache_callback = lambda { |record|
+        association = record.association(reflection_name)
 
         if association.saved_change_to_target?
           association.increment_counters
           association.decrement_counters_before_last_save
         end
       }
+      counter_cache_callback.make_shareable!
+      model.after_update counter_cache_callback
 
       klass = reflection.class_name.safe_constantize
       klass._counter_cache_columns |= [cache_column] if klass && klass.respond_to?(:_counter_cache_columns)
@@ -78,19 +84,35 @@ module ActiveRecord::Associations::Builder # :nodoc:
     end
 
     def self.add_touch_callbacks(model, reflection)
-      foreign_key = reflection.foreign_key
-      name        = reflection.name
-      touch       = reflection.options[:touch]
+      # Snapshot the reflection-derived values into freezable, single-
+      # assignment locals so the generated callback lambdas don't capture
+      # +reflection+ itself (mutable +@klass+ / +@validated+, not
+      # shareable). +Ractor.make_shareable+ also rejects procs that close
+      # over locals which may be reassigned, so each captured local must
+      # be assigned exactly once before the proc is built.
+      # +Array#dup+ is shallow and +Ractor.make_shareable+ deep-freezes
+      # element references in place, which would freeze Strings shared
+      # with the live reflection. Map+dup the elements so we capture
+      # fresh frozen Strings without mutating the source-of-truth.
+      foreign_key = case (raw = reflection.foreign_key)
+      when Array then raw.map { |s| s.dup.freeze }.freeze
+      else raw.dup.freeze
+      end
+      name = reflection.name
+      raw_touch = reflection.options[:touch]
+      touch = raw_touch.is_a?(String) ? raw_touch.dup.freeze : Ractor.make_shareable(raw_touch)
+      has_counter_cache = !!reflection.counter_cache_column
 
       callback = lambda { |changes_method| lambda { |record|
         BelongsTo.touch_record(record, record.send(changes_method), foreign_key, name, touch)
-      }}
+      }.make_shareable! }
 
-      if reflection.counter_cache_column
+      if has_counter_cache
         touch_callback = callback.(:saved_changes)
         update_callback = lambda { |record|
-          instance_exec(record, &touch_callback) unless association(reflection.name).saved_change_to_target?
+          instance_exec(record, &touch_callback) unless association(name).saved_change_to_target?
         }
+        update_callback.make_shareable!
         model.after_update update_callback, if: :saved_changes?
       else
         model.after_create callback.(:saved_changes), if: :saved_changes?
@@ -102,9 +124,16 @@ module ActiveRecord::Associations::Builder # :nodoc:
     end
 
     def self.add_default_callbacks(model, reflection)
-      model.before_validation lambda { |o|
-        o.association(reflection.name).default(&reflection.options[:default])
+      # Snapshot the reflection-derived locals into shareable single-
+      # assignment values so the +before_validation+ lambda doesn't
+      # capture +reflection+ itself.
+      reflection_name = reflection.name
+      default_proc = reflection.options[:default]
+      callback = lambda { |o|
+        o.association(reflection_name).default(&default_proc)
       }
+      callback.make_shareable! if default_proc.nil? || default_proc.shareable?
+      model.before_validation callback
     end
 
     def self.add_destroy_callbacks(model, reflection)
@@ -116,7 +145,12 @@ module ActiveRecord::Associations::Builder # :nodoc:
         end
       end
 
-      model.after_destroy lambda { |o| o.association(reflection.name).handle_dependency }
+      # Snapshot +reflection.name+ so the +after_destroy+ lambda doesn't
+      # capture +reflection+ itself.
+      reflection_name = reflection.name
+      handle_dependency_callback = lambda { |o| o.association(reflection_name).handle_dependency }
+      handle_dependency_callback.make_shareable!
+      model.after_destroy handle_dependency_callback
     end
 
     def self.define_validations(model, reflection)
@@ -136,20 +170,42 @@ module ActiveRecord::Associations::Builder # :nodoc:
         if ActiveRecord.belongs_to_required_validates_foreign_key
           model.validates_presence_of reflection.name, message: :required
         else
-          condition = lambda { |record|
-            foreign_key = reflection.foreign_key
-            foreign_type = reflection.foreign_type
+          # Snapshot the reflection-derived values into freezable locals so
+          # the +if:+ condition lambda doesn't capture +reflection+ itself
+          # (which holds mutable +@klass+ / +@validated+ ivars and is not
+          # shareable). +foreign_key+ may be a String or Array of Strings;
+          # +foreign_type+ is a String or +nil+; +polymorphic+ is a bool.
+          # All freezable, so the resulting lambda is shareable. Locals
+          # used inside the lambda must each be assigned exactly once
+          # before capture (single-assignment), otherwise
+          # +Ractor.make_shareable+ rejects the proc with "may be
+          # reassigned". That's why we materialize +_foreign_type+ via
+          # +Ractor.make_shareable+ rather than a guarded +.dup.freeze+.
+          # +Array#dup+ is shallow and +Ractor.make_shareable+ deep-
+          # freezes element references in place, which would freeze
+          # Strings shared with the live reflection. Map+dup the
+          # elements so we capture fresh frozen Strings without
+          # mutating the source-of-truth.
+          captured_foreign_key = case (raw_fk = reflection.foreign_key)
+          when Array then raw_fk.map { |s| s.dup.freeze }.freeze
+          else raw_fk.dup.freeze
+          end
+          raw_ft = reflection.foreign_type
+          captured_foreign_type = raw_ft ? raw_ft.dup.freeze : nil
+          captured_polymorphic = reflection.polymorphic?
 
-            fk_missing_or_changed = if foreign_key.is_a?(Array)
-              foreign_key.any? { |fk| record.read_attribute(fk).nil? || record.attribute_changed?(fk) }
+          condition = lambda { |record|
+            fk_missing_or_changed = if captured_foreign_key.is_a?(Array)
+              captured_foreign_key.any? { |fk| record.read_attribute(fk).nil? || record.attribute_changed?(fk) }
             else
-              record.read_attribute(foreign_key).nil? ||
-                record.attribute_changed?(foreign_key)
+              record.read_attribute(captured_foreign_key).nil? ||
+                record.attribute_changed?(captured_foreign_key)
             end
 
             fk_missing_or_changed ||
-              (reflection.polymorphic? && (record.read_attribute(foreign_type).nil? || record.attribute_changed?(foreign_type)))
+              (captured_polymorphic && (record.read_attribute(captured_foreign_type).nil? || record.attribute_changed?(captured_foreign_type)))
           }
+          condition.make_shareable!
 
           model.validates_presence_of reflection.name, message: :required, if: condition
         end

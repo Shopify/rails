@@ -55,26 +55,37 @@ module ActiveRecord
           raise MinimumLengthError, "Token requires a minimum length of #{MINIMUM_TOKEN_LENGTH} characters."
         end
 
-        prefix = "#{attribute}_" if prefix == true
+        # +Ractor.make_shareable+ rejects procs that capture a local which
+        # may be reassigned. Both +prefix+ and +generate_token+ would
+        # otherwise be reassigned: +prefix+ via +"#{attribute}_" if prefix
+        # == true+, and +generate_token+ via the +if/else+ below. Bind
+        # both to fresh, single-assignment locals before any proc captures
+        # them so the generated callback chain is shareable.
+        resolved_prefix = (prefix == true) ? "#{attribute}_".freeze : (prefix && prefix.frozen? ? prefix : prefix&.dup&.freeze)
+        token_length = length
 
-        if prefix
-          generate_token = -> do
-            token = self.generate_unique_secure_token(length: length)
-
-            "#{prefix}#{token}"
-          end
+        token_generator = if resolved_prefix
+          ->(target) {
+            token = target.generate_unique_secure_token(length: token_length)
+            "#{resolved_prefix}#{token}"
+          }
         else
-          generate_token = -> { self.generate_unique_secure_token(length: length) }
+          ->(target) { target.generate_unique_secure_token(length: token_length) }
         end
+        token_generator.make_shareable!
 
         # Load securerandom only when has_secure_token is used.
         require "active_support/core_ext/securerandom"
-        define_method("regenerate_#{attribute}") { update! attribute => generate_token.call }
-        set_callback on, on == :initialize ? :after : :before do
-          if new_record? && !query_attribute(attribute)
-            send("#{attribute}=", generate_token.call)
+        attribute_name = attribute.to_sym
+        attribute_writer = :"#{attribute}="
+        define_method("regenerate_#{attribute}") { update! attribute_name => token_generator.call(self) }
+        callback_proc = ->(target) {
+          if target.new_record? && !target.send(:query_attribute, attribute_name)
+            target.public_send(attribute_writer, token_generator.call(target))
           end
-        end
+        }
+        callback_proc.make_shareable!
+        set_callback on, on == :initialize ? :after : :before, callback_proc
       end
 
       def generate_unique_secure_token(length: MINIMUM_TOKEN_LENGTH)

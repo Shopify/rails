@@ -156,23 +156,32 @@ module ActiveRecord
 
     module ClassMethods # :nodoc:
       private
+        # Defines a re-entrant guard around +block+. The generated method
+        # captures only +method_name+ (a Symbol) so its defining proc can
+        # be made shareable. The user-supplied +block+ runs via
+        # +instance_eval+ on the record. To keep the generated method
+        # shareable across Ractors, +block+ must itself be shareable
+        # (i.e. capture only shareable values).
         def define_non_cyclic_method(name, &block)
           return if method_defined?(name, false)
 
-          define_method(name) do |*args|
-            result = true; @_already_called ||= {}
+          method_name = name
+          method_body = -> (*args) {
+            result = true
+            @_already_called ||= {}
             # Loop prevention for validation of associations
-            unless @_already_called[name]
+            unless @_already_called[method_name]
               begin
-                @_already_called[name] = true
+                @_already_called[method_name] = true
                 result = instance_eval(&block)
               ensure
-                @_already_called[name] = false
+                @_already_called[method_name] = false
               end
             end
-
             result
-          end
+          }
+          method_body.make_shareable! if block.shareable?
+          define_method(name, method_body)
         end
 
         # Adds validation and save callbacks for the association as specified by
@@ -188,16 +197,31 @@ module ActiveRecord
         # before actually defining them.
         def add_autosave_association_callbacks(reflection)
           save_method = :"autosave_associated_records_for_#{reflection.name}"
+          # Snapshot the only reflection-derived value the inner callback
+          # blocks need (the reflection +name+, a frozen Symbol). At call
+          # time the record looks up the live reflection from
+          # +self.class._reflect_on_association(reflection_name)+. This keeps the
+          # blocks free of any +reflection+ closure so the generated
+          # callback methods can be made shareable across Ractors.
+          reflection_name = reflection.name
 
           if reflection.collection?
             around_save :around_save_collection_association
 
-            define_non_cyclic_method(save_method) { save_collection_association(reflection) }
+            block = Proc.new {
+              save_collection_association(self.class._reflect_on_association(reflection_name))
+            }
+            block.make_shareable!
+            define_non_cyclic_method(save_method, &block)
             # Doesn't use after_save as that would save associations added in after_create/after_update twice
             after_create save_method
             after_update save_method
           elsif reflection.has_one?
-            define_non_cyclic_method(save_method) { save_has_one_association(reflection) }
+            block = Proc.new {
+              save_has_one_association(self.class._reflect_on_association(reflection_name))
+            }
+            block.make_shareable!
+            define_non_cyclic_method(save_method, &block)
             # Configures two callbacks instead of a single after_save so that
             # the model may rely on their execution order relative to its
             # own callbacks.
@@ -209,7 +233,11 @@ module ActiveRecord
             after_create save_method
             after_update save_method
           else
-            define_non_cyclic_method(save_method) { throw(:abort) if save_belongs_to_association(reflection) == false }
+            block = Proc.new {
+              throw(:abort) if save_belongs_to_association(self.class._reflect_on_association(reflection_name)) == false
+            }
+            block.make_shareable!
+            define_non_cyclic_method(save_method, &block)
             before_save save_method
           end
 
@@ -227,7 +255,15 @@ module ActiveRecord
               method = :validate_belongs_to_association
             end
 
-            define_non_cyclic_method(validation_method) { send(method, reflection) }
+            # Snapshot reflection name and helper method symbol (both
+            # frozen Symbols) so the block doesn't capture +reflection+.
+            reflection_name = reflection.name
+            helper_method = method
+            block = Proc.new {
+              send(helper_method, self.class._reflect_on_association(reflection_name))
+            }
+            block.make_shareable!
+            define_non_cyclic_method(validation_method, &block)
             validate validation_method
             after_validation :_ensure_no_duplicate_errors
           end

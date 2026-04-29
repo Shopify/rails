@@ -150,7 +150,17 @@ module ActiveRecord::Associations::Builder # :nodoc:
         end
       end
 
-      model.before_destroy(->(o) { o.association(reflection.name).handle_dependency })
+      # Snapshot the only reflection-derived value the destroy callback
+      # actually reads (+name+ is a frozen Symbol) so the +before_destroy+
+      # lambda doesn't capture the +reflection+ local. The reflection
+      # holds mutable +@klass+ / +@validated+ ivars and is not shareable;
+      # capturing it here would block +__callbacks[:destroy]+ from being
+      # made shareable for any model that declares an association with
+      # +dependent:+.
+      reflection_name = reflection.name
+      handle_dependency_callback = ->(o) { o.association(reflection_name).handle_dependency }
+      handle_dependency_callback.make_shareable!
+      model.before_destroy(handle_dependency_callback)
     end
 
     def self.add_after_commit_jobs_callback(model, dependent)

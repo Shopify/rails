@@ -77,7 +77,12 @@ module ActiveRecord
       end
 
       def current_time_from_proper_timezone
-        with_connection { |c| c.default_timezone == :utc ? Time.now.utc : Time.now }
+        # Use the +Symbol+ cached on the AR class at boot
+        # (+make_cached_connection_default_timezone_shareable!+) so that
+        # +Timestamp+ callbacks running on a non-main Ractor don't reach
+        # +RactorConnectionProxy#default_timezone+, which is intentionally
+        # not implemented on the request-path proxy.
+        cached_connection_default_timezone == :utc ? Time.now.utc : Time.now
       end
 
       protected

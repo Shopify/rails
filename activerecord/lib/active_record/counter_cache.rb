@@ -11,6 +11,25 @@ module ActiveRecord
     end
 
     module ClassMethods
+      # Force-resolve +_counter_cache_columns+ and
+      # +counter_cached_association_names+ and snapshot shareable copies
+      # so non-main Ractors can read these +class_attribute+ singleton-
+      # class ivars. Both default to a mutable +[]+ stored on
+      # +ActiveRecord::Base+ via the +included+ block; the ivar is also
+      # populated lazily by +has_many ... counter_cache: true+ /
+      # +belongs_to ... counter_cache: true+ at class-definition time.
+      # +copy: true+ avoids entangling caller-held references.
+      def make_counter_cache_shareable! # :nodoc:
+        current_columns = _counter_cache_columns
+        unless Ractor.shareable?(current_columns)
+          self._counter_cache_columns = Ractor.make_shareable(current_columns, copy: true)
+        end
+        current_names = counter_cached_association_names
+        unless Ractor.shareable?(current_names)
+          self.counter_cached_association_names = Ractor.make_shareable(current_names, copy: true)
+        end
+      end
+
       # Resets one or more counter caches to their correct value using an SQL
       # count query. This is useful when adding new counter caches, or if the
       # counter has been corrupted or modified directly by SQL.

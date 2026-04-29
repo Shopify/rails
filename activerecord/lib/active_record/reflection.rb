@@ -241,6 +241,29 @@ module ActiveRecord
           # Skip if already warmed (idempotent across descendant walks).
           return if reflection.frozen?
 
+          # +AssociationReflection#check_validity!+ memoizes +@validated+
+          # on first read and is called from +Association#initialize+ on
+          # every +record.association(name)+ call. From a non-main Ractor
+          # the dispatched +association(...)+ would otherwise reach a
+          # frozen shareable_clone with +@validated=false+ and raise
+          # +FrozenError+. Resolve it here so both the live reflection
+          # and the clone start out validated. Skip aggregate reflections
+          # (no +check_validity!+) and only call when the reflection's
+          # context is resolvable (has +klass+ for non-polymorphic).
+          if reflection.is_a?(AssociationReflection)
+            begin
+              reflection.check_validity!
+            rescue NameError, ActiveRecord::AssociationNotFoundError => e
+              # An association whose target class can't be resolved at boot
+              # (e.g., polymorphic with no instance referencing it yet, or
+              # a model that hasn't been autoloaded) cannot be validated
+              # here. Skip the warm — the runtime path will surface the same
+              # error on first non-warmed access. Log so the skipped warm
+              # stays visible.
+              Rails.logger&.warn("warm_reflection_memos: check_validity! skipped for #{inspect}.#{reflection.name}: #{e.class}: #{e.message}")
+            end
+          end
+
           # +class_name+ memoizes +@class_name+. Skip when polymorphic — the
           # association doesn't have a single resolvable class name and
           # +derive_class_name+ would still set the memo to the literal name,

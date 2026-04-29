@@ -433,7 +433,30 @@ module ActiveRecord
       # Determines if the primary key values should be selected from their
       # corresponding sequence before the insert statement.
       def prefetch_primary_key?
-        with_connection { |c| c.prefetch_primary_key?(table_name) }
+        # The result is a property of the (immutable in production) schema
+        # plus the adapter type, so cache it on the class to avoid a
+        # +with_connection+ checkout from non-main Ractors during
+        # +_insert_record+. Set at boot via
+        # +make_prefetch_primary_key_shareable!+; on the main Ractor we
+        # resolve lazily as a fallback.
+        return @cached_prefetch_primary_key if defined?(@cached_prefetch_primary_key) && !@cached_prefetch_primary_key.nil?
+        unless Ractor.main?
+          raise Ractor::IsolationError,
+            "ActiveRecord::ModelSchema::ClassMethods#prefetch_primary_key? was called " \
+            "from a non-main Ractor on #{inspect}, which has no cached value. Call " \
+            "+make_prefetch_primary_key_shareable!+ on this class during boot " \
+            "(see Rails.application#ractorize!) so the non-main read path can " \
+            "consult the cache."
+        end
+        @cached_prefetch_primary_key = with_connection { |c| c.prefetch_primary_key?(table_name) }
+      end
+
+      # Force-resolves +@cached_prefetch_primary_key+ at boot so the
+      # +_insert_record+ path doesn't do a +with_connection+ checkout
+      # from non-main Ractors. The result is a bool (already shareable).
+      def make_prefetch_primary_key_shareable! # :nodoc:
+        return if defined?(@cached_prefetch_primary_key) && !@cached_prefetch_primary_key.nil?
+        @cached_prefetch_primary_key = with_connection { |c| c.prefetch_primary_key?(table_name) }
       end
 
       # Returns the next value that will be used as the primary key on
@@ -464,6 +487,12 @@ module ActiveRecord
       # The schema is loaded at boot on the main Ractor; once populated these
       # values are stable for the lifetime of the process. Idempotent.
       def make_model_schema_shareable! # :nodoc:
+        # +table_name+ lazy-resolves +@table_name+ via +reset_table_name+
+        # on first read; +prefetch_primary_key?+ -> +table_name+ runs on
+        # every +_insert_record+. Warm and freeze the String so non-main
+        # Ractor reads succeed.
+        table_name
+        @table_name = Ractor.make_shareable(@table_name.dup) if @table_name && !Ractor.shareable?(@table_name)
         # Warm and freeze the schema-loaded ivars. +load_schema!+ is what
         # populates +@columns_hash+; calling +columns_hash+ triggers it.
         columns_hash
@@ -483,6 +512,16 @@ module ActiveRecord
         @symbol_column_to_string_name_hash = Ractor.make_shareable(@symbol_column_to_string_name_hash, copy: true) if @symbol_column_to_string_name_hash && !Ractor.shareable?(@symbol_column_to_string_name_hash)
         content_columns
         @content_columns = Ractor.make_shareable(@content_columns, copy: true) if @content_columns && !Ractor.shareable?(@content_columns)
+        # +_returning_columns_for_insert(connection)+ is +||=+-memoized in
+        # +@_returning_columns_for_insert+ on the first +_create_record+
+        # call. From a non-main Ractor that lazy class-ivar write raises
+        # +Ractor::IsolationError+. Force-resolve it now using the
+        # main-side connection so the cached Array of column names is
+        # available to the dispatched insert path.
+        with_connection do |c|
+          _returning_columns_for_insert(c)
+        end
+        @_returning_columns_for_insert = Ractor.make_shareable(@_returning_columns_for_insert, copy: true) if @_returning_columns_for_insert && !Ractor.shareable?(@_returning_columns_for_insert)
       end
 
       def columns_hash # :nodoc:

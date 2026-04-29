@@ -706,20 +706,34 @@ module ActiveSupport
         # at boot to make their callback graph Ractor-shareable.
         def make_shareable!
           [self, *descendants].each do |klass|
-            callbacks = klass.__callbacks
-            next if callbacks.nil?
-            callbacks.each do |name, chain|
-              begin
-                chain.make_shareable!
-              rescue Ractor::IsolationError => error
-                raise Ractor::IsolationError,
-                  "While making #{klass.inspect}.__callbacks[#{name.inspect}] shareable: #{error.message}",
-                  error.backtrace
-              end
-            end
-            callbacks.make_shareable!
+            klass.make_callback_chains_shareable!
           end
           super
+        end
+
+        # Make this class's +__callbacks+ Hash and every +CallbackChain+ inside
+        # it shareable, without the +super+ cascade in +make_shareable!+ that
+        # would deep-freeze the class object itself. Owners that want only the
+        # callback graph shareable (e.g. +ActiveRecord::Base+ and its
+        # descendants, where the class object holds other lazy schema state
+        # that must remain mutable) call this instead of +make_shareable!+.
+        #
+        # Idempotent: short-circuits if the +__callbacks+ Hash is already
+        # shareable.
+        def make_callback_chains_shareable!
+          callbacks = __callbacks
+          return self if callbacks.nil? || Ractor.shareable?(callbacks)
+          callbacks.each do |name, chain|
+            begin
+              chain.make_shareable!
+            rescue Ractor::IsolationError => error
+              raise Ractor::IsolationError,
+                "While making #{inspect}.__callbacks[#{name.inspect}] shareable: #{error.message}",
+                error.backtrace
+            end
+          end
+          callbacks.make_shareable!
+          self
         end
 
         def normalize_callback_params(filters, block) # :nodoc:

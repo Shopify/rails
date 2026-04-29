@@ -103,7 +103,7 @@ module ActiveRecord
       # it on the main side. Marshal is acceptable here: Arel managers
       # are stateless beyond their AST.
       def insert(arel_im, name = nil, pk = nil, pk_value = nil, returning: nil)
-        im_dump   = Marshal.dump(arel_im)
+        im_dump   = Marshal.dump(arel_im).freeze
         op_name   = name.nil? ? nil : Ractor.make_shareable(name, copy: true)
         pk_value_ = Ractor.make_shareable(pk_value, copy: true)
         pk_       = Ractor.make_shareable(pk, copy: true)
@@ -121,7 +121,7 @@ module ActiveRecord
       end
 
       def update(arel_um, name = nil)
-        um_dump = Marshal.dump(arel_um)
+        um_dump = Marshal.dump(arel_um).freeze
         op_name = name.nil? ? nil : Ractor.make_shareable(name, copy: true)
 
         Ractor::Dispatch.main.run do
@@ -136,7 +136,7 @@ module ActiveRecord
       end
 
       def delete(arel_dm, name = nil)
-        dm_dump = Marshal.dump(arel_dm)
+        dm_dump = Marshal.dump(arel_dm).freeze
         op_name = name.nil? ? nil : Ractor.make_shareable(name, copy: true)
 
         Ractor::Dispatch.main.run do

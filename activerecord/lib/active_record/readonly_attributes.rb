@@ -43,6 +43,16 @@ module ActiveRecord
       def readonly_attribute?(name) # :nodoc:
         _attr_readonly.include?(name)
       end
+
+      # Force-resolve +_attr_readonly+ and snapshot a shareable copy so
+      # non-main Ractors can read this +class_attribute+'s singleton-class
+      # ivar. Default is a mutable +[]+ stored on +ActiveRecord::Base+;
+      # +copy: true+ avoids entangling caller-held references.
+      def make_attr_readonly_shareable! # :nodoc:
+        current = _attr_readonly
+        return if Ractor.shareable?(current)
+        self._attr_readonly = Ractor.make_shareable(current, copy: true)
+      end
     end
 
     module HasReadonlyAttributes # :nodoc:

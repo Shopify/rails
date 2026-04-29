@@ -73,6 +73,21 @@ module ActiveModel
       end
 
       module ClassMethods
+        # Force-resolve +normalized_attributes+ and snapshot a shareable
+        # copy so non-main Ractors can read the singleton-class ivar that
+        # backs this +class_attribute+. The default value is a mutable
+        # +Set.new+ stored on +ActiveRecord::Base+'s singleton class; the
+        # +before_validation :normalize_changed_in_place_attributes+
+        # callback reads it on every save, which raises
+        # +Ractor::IsolationError+ from non-main Ractors until the Set is
+        # shareable. +copy: true+ avoids entangling caller-held references
+        # to the Set.
+        def make_normalized_attributes_shareable! # :nodoc:
+          current = normalized_attributes
+          return if Ractor.shareable?(current)
+          self.normalized_attributes = Ractor.make_shareable(current, copy: true)
+        end
+
         # Declares a normalization for one or more attributes. The normalization
         # is applied when the attribute is assigned or validated.
         #
