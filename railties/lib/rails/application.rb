@@ -12,6 +12,7 @@ require "active_support/hash_with_indifferent_access"
 require "active_support/configuration_file"
 require "active_support/parameter_filter"
 require "active_support/core_ext/kernel/shareable"
+require "ractor/dispatch"
 require "rails/engine"
 require "rails/autoloaders"
 
@@ -108,8 +109,28 @@ module Rails
       end
     end
 
-    attr_accessor :assets, :sandbox
+    attr_writer :assets
+    attr_accessor :sandbox
     alias_method :sandbox?, :sandbox
+
+    # Propshaft's Assembly holds inherently mutable runtime state (lazy
+    # @compilers, @load_path, @resolver, @prefix; per-request asset
+    # resolution), so it cannot be deep-frozen by +make_shareable!+.
+    # +ractorize!+ detaches the Propshaft @assets off the (about-to-be-
+    # frozen) instance and stashes it on the (mutable) application class;
+    # reads from request Ractors dispatch back to the main Ractor.
+    # The detach in +ractorize!+ is gated on +Propshaft::Assembly+, so
+    # other asset pipelines (sprockets, jsbundling, ...) are not handled
+    # here and would need their own treatment if used in this branch.
+    def assets
+      return @assets if @assets
+      if Ractor.main?
+        self.class.instance_variable_get(:@_ractor_detached_assets)
+      else
+        ::Ractor::Dispatch.main.run { Rails.application.assets }
+      end
+    end
+
     attr_reader :reloaders, :reloader, :executor, :autoloaders
 
     delegate :default_url_options, :default_url_options=, to: :routes
@@ -1178,6 +1199,16 @@ module Rails
         [ActionController::Metal, *ActionController::Metal.descendants].each do |controller_class|
           controller_class.make_controller_name_shareable!
         end
+      end
+      # Detach Propshaft::Assembly before deep-freeze. Its lazy ivars
+      # (@compilers, @load_path, @resolver, @prefix) write at request time,
+      # so deep-freezing the Application transitively freezes the Assembly
+      # and the first +stylesheet_link_tag+ raises FrozenError. Stash on
+      # the application class (not frozen); +Application#assets+ above
+      # routes non-main reads through +Ractor::Dispatch.main.run+.
+      if defined?(::Propshaft::Assembly) && @assets.is_a?(::Propshaft::Assembly)
+        self.class.instance_variable_set(:@_ractor_detached_assets, @assets)
+        @assets = nil
       end
       env_config.make_shareable!
       routes.make_shareable!

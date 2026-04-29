@@ -14,16 +14,23 @@ module ActiveSupport
         ActiveSupport::JSON,
         ::JSON,
         Marshal,
-      ]
+      ].freeze
 
       TIMESTAMP_SERIALIZERS = [
         SerializerWithFallback::SERIALIZERS.fetch(:message_pack),
         SerializerWithFallback::SERIALIZERS.fetch(:message_pack_allow_marshal),
-      ]
+      ].freeze
 
+      # When MessagePack support is loaded after this file, +<<+ on the frozen
+      # constant arrays would raise. Rebuild the constants so they stay frozen
+      # (and therefore Ractor-shareable) at every observable moment.
       ActiveSupport.on_load(:message_pack) do
-        ENVELOPE_SERIALIZERS << ActiveSupport::MessagePack
-        TIMESTAMP_SERIALIZERS << ActiveSupport::MessagePack
+        old_envelope = Metadata::ENVELOPE_SERIALIZERS
+        Metadata.send(:remove_const, :ENVELOPE_SERIALIZERS)
+        Metadata.const_set(:ENVELOPE_SERIALIZERS, [*old_envelope, ActiveSupport::MessagePack].freeze)
+        old_timestamp = Metadata::TIMESTAMP_SERIALIZERS
+        Metadata.send(:remove_const, :TIMESTAMP_SERIALIZERS)
+        Metadata.const_set(:TIMESTAMP_SERIALIZERS, [*old_timestamp, ActiveSupport::MessagePack].freeze)
       end
 
       private

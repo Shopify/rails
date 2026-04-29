@@ -75,6 +75,14 @@ module ActionDispatch
     EXCLUDE_NONE = ->(_) { false }.make_shareable!
     private_constant :EXCLUDE_ALL, :EXCLUDE_NONE
 
+    # Computed once at file load time. +Gem::Version+ memoizes instances on the
+    # +@@all+ class variable (with the value being a +Hash+ that is not
+    # Ractor-shareable), so calling +Gem::Version.new+ at request time from a
+    # non-main Ractor raises +Ractor::IsolationError+. Capture the boolean here
+    # so the request path only reads a frozen constant.
+    RACK_RELEASE_LT_3 = Gem::Version.new(Rack::RELEASE) < Gem::Version.new("3")
+    private_constant :RACK_RELEASE_LT_3
+
     def self.default_hsts_options
       { expires: HSTS_EXPIRES_IN, subdomains: true, preload: false }
     end
@@ -136,7 +144,7 @@ module ActionDispatch
         cookies = headers[Rack::SET_COOKIE]
         return unless cookies
 
-        if Gem::Version.new(Rack::RELEASE) < Gem::Version.new("3")
+        if RACK_RELEASE_LT_3
           cookies = cookies.split("\n")
           headers[Rack::SET_COOKIE] = cookies.map { |cookie|
             if !/;\s*secure\s*(;|$)/i.match?(cookie)

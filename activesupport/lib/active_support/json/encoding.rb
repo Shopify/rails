@@ -68,9 +68,10 @@ module ActiveSupport
         "&".b => '\u0026'.b,
       }
 
-      HTML_ENTITIES_REGEX = Regexp.union(*(ESCAPED_CHARS.keys - [U2028, U2029]))
-      FULL_ESCAPE_REGEX = Regexp.union(*ESCAPED_CHARS.keys)
-      JS_SEPARATORS_REGEX = Regexp.union(U2028, U2029)
+      HTML_ENTITIES_REGEX = Regexp.union(*(ESCAPED_CHARS.keys - [U2028, U2029])).freeze
+      FULL_ESCAPE_REGEX = Regexp.union(*ESCAPED_CHARS.keys).freeze
+      JS_SEPARATORS_REGEX = Regexp.union(U2028, U2029).freeze
+      Ractor.make_shareable(ESCAPED_CHARS)
 
       class JSONGemEncoder # :nodoc:
         attr_reader :options
@@ -168,6 +169,7 @@ module ActiveSupport
             end
             json_value
           end
+          Ractor.make_shareable(CODER)
 
 
           def initialize(options = nil)
