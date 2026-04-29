@@ -512,6 +512,19 @@ module ActiveRecord
         @symbol_column_to_string_name_hash = Ractor.make_shareable(@symbol_column_to_string_name_hash, copy: true) if @symbol_column_to_string_name_hash && !Ractor.shareable?(@symbol_column_to_string_name_hash)
         content_columns
         @content_columns = Ractor.make_shareable(@content_columns, copy: true) if @content_columns && !Ractor.shareable?(@content_columns)
+        # +column_defaults+ is +||=+-memoized in +@column_defaults+ on first
+        # read. The hash itself gets +.freeze+ but the per-column default
+        # values are not deep-frozen, so the class ivar isn't shareable from
+        # non-main Ractors. Reached from +Inheritance::ClassMethods#new+ on
+        # every +Model.new+, which on a request-side Ractor raises
+        # +Ractor::IsolationError+ until the value graph is shareable.
+        # Safe to compute here because
+        # +make_attribute_registration_shareable!+ has already pre-populated
+        # +Attribute#@value+ on every default attribute (otherwise the
+        # +_default_attributes.deep_dup.to_hash+ inside +column_defaults+
+        # would FrozenError).
+        column_defaults
+        @column_defaults = Ractor.make_shareable(@column_defaults, copy: true) if @column_defaults && !Ractor.shareable?(@column_defaults)
         # +_returning_columns_for_insert(connection)+ is +||=+-memoized in
         # +@_returning_columns_for_insert+ on the first +_create_record+
         # call. From a non-main Ractor that lazy class-ivar write raises

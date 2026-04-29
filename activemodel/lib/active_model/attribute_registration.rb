@@ -52,7 +52,23 @@ module ActiveModel
       # Schema is loaded at boot on the main Ractor, so the resolved values are
       # correct for the lifetime of the process. Idempotent.
       def make_attribute_registration_shareable! # :nodoc:
-        @default_attributes = Ractor.make_shareable(_default_attributes, copy: true) unless defined?(@default_attributes) && @default_attributes && Ractor.shareable?(@default_attributes)
+        unless defined?(@default_attributes) && @default_attributes && Ractor.shareable?(@default_attributes)
+          set = _default_attributes
+          # +Attribute#value+ lazy-writes +@value = type_cast(@value_before_type_cast)+
+          # the first time it is read, and +Attribute#value_for_database+
+          # lazy-writes +@value_for_database = _value_for_database+ likewise.
+          # Once we deep-freeze the +AttributeSet+ below, those lazy writes
+          # would raise +FrozenError+ at request time (e.g. via
+          # +ActiveRecord::ModelSchema#column_defaults+, which calls
+          # +_default_attributes.deep_dup.to_hash+ and triggers
+          # +Attribute#value+ on every default). Pre-populate both ivars on
+          # every Attribute via the public +AttributeSet+ traversal methods
+          # so the deep-freeze captures fully-resolved values. Reading the
+          # returned Hashes is a no-op; the side effect is what we need.
+          set.to_hash
+          set.values_for_database
+          @default_attributes = Ractor.make_shareable(set, copy: true)
+        end
         @attribute_types = Ractor.make_shareable(attribute_types, copy: true) unless defined?(@attribute_types) && @attribute_types && Ractor.shareable?(@attribute_types)
       end
 
