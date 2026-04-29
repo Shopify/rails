@@ -21,6 +21,19 @@ I18n.load_path << File.expand_path("locale/en.rb", __dir__)
 # i18n gem itself is incorrect because gem patches do not survive
 # bundle install.
 module I18n
+  # Pre-computed +Regexp.union+ of +I18n::DEFAULT_INTERPOLATION_PATTERNS+,
+  # frozen at load time so non-main Ractors can read it directly. The gem
+  # caches this value lazily inside +I18n::INTERPOLATION_PATTERNS_CACHE+
+  # (a +Hash.new { |h, p| h[p] = Regexp.union(p) }+), which is inherently
+  # non-shareable due to its default proc and lazy mutation. Our override
+  # of +interpolate_hash+ below uses this constant for the default-pattern
+  # path so request Ractors never touch the gem's cache.
+  #
+  # The gem itself defines (and immediately deprecates) a similarly named
+  # +I18n::INTERPOLATION_PATTERN+, so we use a distinct name to avoid the
+  # deprecation warning and any aliasing surprises.
+  RAILS_DEFAULT_INTERPOLATION_PATTERN = Regexp.union(I18n::DEFAULT_INTERPOLATION_PATTERNS).freeze
+
   class << self
     # Force-build the lazy +@@fallbacks+ class variable and deep-freeze
     # the value so it can be read from non-main Ractors. The reader
@@ -54,6 +67,61 @@ module I18n
 
     def available_locales_initialized?
       config.available_locales_initialized?
+    end
+
+    # Override +I18n.interpolate_hash+ so request Ractors never read the
+    # gem's +I18n::INTERPOLATION_PATTERNS_CACHE+, a
+    # +Hash.new { |h, p| h[p] = Regexp.union(p) }+ that is structurally
+    # non-shareable (mutable + default proc) regardless of +freeze+.
+    #
+    # The gem's implementation at +i18n/interpolate/ruby.rb:29-51+ does:
+    #
+    #   pattern = INTERPOLATION_PATTERNS_CACHE[config.interpolation_patterns]
+    #   ... gsub(pattern) { |match| ... }
+    #
+    # That single +[]+ read raises +Ractor::IsolationError+ on non-main.
+    # Our replacement avoids the cache entirely:
+    #
+    #   * If +config.interpolation_patterns+ equals (==) the gem's
+    #     +DEFAULT_INTERPOLATION_PATTERNS+, use our pre-computed frozen
+    #     +RAILS_DEFAULT_INTERPOLATION_PATTERN+ above. This is the hot
+    #     path — every default-config app hits it on every translation.
+    #   * Otherwise, recompute +Regexp.union(patterns)+ on the spot. This
+    #     forfeits the gem's caching for non-default configurations, which
+    #     are rare in practice and out of scope for this leaf.
+    #
+    # The +gsub+ body is copied verbatim from the gem
+    # (+i18n/interpolate/ruby.rb:31-50+) so behavior is identical for
+    # callers; only the pattern lookup differs. The same relocation rule
+    # as +make_shareable!+ above applies — gem source is not patched.
+    def interpolate_hash(string, values)
+      patterns = config.interpolation_patterns
+      pattern = if patterns == I18n::DEFAULT_INTERPOLATION_PATTERNS
+        RAILS_DEFAULT_INTERPOLATION_PATTERN
+      else
+        Regexp.union(patterns)
+      end
+
+      interpolated = false
+
+      interpolated_string = string.gsub(pattern) do |match|
+        interpolated = true
+
+        if match == "%%"
+          "%"
+        else
+          key = ($1 || $2 || match.tr("%{}", "")).to_sym
+          value = if values.key?(key)
+            values[key]
+          else
+            config.missing_interpolation_argument_handler.call(key, values, string)
+          end
+          value = value.call(values) if value.respond_to?(:call)
+          $3 ? sprintf("%#{$3}", value) : value
+        end
+      end
+
+      interpolated ? interpolated_string : string
     end
   end
 end
