@@ -41,8 +41,10 @@ module ActiveSupport
     ]
 
     # Mapping of canonical option names to aliases that a store will recognize.
+    # The inner Array is also frozen so the constant is Ractor-shareable
+    # (deep-frozen) for non-main reads in +normalize_options+.
     OPTION_ALIASES = {
-      expires_in: [:expire_in, :expired_in]
+      expires_in: [:expire_in, :expired_in].freeze
     }.freeze
 
     DEFAULT_COMPRESS_LIMIT = 1.kilobyte

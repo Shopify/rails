@@ -58,6 +58,18 @@ module AbstractController
         def fragment_cache_key(value = nil, &key)
           self.fragment_cache_keys += [key || -> { value }]
         end
+
+        # Force-resolves +fragment_cache_keys+ and snapshots a shareable copy
+        # so non-main Ractors can read the singleton-class ivar that backs this
+        # +class_attribute+. The default +[]+ (and any +fragment_cache_key+
+        # additions made during boot) is mutable and would otherwise raise
+        # +Ractor::IsolationError+ on read from a dispatched render. +copy: true+
+        # avoids entangling caller-held references to the array.
+        def make_fragment_cache_keys_shareable! # :nodoc:
+          current = fragment_cache_keys
+          return if Ractor.shareable?(current)
+          self.fragment_cache_keys = Ractor.make_shareable(current, copy: true)
+        end
       end
 
       # Given a key (as described in `expire_fragment`), returns a key array suitable

@@ -36,6 +36,18 @@ module ActionView
       @trackers.delete(handler)
     end
 
+    # Snapshots the +@trackers+ registry into a shareable frozen Hash so
+    # +find_dependencies+ can read it from non-main Ractors during digest
+    # dependency tracking. Called once from +Application#ractorize!+ after
+    # +eager_load!+ has run all gem-level +register_tracker+ calls (jbuilder,
+    # slim, haml, etc.). Subsequent +register_tracker+ / +remove_tracker+
+    # calls would now raise +FrozenError+; in standard Rails apps those
+    # calls only happen at file-load time, so this is safe.
+    def self.make_shareable! # :nodoc:
+      return if @trackers.frozen?
+      @trackers = Ractor.make_shareable(@trackers.each_pair.to_h)
+    end
+
     case ActionView.render_tracker
     when :ruby
       register_tracker :erb, RubyTracker

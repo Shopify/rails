@@ -697,6 +697,24 @@ module Rails
       env_config
       routes
 
+      # +Concurrent::NULL+ is a sentinel +::Object.new+ used by
+      # +Concurrent::Map#compute_if_absent+ for fast-path identity checks.
+      # The gem ships it unfrozen; reading the constant from a non-main
+      # Ractor raises +Ractor::IsolationError+. Freezing the sentinel keeps
+      # +equal?+ semantics intact and makes every +Concurrent::Map+
+      # call site (including +ActionView::Digestor.digest+) safe to read
+      # from request Ractors. Vendored as a boot-path warmup rather than a
+      # gem patch so it survives gem reinstalls.
+      Concurrent::NULL.freeze if defined?(Concurrent::NULL) && !Concurrent::NULL.frozen?
+
+      # +ActionView::DependencyTracker+ holds a module-level +@trackers+
+      # +Concurrent::Map+ registry populated by +register_tracker+ at gem
+      # load time (Rails defaults to +:erb+; jbuilder/slim/haml etc. add
+      # their own). Read by +find_dependencies+ during digest dependency
+      # tracking on every render. Snapshot the registry into a shareable
+      # Hash after +eager_load!+ has run all registrations.
+      ActionView::DependencyTracker.make_shareable! if defined?(ActionView::DependencyTracker)
+
       AbstractController::Base.make_shareable! if defined?(AbstractController::Base)
       # +ActionController::Base+ subclasses each carry an
       # +@_parameter_encodings+ Hash (set up via +ParameterEncoding+'s
@@ -1123,6 +1141,30 @@ module Rails
         # which raises +Ractor::IsolationError+ from non-main Ractors until
         # the cached value is shareable.
         ActiveRecord::Relation::WhereClause.make_shareable! if defined?(ActiveRecord::Relation::WhereClause)
+      end
+      # +AbstractController::Caching+ exposes +_view_cache_dependencies+ as a
+      # +class_attribute+; the default +[]+ stored on +ActionController::Base+'s
+      # singleton class is mutable and would raise +Ractor::IsolationError+ when
+      # +partial_path+ -> +view_cache_dependencies+ reads it from a dispatched
+      # render on a non-main Ractor. Snapshot a shareable copy at boot.
+      ActionController::Base.make_view_cache_dependencies_shareable! if defined?(ActionController::Base)
+      # +AbstractController::Caching::Fragments+ exposes +fragment_cache_keys+
+      # as a +class_attribute+; the default +[]+ stored on +ActionController::Base+'s
+      # singleton class is mutable and would raise +Ractor::IsolationError+ when
+      # +combined_fragment_cache_key+ reads it from a dispatched render on a
+      # non-main Ractor. Snapshot a shareable copy at boot.
+      ActionController::Base.make_fragment_cache_keys_shareable! if defined?(ActionController::Base)
+      # +ActionController::Metal.controller_name+ is +||=+-memoized per
+      # class on the singleton-class ivar +@controller_name+, with subclass
+      # +inherited+ resetting it to +nil+. Reached from
+      # +ActionController::Caching#instrument_payload+ during fragment-cache
+      # instrumentation on dispatched renders. Walk every concrete controller
+      # descendant and warm the ivar at boot so the lazy +||=+ never fires
+      # from a non-main Ractor.
+      if defined?(ActionController::Metal)
+        [ActionController::Metal, *ActionController::Metal.descendants].each do |controller_class|
+          controller_class.make_controller_name_shareable!
+        end
       end
       env_config.make_shareable!
       routes.make_shareable!

@@ -139,6 +139,19 @@ module ActionController
       @controller_name ||= (name.demodulize.delete_suffix("Controller").underscore unless anonymous?)
     end
 
+    # Force-resolves +@controller_name+ at boot so non-main Ractors can
+    # read it during fragment-cache instrumentation without triggering the
+    # lazy +||=+ write on a class singleton-class ivar. Anonymous classes
+    # stay +nil+ (the +unless anonymous?+ guard inside +controller_name+
+    # short-circuits) and are not affected. The result of
+    # +String#underscore+ is unfrozen, so freeze the cached value to
+    # make it shareable.
+    def self.make_controller_name_shareable! # :nodoc:
+      return if defined?(@controller_name) && @controller_name.is_a?(String) && @controller_name.frozen?
+      resolved = anonymous? ? nil : name.demodulize.delete_suffix("Controller").underscore.freeze
+      @controller_name = resolved
+    end
+
     def self.make_response!(request)
       ActionDispatch::Response.new.tap do |res|
         res.request = request

@@ -52,6 +52,18 @@ module AbstractController
       def view_cache_dependency(&dependency)
         self._view_cache_dependencies += [dependency]
       end
+
+      # Force-resolves +_view_cache_dependencies+ and snapshots a shareable
+      # copy so non-main Ractors can read the singleton-class ivar that backs
+      # this +class_attribute+. The default +[]+ (and any +view_cache_dependency+
+      # additions made during boot) is mutable and would otherwise raise
+      # +Ractor::IsolationError+ on read from a dispatched render. +copy: true+
+      # avoids entangling caller-held references to the array.
+      def make_view_cache_dependencies_shareable! # :nodoc:
+        current = _view_cache_dependencies
+        return if Ractor.shareable?(current)
+        self._view_cache_dependencies = Ractor.make_shareable(current, copy: true)
+      end
     end
 
     def view_cache_dependencies

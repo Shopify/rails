@@ -4,8 +4,6 @@ require "action_view/dependency_tracker"
 
 module ActionView
   class Digestor
-    @@digest_mutex = Mutex.new
-
     class << self
       # Supported options:
       #
@@ -21,17 +19,17 @@ module ActionView
           cache_key = "#{name}.#{format}.#{dependencies_suffix}"
         end
 
-        # this is a correctly done double-checked locking idiom
-        # (Concurrent::Map's lookups have volatile semantics)
-        finder.digest_cache[cache_key] || @@digest_mutex.synchronize do
-          finder.digest_cache.fetch(cache_key) do # re-check under lock
-            path = TemplatePath.parse(name)
-            root = tree(path.to_s, finder, path.partial?)
-            dependencies.each do |injected_dep|
-              root.children << Injected.new(injected_dep, nil, nil)
-            end if dependencies
-            finder.digest_cache[cache_key] = root.digest(finder)
-          end
+        # +Concurrent::Map#compute_if_absent+ provides atomic compute-once-per-key
+        # semantics, replacing the previous double-checked-locking idiom that
+        # used a class-variable +Mutex+. Eliminating the mutex makes the cache
+        # safe to read from non-main Ractors during cache_helper digest lookups.
+        finder.digest_cache.compute_if_absent(cache_key) do
+          path = TemplatePath.parse(name)
+          root = tree(path.to_s, finder, path.partial?)
+          dependencies.each do |injected_dep|
+            root.children << Injected.new(injected_dep, nil, nil)
+          end if dependencies
+          root.digest(finder)
         end
       end
 

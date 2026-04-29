@@ -1,7 +1,5 @@
 # frozen_string_literal: true
 
-require "concurrent/map"
-
 module ActionView
   # This class defines the interface for a renderer. Each class that
   # subclasses +AbstractRenderer+ is used by the base +Renderer+ class to
@@ -30,9 +28,15 @@ module ActionView
     end
 
     module ObjectRendering # :nodoc:
-      PREFIXED_PARTIAL_NAMES = Concurrent::Map.new do |h, k|
-        h.compute_if_absent(k) { Concurrent::Map.new }
-      end
+      # Originally a +Concurrent::Map+ keyed on +(prefix, path)+ that memoized
+      # the merged partial path. The map itself isn't Ractor-shareable (mutable,
+      # auto-creating default block) so reading the constant from a non-main
+      # Ractor raised +Ractor::IsolationError+. Replaced with a shareable
+      # frozen empty Hash; +partial_path+ now recomputes
+      # +merge_prefix_into_object_path+ on every call. The work is plain
+      # string manipulation and the cost is dominated by the surrounding
+      # render path; profile if the cache turns out to be load-bearing.
+      PREFIXED_PARTIAL_NAMES = {}.freeze
 
       def initialize(lookup_context, options)
         super
@@ -83,7 +87,7 @@ module ActionView
           end
 
           if view.prefix_partial_path_with_controller_namespace
-            PREFIXED_PARTIAL_NAMES[@context_prefix][path] ||= merge_prefix_into_object_path(@context_prefix, path.dup)
+            (PREFIXED_PARTIAL_NAMES[@context_prefix] || {})[path] || merge_prefix_into_object_path(@context_prefix, path.dup)
           else
             path
           end
