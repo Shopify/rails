@@ -275,6 +275,14 @@ module ActiveRecord
     # The connection will remain leased for the entire duration of the request
     # or job, or until +#release_connection+ is called.
     def lease_connection
+      # On a non-main Ractor we cannot reach the real ConnectionPool's
+      # mutex / driver state. Return the shareable connection proxy
+      # which dispatches per-call to the main Ractor. See
+      # +ConnectionAdapters::RactorConnectionProxy+ for the boundary
+      # contract.
+      if !Ractor.main?
+        return ConnectionAdapters::RactorConnectionProxy
+      end
       connection_pool.lease_connection
     end
 
@@ -315,6 +323,16 @@ module ActiveRecord
     # If #connection is called inside the block, the connection won't be checked back in
     # unless the +prevent_permanent_checkout+ argument is set to +true+.
     def with_connection(prevent_permanent_checkout: false, &block)
+      # The persistence path (+save+, +update+, +destroy+) and the
+      # transaction wrapper both go through here. On a non-main Ractor,
+      # yield the shareable connection proxy whose +insert+ / +update+ /
+      # +delete+ dispatch to the main Ractor. See
+      # +ConnectionAdapters::RactorConnectionProxy+ for the surface and
+      # boundary semantics (transactions are no-ops, callbacks don't
+      # fire on this side, etc.).
+      if !Ractor.main?
+        return yield ConnectionAdapters::RactorConnectionProxy
+      end
       connection_pool.with_connection(prevent_permanent_checkout: prevent_permanent_checkout, &block)
     end
 
@@ -367,6 +385,14 @@ module ActiveRecord
     end
 
     def connection_pool
+      # On a non-main Ractor the real handler / pool graph is not
+      # shareable. Return the shareable pool proxy whose +with_connection+
+      # yields +RactorConnectionProxy+ and whose
+      # +with_pool_transaction_isolation_level+ is a yielding shell.
+      # See +ConnectionAdapters::RactorConnectionPool+.
+      if !Ractor.main?
+        return ConnectionAdapters::RactorConnectionPool
+      end
       connection_handler.retrieve_connection_pool(connection_specification_name, role: current_role, shard: current_shard, strict: true)
     end
 
