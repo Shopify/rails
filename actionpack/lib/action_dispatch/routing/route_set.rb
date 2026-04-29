@@ -97,6 +97,27 @@ module ActionDispatch
           @path_helpers.include?(key) || @url_helpers.include?(key)
         end
 
+        # Helper modules carry boot-populated ivars (@_url_helper_*, @_url_strategy_*,
+        # @_custom_url_helper_*) that the generated url_for methods read via
+        # instance_variable_get on a non-main Ractor. Ractor.make_shareable freezes
+        # reachable objects but does not recurse through Module references and does
+        # not deep-freeze ivars stored on Modules, so shareable-ize each value here
+        # before the standard freeze runs.
+        def freeze
+          return self if frozen?
+
+          @routes.each_value { |route| route.eager_load! if route.respond_to?(:eager_load!) }
+
+          [@url_helpers_module, @path_helpers_module].each do |mod|
+            mod.instance_variables.each do |ivar|
+              next unless ivar.start_with?("@_url_helper_", "@_url_strategy_", "@_custom_url_helper_")
+              mod.instance_variable_get(ivar).make_shareable!
+            end
+          end
+
+          super
+        end
+
         def helper_names
           @path_helpers.map(&:to_s) + @url_helpers.map(&:to_s)
         end
@@ -363,8 +384,8 @@ module ActionDispatch
       end
 
       # strategy for building URLs to send to the client
-      PATH    = ->(options) { ActionDispatch::Http::URL.path_for(options) }
-      UNKNOWN = ->(options) { ActionDispatch::Http::URL.url_for(options) }
+      PATH    = ->(options) { ActionDispatch::Http::URL.path_for(options) }.make_shareable!
+      UNKNOWN = ->(options) { ActionDispatch::Http::URL.url_for(options) }.make_shareable!
 
       attr_accessor :formatter, :set, :named_routes, :router
       attr_accessor :disable_clear_and_finalize, :resources_path_names

@@ -357,6 +357,9 @@ module ActionDispatch
               CACHE[:url][action]  = build action, "url"
               CACHE[:path][action] = build action, "path"
             end
+
+            # CACHE is populated at boot and read-only thereafter; freeze for non-main Ractor reads.
+            CACHE.make_shareable!
         end
     end
   end
