@@ -51,6 +51,33 @@ module ActiveRecord
         end
       end
 
+      # Pre-resolve +@covered+ before the +_validate_callbacks+ chain
+      # (which holds this validator instance) is deep-frozen by
+      # +make_callback_chains_shareable!+, so the request-side
+      # +@covered ||=+ memoization in +covered_by_unique_index?+ is a
+      # no-op rather than a +FrozenError+ on the singleton class.
+      # +covered_by_unique_index?+ uses +record+ only for
+      # +record.class._reflect_on_association+, so a +@klass.allocate+
+      # stand-in is sufficient for the precompute (no DB roundtrip, no
+      # +init_internals+). Best-effort: any exception is swallowed so
+      # boot does not fail; the request path will then resurface a
+      # clear error from the original call site.
+      def make_covered_shareable! # :nodoc:
+        return if frozen?
+        return if defined?(@covered) && @covered
+        return if @klass.nil?
+        return if @klass.respond_to?(:abstract_class?) && @klass.abstract_class?
+        attribute_first = self.attributes.first
+        return if attribute_first.nil?
+        begin
+          record = @klass.allocate
+          scope = Array(options[:scope])
+          covered_by_unique_index?(@klass, record, attribute_first, scope)
+        rescue StandardError
+          nil
+        end
+      end
+
     private
       # The check for an existing value should be run from a class that
       # isn't abstract. This means working down from the current class
@@ -147,6 +174,23 @@ module ActiveRecord
     end
 
     module ClassMethods
+      # Pre-populate +@covered+ on every +UniquenessValidator+ attached
+      # to this class, before +make_callback_chains_shareable!+ deep-
+      # freezes the +_validate_callbacks+ chain that owns these
+      # validator instances. After this runs, the request-side
+      # +@covered ||= ...+ memoization in
+      # +UniquenessValidator#covered_by_unique_index?+ is a no-op on
+      # the frozen validator. See
+      # +UniquenessValidator#make_covered_shareable!+.
+      def make_uniqueness_validators_shareable! # :nodoc:
+        return unless respond_to?(:_validators) && _validators
+        _validators.each_value do |validators|
+          validators.each do |v|
+            v.make_covered_shareable! if v.respond_to?(:make_covered_shareable!)
+          end
+        end
+      end
+
       # Validates whether the value of the specified attributes are unique
       # across the system. Useful for making sure that only one user
       # can be named "davidhh".

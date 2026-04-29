@@ -1254,7 +1254,19 @@ module Rails
         # class ivar +@__class_attr_defined_enums+. Snapshot a shareable copy
         # on every AR class for the same reason +__callbacks+ is walked here.
         # See +make_defined_enums_shareable!+ for the full rationale.
+        # +ActiveRecord::Validations::UniquenessValidator+ memoizes the list
+        # of validator attributes covered by a unique index in the instance
+        # ivar +@covered+ via +@covered ||=+. Validators are reachable from
+        # +_validate_callbacks+ and therefore deep-frozen by
+        # +make_callback_chains_shareable!+ below; the request-side
+        # +covered_by_unique_index?+ then raises +FrozenError+ on the first
+        # write. Pre-resolve +@covered+ on every UniquenessValidator BEFORE
+        # +make_callback_chains_shareable!+ runs so the +||=+ becomes a no-op
+        # at request time. Must be the first call in the per-class loop body
+        # below for that ordering to hold. See
+        # +make_uniqueness_validators_shareable!+ for the full rationale.
         [ActiveRecord::Base, *ActiveRecord::Base.descendants].each do |ar_class|
+          ar_class.make_uniqueness_validators_shareable! if ar_class.respond_to?(:make_uniqueness_validators_shareable!)
           ar_class.make_callback_chains_shareable!
           ar_class.make_normalized_attributes_shareable! if ar_class.respond_to?(:make_normalized_attributes_shareable!)
           ar_class.make_counter_cache_shareable! if ar_class.respond_to?(:make_counter_cache_shareable!)
