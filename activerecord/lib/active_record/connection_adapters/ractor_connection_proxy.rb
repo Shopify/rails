@@ -273,16 +273,63 @@ module ActiveRecord
       end
     end
 
+    # Returned by +RactorConnectionPool#schema_cache+ on a non-main
+    # Ractor. Mirrors only the +BoundSchemaReflection+ methods the
+    # request-path read flow actually calls. The real
+    # +BoundSchemaReflection+ holds a +@pool+ reference whose graph
+    # carries +MonitorMixin+ / +Mutex+ state and cannot cross a Ractor
+    # boundary, so we per-call dispatch the read to the main side and
+    # return a shareable copy of the result.
+    #
+    # Currently exposes only +indexes(table_name)+, reached via
+    # +UniquenessValidator#covered_by_unique_index?+ during a save with
+    # +validates_uniqueness_of+. Adding more methods (columns_hash,
+    # primary_keys, ...) without a real first-failure driving them is
+    # exactly the silent-forwarding anti-pattern called out in
+    # +RactorConnectionProxy+'s docstring; extend deliberately when a
+    # new gate failure points here.
+    module RactorSchemaCacheProxy
+      extend self
+
+      # Dispatch to +klass.schema_cache.indexes(table_name)+ on the
+      # main side and return a shareable +Array<IndexDefinition>+.
+      # +IndexDefinition+ is a plain object with String/Symbol/nil
+      # fields and deep-freezes cleanly.
+      def indexes(table_name)
+        name_dump = table_name.frozen? ? table_name : table_name.dup.freeze
+        Ractor::Dispatch.main.run do
+          RactorConnectionProxy.dispatched_with_sanitized_errors do
+            result = ActiveRecord::Base.connection_pool.schema_cache.indexes(name_dump)
+            Ractor.make_shareable(result, copy: true)
+          end
+        end
+      end
+
+      def respond_to_missing?(name, include_private = false)
+        false
+      end
+
+      def method_missing(name, *, **, &)
+        raise NoMethodError,
+          "#{name} is not implemented on #{self} (the non-main-Ractor " \
+          "schema-cache proxy). The request-path read surface is " \
+          "intentionally limited; if you hit this, extend the proxy at " \
+          "#{__FILE__} or route the caller through the real schema cache " \
+          "on the main Ractor."
+      end
+    end
+
     # Returned by +ActiveRecord::Base.connection_pool+ on a non-main
     # Ractor. Mirrors the surface the persistence path actually touches:
-    # +with_connection+ (yields the connection proxy) and the
+    # +with_connection+ (yields the connection proxy), the
     # +with_pool_transaction_isolation_level+ wrapper that
-    # +with_transaction_returning_status+ wraps every save in.
-    #
-    # All other methods raise. Notably +schema_cache+ is intentionally
-    # absent: schema lookups go through the eagerly-built shareable
-    # +SchemaReflection+ on the main side; if a write path ever needs
-    # the cache from a non-main Ractor we should add it deliberately.
+    # +with_transaction_returning_status+ wraps every save in, and
+    # +schema_cache+ which returns +RactorSchemaCacheProxy+ for the
+    # narrow read-path schema lookups (currently +indexes+, used by
+    # +UniquenessValidator#covered_by_unique_index?+). Schema-cache
+    # entries are eagerly populated on the main side at boot via
+    # +SchemaReflection+, so the dispatched call is a frozen-result
+    # in-memory lookup, not a DB roundtrip in the steady state.
     module RactorConnectionPool
       extend self
 
@@ -315,6 +362,14 @@ module ActiveRecord
         end
       end
 
+      # Returns the request-side schema-cache proxy. The real
+      # +ConnectionPool#schema_cache+ holds a non-shareable pool
+      # reference; the proxy dispatches per-call schema reads to the
+      # main side. See +RactorSchemaCacheProxy+.
+      def schema_cache
+        RactorSchemaCacheProxy
+      end
+
       def respond_to_missing?(name, include_private = false)
         false
       end
@@ -330,6 +385,7 @@ module ActiveRecord
     end
 
     Ractor.make_shareable(RactorConnectionProxy)
+    Ractor.make_shareable(RactorSchemaCacheProxy)
     Ractor.make_shareable(RactorConnectionPool)
   end
 end
