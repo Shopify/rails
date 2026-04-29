@@ -16,7 +16,7 @@ module ActiveRecord
         @value_transformation = value_transformation
       end
 
-      INSTANCE = create
+      INSTANCE = create.make_shareable!
 
       def scope(association)
         klass = association.klass
