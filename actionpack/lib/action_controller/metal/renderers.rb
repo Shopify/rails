@@ -89,6 +89,22 @@ module ActionController
       if RENDERERS.frozen?
         raise FrozenError, "can't register renderer #{key.inspect} after Rails.application.ractorize!"
       end
+      # Try to make the block shareable so the renderer method can be
+      # invoked from non-main Ractors — Ruby raises "defined with an
+      # un-shareable Proc in a different Ractor" otherwise. Built-in
+      # renderers (+:json+, +:js+, +:xml+) define their blocks with
+      # +self = ActionController::Renderers+ (a module), which is fine.
+      # Some gem-registered renderers (e.g. +turbo-rails+ registering
+      # +:turbo_stream+) define theirs with +self+ being an Engine
+      # instance, which can't be isolated. Swallow that case so boot
+      # still succeeds; if that renderer is later invoked from a non-
+      # main Ractor Ruby will raise at the call site with a clear
+      # backtrace pointing at the gem's block.
+      begin
+        block = Ractor.make_shareable(block)
+      rescue Ractor::IsolationError
+        # block stays as-is; non-main Ractor calls will raise on use.
+      end
       define_method(_render_with_renderer_method_name(key), &block)
       RENDERERS << key.to_sym
     end
