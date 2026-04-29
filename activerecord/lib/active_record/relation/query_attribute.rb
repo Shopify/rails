@@ -18,6 +18,15 @@ module ActiveRecord
           unless @value_before_type_cast.frozen?
             @value_before_type_cast = @value_before_type_cast.deep_dup
           end
+        else
+          # Non-mutable, non-serialized values are stable for the lifetime of
+          # the QueryAttribute. Pre-resolve +@value_for_database+ at
+          # construction so the lazy +value_for_database+ memoization never
+          # fires from a non-main Ractor (the ivar write would FrozenError on
+          # a deep-frozen attribute crossing the +RactorQueryDispatch+
+          # boundary, and +Ractor::IsolationError+ on a class-shared
+          # attribute read from non-main).
+          value_for_database
         end
       end
 

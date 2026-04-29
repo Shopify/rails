@@ -43,7 +43,26 @@ module ActiveRecord
       end
 
       def default_value # :nodoc:
-        @default_value ||= Value.new
+        # +defined?+ guards against the +||=+ class ivar write firing from
+        # non-main Ractors. +make_default_value_shareable!+ pre-resolves at
+        # boot so the warm path returns the cached singleton without
+        # touching the ivar.
+        if defined?(@default_value) && @default_value
+          @default_value
+        else
+          @default_value = Value.new
+        end
+      end
+
+      # Pre-resolve the +@default_value+ singleton and make it shareable so
+      # non-main Ractor reads of +ActiveRecord::Type.default_value+ (reached
+      # via +QueryMethods#build_cast_value+ during +order(...)+ relation
+      # building) succeed. The +Value+ instance is stateless (its ivars are
+      # nil sentinels), set once, and shared across the process.
+      def make_default_value_shareable! # :nodoc:
+        return if defined?(@default_value_shareable) && @default_value_shareable
+        default_value.make_shareable!
+        @default_value_shareable = true
       end
 
       def adapter_name_from(model) # :nodoc:

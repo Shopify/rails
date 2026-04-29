@@ -500,6 +500,29 @@ module ActiveRecord
         end
 
         def cached_find_by(keys, values)
+          # On non-main Ractors we cannot reach the real connection_pool /
+          # StatementCache infrastructure: ConnectionPool holds Mutex /
+          # ConditionVariable and live driver state, and StatementCache memos
+          # are stored under @find_by_statement_cache (a Concurrent::Map of
+          # per-connection caches) which is mutated under the pool's monitor.
+          # Both are non-shareable. Rather than expanding the
+          # RactorConnectionHandler stub or shipping the whole prepared-
+          # statement path to main via Ractor::Dispatch, build the equivalent
+          # Relation directly and let it traverse the existing
+          # Relation#exec_main_query -> RactorQueryDispatch.select_all
+          # boundary. The cost is one prepared-statement-cache miss per
+          # cached_find_by call from a non-main Ractor; the benefit is that
+          # this stays an owner-level fix at cached_find_by (which owns the
+          # prepared-statement-caching choice) and reuses the existing narrow
+          # dispatch surface.
+          unless Ractor.main?
+            # Mirror the prepared-statement Relation that the main path builds:
+            # keys map 1:1 to values (composite primary keys come through as
+            # Array-keyed entries with Array values, which #where handles).
+            wheres = keys.zip(values).to_h
+            return where(wheres).limit(1).first
+          end
+
           with_connection do |connection|
             statement = cached_find_by_statement(connection, keys) { |params|
               wheres = keys.index_with do |key|

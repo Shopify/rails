@@ -26,6 +26,11 @@ module ActiveRecord
       # The result is frozen and made shareable on the main side via
       # Result#make_shareable! before being returned across the boundary.
       def select_all(model, arel, name = nil, binds = [], allow_retry: false)
+        # +Ractor.make_shareable(_, copy: true)+ deep-freezes the arel /
+        # binds graph. +QueryAttribute+ now eagerly resolves
+        # +@value_for_database+ in its constructor for non-mutable values, so
+        # the deep-freeze here is safe: the only memoized state on each bind
+        # is already populated before this point.
         shareable_arel  = Ractor.make_shareable(arel,  copy: true)
         shareable_binds = Ractor.make_shareable(binds, copy: true)
         model_name      = model.name

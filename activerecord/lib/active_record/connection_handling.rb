@@ -344,7 +344,26 @@ module ActiveRecord
     end
 
     def adapter_class # :nodoc:
+      # Read from the boot-time cache on non-main Ractors so we don't reach
+      # +connection_pool+ -> +RactorConnectionHandler#retrieve_connection_pool+
+      # (which is intentionally unimplemented). +make_adapter_class_shareable!+
+      # populates +@__cached_adapter_class+ during +ractorize!+.
+      if !Ractor.main? && defined?(@__cached_adapter_class) && @__cached_adapter_class
+        return @__cached_adapter_class
+      end
       connection_pool.db_config.adapter_class
+    end
+
+    # Resolve and freeze the adapter class on the AR descendant so non-main
+    # Ractor reads of +adapter_class+ (e.g. from
+    # +QueryMethods#preprocess_order_args+ for raw-SQL validation) skip the
+    # +connection_pool+ traversal that would hit
+    # +RactorConnectionHandler#retrieve_connection_pool+. The adapter class
+    # is determined by the database config at boot and doesn't change at
+    # runtime.
+    def make_adapter_class_shareable! # :nodoc:
+      return if defined?(@__cached_adapter_class) && @__cached_adapter_class
+      @__cached_adapter_class = adapter_class
     end
 
     def connection_pool

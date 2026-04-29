@@ -68,7 +68,11 @@ module ActiveRecord
       #   Account.reflect_on_aggregation(:balance) # => the balance AggregateReflection
       #
       def reflect_on_aggregation(aggregation)
-        aggregate_reflections[aggregation.to_sym]
+        if !Ractor.main? && defined?(@__shareable_aggregate_reflections) && @__shareable_aggregate_reflections
+          @__shareable_aggregate_reflections[aggregation.to_sym]
+        else
+          aggregate_reflections[aggregation.to_sym]
+        end
       end
 
       # Returns a Hash of name of the reflection as the key and an AssociationReflection as the value.
@@ -80,6 +84,13 @@ module ActiveRecord
       end
 
       def normalized_reflections # :nodoc:
+        # Non-main reads use the sanitized, shareable copy snapshotted at boot
+        # by +make_reflections_shareable!+. The lazy +@__reflections+ memoize
+        # below is a class ivar write — disallowed from non-main Ractors.
+        if !Ractor.main? && defined?(@__shareable_normalized_reflections) && @__shareable_normalized_reflections
+          return @__shareable_normalized_reflections
+        end
+
         @__reflections ||= begin
           ref = {}
 
@@ -124,7 +135,17 @@ module ActiveRecord
       end
 
       def _reflect_on_association(association) # :nodoc:
-        _reflections[association.to_sym]
+        # On non-main Ractors the live +_reflections+ Hash is unreachable
+        # (its values are full Reflection objects whose +@scope+ Procs aren't
+        # shareable). +make_reflections_shareable!+ snapshots a sanitized,
+        # deep-frozen copy onto +@__shareable_reflections+ at boot; read from
+        # that copy here so callers (predicate_builder, table_metadata, etc.)
+        # see the same metadata they would on main.
+        if !Ractor.main? && defined?(@__shareable_reflections) && @__shareable_reflections
+          @__shareable_reflections[association.to_sym]
+        else
+          _reflections[association.to_sym]
+        end
       end
 
       # Returns an array of AssociationReflection objects for all associations which have <tt>:autosave</tt> enabled.
@@ -138,7 +159,129 @@ module ActiveRecord
         @__reflections = nil
       end
 
+      # Force-resolve every lazy memo on every Reflection stored under this
+      # AR class's +_reflections+ / +aggregate_reflections+ class_attribute,
+      # then replace those Hashes with deep-frozen, shareable copies and
+      # warm the +@__reflections+ normalized cache to the frozen version.
+      #
+      # +PredicateBuilder#expand_from_hash+ calls
+      # +TableMetadata#associated_with(key)+ for every key in a +where(...)+
+      # Hash, including plain column keys. That reads
+      # +_reflections+ off the class_attribute ivar, which raises
+      # +Ractor::IsolationError+ from a non-main Ractor until the Hash and
+      # every Reflection inside it are shareable. The owner of the
+      # +_reflections+ Hash is each AR descendant that calls +has_many+ /
+      # +belongs_to+ / +has_one+ / +composed_of+, so the warmer lives here in
+      # +Reflection::ClassMethods+.
+      #
+      # In production, associations are declared at class-definition time and
+      # not added afterwards. The lazy memos on each Reflection (+@class_name+,
+      # +@inverse_of+, +@klass+, +@foreign_key+, etc.) are likewise resolved
+      # once and never recomputed. Pre-warming them before deep-freezing means
+      # subsequent calls on either Ractor return the cached value instead of
+      # attempting to re-memoize on a frozen object.
+      def make_reflections_shareable! # :nodoc:
+        return if defined?(@__reflections_shareable) && @__reflections_shareable
+
+        # Force-resolve memos on each MacroReflection / AssociationReflection.
+        # +_reflections+ holds the user-declared associations; for HABTM and
+        # +through:+ reflections, +parent_reflection+ may also expose memos
+        # that haven't been touched yet, so warm those too via the normalized
+        # cache pass below.
+        _reflections.each_value do |reflection|
+          warm_reflection_memos(reflection)
+        end
+        aggregate_reflections.each_value do |reflection|
+          warm_reflection_memos(reflection)
+        end
+
+        # +ThroughReflection+ exposes +source_reflection+ / +through_reflection+
+        # which may walk back into +_reflections+ on +through_reflection.klass+.
+        # Force the normalized cache so +@__reflections+ is populated and
+        # frozen-shareable too.
+        normalized = {}
+        _reflections.each do |name, reflection|
+          parent = reflection.parent_reflection
+          if parent
+            warm_reflection_memos(parent)
+            normalized[parent.name] = parent
+          else
+            normalized[name] = reflection
+          end
+        end
+
+        # Build sanitized, shareable copies of each reflection. The live
+        # +@scope+ on associations is a Proc that may capture per-class state
+        # (e.g. +has_one_attached+ produces +-> { where(name: name) }+, and
+        # +Builder::Association.build_scope+ wraps zero-arity scopes in
+        # +proc { instance_exec(&scope) }+). Those Procs aren't shareable, so
+        # we deep-clone each reflection, replace +@scope+ with +nil+ on the
+        # clone, then deep-freeze the clone via +make_shareable(copy: true)+.
+        # The main-Ractor scope-evaluation paths (+scope_for+,
+        # +has_scope?+, etc.) still read the LIVE +_reflections+ Hash so the
+        # framework's mutation paths (+CounterCache#load_schema!+ memoization,
+        # +autosave=+, +parent_reflection=+, etc.) keep working untouched.
+        # Non-main reads route through +_reflect_on_association+ /
+        # +reflect_on_aggregation+, which consult these shadow ivars instead
+        # of the unshareable live Hashes.
+        @__shareable_reflections = build_shareable_reflection_hash(_reflections)
+        @__shareable_aggregate_reflections = build_shareable_reflection_hash(aggregate_reflections)
+        @__shareable_normalized_reflections = build_shareable_reflection_hash(normalized)
+
+        @__reflections_shareable = true
+      end
+
       private
+        def build_shareable_reflection_hash(source)
+          shareable = source.transform_values(&:shareable_clone)
+          Ractor.make_shareable(shareable, copy: true)
+        end
+
+        def warm_reflection_memos(reflection)
+          # Skip if already warmed (idempotent across descendant walks).
+          return if reflection.frozen?
+
+          # +class_name+ memoizes +@class_name+. Skip when polymorphic — the
+          # association doesn't have a single resolvable class name and
+          # +derive_class_name+ would still set the memo to the literal name,
+          # which we don't want for a polymorphic association. Aggregate
+          # reflections don't define +polymorphic?+, so test responsively.
+          if !(reflection.respond_to?(:polymorphic?) && reflection.polymorphic?)
+            reflection.class_name
+          end
+
+          # +ThroughReflection+ memoizes +@source_reflection_name+ via the
+          # private +source_reflection_name+. Warm only on ThroughReflection
+          # (the only class that defines a memoized version; the abstract
+          # +through_reflection?+ predicate identifies it).
+          if reflection.through_reflection?
+            reflection.send(:source_reflection_name)
+          end
+
+          # AssociationReflection-specific lazy memos (foreign keys, inverses,
+          # counter caches). Skipped for AggregateReflection (which doesn't
+          # define them).
+          if reflection.is_a?(AssociationReflection)
+            reflection.foreign_key
+            reflection.active_record_primary_key
+            reflection.counter_cache_column
+            reflection.has_inverse?
+            unless reflection.polymorphic?
+              # +association_foreign_key+, +join_table+ (via
+              # +derive_join_table+), +inverse_of+, and
+              # +inverse_which_updates_counter_cache+ all eventually need
+              # +klass+ — which raises ArgumentError on polymorphic
+              # associations. The reflection still reads cleanly from non-main
+              # Ractors without these memos warmed because +polymorphic?+
+              # short-circuits the relevant code paths.
+              reflection.association_foreign_key
+              reflection.join_table
+              reflection.inverse_of
+              reflection.inverse_which_updates_counter_cache
+            end
+          end
+        end
+
         def inherited(subclass)
           super
           subclass.class_eval do
@@ -347,9 +490,38 @@ module ActiveRecord
         message << " named `:#{name}` cannot be lazily loaded."
       end
 
+      # Build a sanitized clone suitable for use inside a frozen, shareable
+      # +_reflections+ Hash on a non-main Ractor read path. The clone drops
+      # the live +@scope+ Proc and any +options[:extend]+ Procs (which can
+      # capture per-class state and aren't shareable), then recursively
+      # sanitizes any nested reflection (delegate / parent). The original
+      # +self+ is left untouched so main-Ractor scope evaluation continues
+      # to use the live, mutable graph the framework wired into association
+      # callbacks.
+      def shareable_clone # :nodoc:
+        sanitized = clone
+        sanitized.send(:strip_unshareable_state!)
+        sanitized
+      end
+
       protected
         def actual_source_reflection # FIXME: this is a horrible name
           self
+        end
+
+        # Subclasses override to recursively sanitize nested reflections.
+        # The base implementation handles +@scope+ and +options[:extend]+,
+        # which is sufficient for non-Through reflection types.
+        def strip_unshareable_state!
+          if instance_variable_defined?(:@scope) && instance_variable_get(:@scope)
+            instance_variable_set(:@scope, nil)
+          end
+          if instance_variable_defined?(:@options)
+            options = instance_variable_get(:@options)
+            if options.is_a?(Hash) && options.key?(:extend)
+              instance_variable_set(:@options, options.except(:extend))
+            end
+          end
         end
 
       private
@@ -894,6 +1066,18 @@ module ActiveRecord
         def derive_join_table
           ModelSchema.derive_join_table_name active_record.table_name, klass.table_name
         end
+
+      protected
+        # Recursively sanitize the +parent_reflection+ (set by HABTM setup
+        # to point at the owning HABTM reflection, which itself carries
+        # scopes / extensions).
+        def strip_unshareable_state!
+          super
+          parent = parent_reflection
+          if parent
+            self.parent_reflection = parent.shareable_clone
+          end
+        end
     end
 
     class HasManyReflection < AssociationReflection # :nodoc:
@@ -1265,6 +1449,18 @@ module ActiveRecord
           public_instance_methods
 
         delegate(*delegate_methods, to: :delegate_reflection)
+
+      protected
+        # +ThroughReflection+ wraps a +@delegate_reflection+ that carries the
+        # original macro's options (and therefore its own +@scope+ /
+        # +options[:extend]+). Sanitize that delegate too so the deep-freeze
+        # walk doesn't choke on it.
+        def strip_unshareable_state!
+          super
+          if delegate_reflection
+            instance_variable_set(:@delegate_reflection, delegate_reflection.shareable_clone)
+          end
+        end
     end
 
     class PolymorphicReflection < AbstractReflection # :nodoc:

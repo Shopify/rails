@@ -221,18 +221,46 @@ module ActiveRecord
       end
 
       def query_constraints_list # :nodoc:
-        @query_constraints_list ||= if base_class? || primary_key != base_class.primary_key
-          primary_key if primary_key.is_a?(Array)
+        # +defined?+-guarded read so a +nil+ memo (the typical case for
+        # single-column primary keys) doesn't re-trigger the +||=+ write on
+        # every call. A non-main Ractor reading this method on an
+        # un-warmed class would raise +Ractor::IsolationError+ on the class
+        # ivar write; +make_query_constraints_list_shareable!+ pre-resolves
+        # the value at boot so the +defined?+ branch always finds it.
+        if defined?(@query_constraints_list)
+          @query_constraints_list
         else
-          base_class.query_constraints_list
+          @query_constraints_list = if base_class? || primary_key != base_class.primary_key
+            primary_key if primary_key.is_a?(Array)
+          else
+            base_class.query_constraints_list
+          end
         end
+      end
+
+      # Force-resolve +@query_constraints_list+ and +@composite_query_constraints_list+
+      # so the lazy memoization never fires from a non-main Ractor.
+      # The hot path is +FinderMethods#_order_columns+ -> +query_constraints_list+
+      # on every +find+ that walks ordered_relation; that read raises
+      # +Ractor::IsolationError+ on the class ivar write until the value is
+      # already memoized. Both values depend on +primary_key+, which is set at
+      # boot from the schema and doesn't change at runtime, so warming is safe.
+      def make_query_constraints_list_shareable! # :nodoc:
+        return if defined?(@query_constraints_list_shareable) && @query_constraints_list_shareable
+        query_constraints_list # populates @query_constraints_list (may be nil)
+        composite_query_constraints_list # populates @composite_query_constraints_list
+        @query_constraints_list_shareable = true
       end
 
       # Returns an array of column names to be used in queries. The source of column
       # names is derived from +query_constraints_list+ or +primary_key+. This method
       # is for internal use when the primary key is to be treated as an array.
       def composite_query_constraints_list # :nodoc:
-        @composite_query_constraints_list ||= query_constraints_list || Array(primary_key)
+        if defined?(@composite_query_constraints_list)
+          @composite_query_constraints_list
+        else
+          @composite_query_constraints_list = query_constraints_list || Array(primary_key)
+        end
       end
 
       def _insert_record(connection, values, returning) # :nodoc:

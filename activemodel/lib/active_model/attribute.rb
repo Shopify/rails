@@ -218,6 +218,18 @@ module ActiveModel
       end
 
       class WithCastValue < Attribute # :nodoc:
+        def initialize(...)
+          super
+          # +WithCastValue+ is created with a pre-cast value for SQL bind
+          # placeholders such as +LIMIT+ / +OFFSET+ (see
+          # +QueryMethods#build_cast_value+). The base +#value_for_database+
+          # reader memoizes its result on +@value_for_database+ via
+          # +unless defined?(...)+; pre-resolving here ensures the deep-freeze
+          # in +RactorQueryDispatch.select_all+ doesn't FrozenError when SQL
+          # generation reads the bind on the main side.
+          value_for_database
+        end
+
         def type_cast(value)
           value
         end

@@ -1148,6 +1148,30 @@ module Rails
             # Symbol on the class at boot so the cache-version path is connection-free.
             ar_class.make_cached_connection_default_timezone_shareable!
           end
+          # +PredicateBuilder#expand_from_hash+ calls
+          # +TableMetadata#associated_with(key)+ for every key in a +where+
+          # Hash (column or association). That reads the +_reflections+
+          # class_attribute, which raises +Ractor::IsolationError+ on the
+          # singleton-class ivar read from non-main Ractors until every
+          # Reflection's lazy memos are warmed and the Hash is shareable.
+          # Walk every concrete AR descendant and snapshot a deep-frozen
+          # copy of +_reflections+ / +aggregate_reflections+ at boot.
+          ar_class.make_reflections_shareable!
+          # +FinderMethods#_order_columns+ -> +query_constraints_list+ /
+          # +composite_query_constraints_list+ memoizes a class ivar lazily.
+          # Pre-resolve so the +defined?+-guarded read returns the cached
+          # value on non-main Ractors instead of attempting a class ivar
+          # write.
+          ar_class.make_query_constraints_list_shareable!
+          # +QueryMethods#preprocess_order_args+ calls +model.adapter_class+
+          # on every +order(...)+ relation built during a request. The
+          # default reader walks +connection_pool.db_config.adapter_class+,
+          # which hits +RactorConnectionHandler#retrieve_connection_pool+
+          # from non-main Ractors. Cache the resolved adapter class on the
+          # AR descendant so the non-main read path is connection-free.
+          if ar_class != ActiveRecord::Base && ar_class.table_exists?
+            ar_class.make_adapter_class_shareable!
+          end
           # Now that +@attribute_types+ is the deep-copied shareable graph
           # the class will keep, cache +inspect+ off of it.
           ar_class.make_inspect_shareable!
@@ -1175,6 +1199,11 @@ module Rails
         # which raises +Ractor::IsolationError+ from non-main Ractors until
         # the cached value is shareable.
         ActiveRecord::Relation::WhereClause.make_shareable! if defined?(ActiveRecord::Relation::WhereClause)
+        # +ActiveRecord::Type.default_value+ memoizes a +Value.new+ singleton
+        # in the module ivar +@default_value+ via +||=+. Reached from
+        # +QueryMethods#build_cast_value+ during +order(...)+ relation
+        # building; a class ivar write from non-main Ractors raises.
+        ActiveRecord::Type.make_default_value_shareable!
       end
       # +AbstractController::Caching+ exposes +_view_cache_dependencies+ as a
       # +class_attribute+; the default +[]+ stored on +ActionController::Base+'s
