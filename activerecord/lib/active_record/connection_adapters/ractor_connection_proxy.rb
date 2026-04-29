@@ -150,6 +150,60 @@ module ActiveRecord
         end
       end
 
+      # Read-side per-call dispatch for +c.select_rows(arel, name)+.
+      #
+      # Currently reached from +FinderMethods#exists?+, which calls
+      # +c.select_rows(relation.arel, "<Model> Exists?")+ inside a
+      # +with_connection+ block. Any other caller using +c.select_rows+
+      # directly on a +with_connection+ block on a non-main Ractor will
+      # land here too; that is intentional.
+      #
+      # The Arel AST is pure data but its +Arel::Visitors+ dispatch hash
+      # holds non-shareable Procs, so we Marshal the AST per call and
+      # rebuild it on the main side -- exactly the same shape used by
+      # +insert+ / +update+ / +delete+ above. +name+ and +binds+ are
+      # made shareable with +copy: true+ for consistency with those
+      # methods.
+      #
+      # +async: true+ is unsupported on the request-side proxy and
+      # raises +NotImplementedError+, matching the discipline already in
+      # +RactorQueryDispatch.select_all+. Main-Ractor async support is
+      # out of scope here.
+      #
+      # The return shape from a real adapter's +select_rows+ is
+      # +Array<Array>+ (rows of column values); we make it shareable
+      # with +copy: true+ so the request side can read it freely.
+      #
+      # Note: this is NOT routed through +RactorQueryDispatch.select_all+
+      # because that dispatcher keys on a model class (it uses
+      # +klass.with_connection+ on the main side to pick a connection),
+      # and +c.select_rows+ on this proxy has no model in scope. The
+      # dispatched block here uses +ActiveRecord::Base.with_connection+
+      # directly, consistent with +insert+ / +update+ / +delete+ in
+      # this file.
+      def select_rows(arel, name = nil, binds = [], async: false)
+        if async
+          raise NotImplementedError,
+            "RactorConnectionProxy#select_rows does not support async: true. " \
+            "Pass async: false; main-Ractor async support is out of scope for " \
+            "the request-side proxy. See #{__FILE__}."
+        end
+
+        arel_dump  = Marshal.dump(arel).freeze
+        op_name    = name.nil? ? nil : Ractor.make_shareable(name, copy: true)
+        binds_dump = Ractor.make_shareable(binds, copy: true)
+
+        Ractor::Dispatch.main.run do
+          RactorConnectionProxy.dispatched_with_sanitized_errors do
+            arel_ = Marshal.load(arel_dump)
+            ActiveRecord::Base.with_connection do |c|
+              rows = c.select_rows(arel_, op_name, binds_dump, async: false)
+              Ractor.make_shareable(rows, copy: true)
+            end
+          end
+        end
+      end
+
       # Adapter-level metadata constant (SQLite ~64, Postgres 63).
       # Called once per +AliasTracker.create+ via
       # +Association#scope+ / +AssociationScope.scope+, which on the
