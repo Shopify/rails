@@ -1235,12 +1235,23 @@ module Rails
         # pure boot-time metadata so warming it on the main side at
         # +ractorize!+ time is idempotent with the lazy compute. See
         # +make_default_scope_override_shareable!+ for the full rationale.
+        # +ActiveRecord::Inheritance#finder_needs_type_condition?+ memoizes
+        # a Symbol +:true+/+:false+ answer in the class ivar
+        # +@finder_needs_type_condition+ via +||=+. Reached during every
+        # relation build that applies a type condition (e.g. +destroy+ ->
+        # +_delete_record+ -> +relation_for_destroy+ -> +default_scoped+),
+        # which raises +Ractor::IsolationError+ on the first ivar write
+        # from non-main Ractors. Pre-warm on the main side so the lazy
+        # +||=+ is a no-op at request time. See
+        # +make_finder_needs_type_condition_shareable!+ for the full
+        # rationale.
         [ActiveRecord::Base, *ActiveRecord::Base.descendants].each do |ar_class|
           ar_class.make_callback_chains_shareable!
           ar_class.make_normalized_attributes_shareable! if ar_class.respond_to?(:make_normalized_attributes_shareable!)
           ar_class.make_counter_cache_shareable! if ar_class.respond_to?(:make_counter_cache_shareable!)
           ar_class.make_attr_readonly_shareable! if ar_class.respond_to?(:make_attr_readonly_shareable!)
           ar_class.make_default_scope_override_shareable! if ar_class.respond_to?(:make_default_scope_override_shareable!)
+          ar_class.make_finder_needs_type_condition_shareable! if ar_class.respond_to?(:make_finder_needs_type_condition_shareable!)
         end
         # +ActiveRecord::Relation::WhereClause.empty+ memoizes the singleton
         # empty +WhereClause+ in the +@empty+ class ivar via +||=+.

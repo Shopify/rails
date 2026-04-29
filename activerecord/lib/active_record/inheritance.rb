@@ -95,6 +95,24 @@ module ActiveRecord
         :true == (@finder_needs_type_condition ||= descends_from_active_record? ? :false : :true)
       end
 
+      # +finder_needs_type_condition?+ memoizes the Symbol +:true+/+:false+
+      # answer in the class ivar +@finder_needs_type_condition+ via +||=+ on
+      # first access. Reached during every relation build that filters by
+      # type (e.g. +destroy+ -> +_delete_record+ -> +relation_for_destroy+
+      # -> +default_scoped+), which means the first non-main Ractor to ask
+      # raises +Ractor::IsolationError+ on the ivar write before the
+      # subsequent +==+ read can short-circuit. The result is boot-time
+      # metadata derived from the class hierarchy / inheritance column, so
+      # warming once on the main side is idempotent with the lazy compute
+      # (the +||=+ is a no-op once set). Symbols are already shareable so
+      # no freeze step is needed; the read in +finder_needs_type_condition?+
+      # is fine on non-main once the ivar is non-nil. Mirrors the per-class
+      # warmer pattern (+make_default_scope_override_shareable!+, etc.)
+      # wired into +Rails.application#ractorize!+.
+      def make_finder_needs_type_condition_shareable! # :nodoc:
+        @finder_needs_type_condition ||= descends_from_active_record? ? :false : :true
+      end
+
       # Returns the first class in the inheritance hierarchy that descends from either an
       # abstract class or from <tt>ActiveRecord::Base</tt>.
       #
