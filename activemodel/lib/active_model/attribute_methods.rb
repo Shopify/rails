@@ -68,8 +68,8 @@ module ActiveModel
     CALL_COMPILABLE_REGEXP = /\A[a-zA-Z_]\w*[!?]?\z/
 
     included do
-      class_attribute :attribute_aliases, instance_writer: false, default: {}
-      class_attribute :attribute_method_patterns, instance_writer: false, default: [ ClassMethods::AttributeMethodPattern.new ]
+      class_attribute :attribute_aliases, instance_writer: false, default: {}.freeze
+      class_attribute :attribute_method_patterns, instance_writer: false, default: Ractor.make_shareable([ ClassMethods::AttributeMethodPattern.new ])
     end
 
     module ClassMethods
@@ -104,7 +104,7 @@ module ActiveModel
       #   person.clear_name
       #   person.name          # => nil
       def attribute_method_prefix(*prefixes, parameters: nil)
-        self.attribute_method_patterns += prefixes.map! { |prefix| AttributeMethodPattern.new(prefix: prefix, parameters: parameters) }
+        self.attribute_method_patterns = Ractor.make_shareable(attribute_method_patterns + prefixes.map { |prefix| AttributeMethodPattern.new(prefix: prefix, parameters: parameters) })
         undefine_attribute_methods
       end
 
@@ -138,7 +138,7 @@ module ActiveModel
       #   person.name          # => "Bob"
       #   person.name_short?   # => true
       def attribute_method_suffix(*suffixes, parameters: nil)
-        self.attribute_method_patterns += suffixes.map! { |suffix| AttributeMethodPattern.new(suffix: suffix, parameters: parameters) }
+        self.attribute_method_patterns = Ractor.make_shareable(attribute_method_patterns + suffixes.map { |suffix| AttributeMethodPattern.new(suffix: suffix, parameters: parameters) })
         undefine_attribute_methods
       end
 
@@ -173,7 +173,7 @@ module ActiveModel
       #   person.reset_name_to_default!
       #   person.name                         # => 'Default Name'
       def attribute_method_affix(*affixes)
-        self.attribute_method_patterns += affixes.map! { |affix| AttributeMethodPattern.new(**affix) }
+        self.attribute_method_patterns = Ractor.make_shareable(attribute_method_patterns + affixes.map { |affix| AttributeMethodPattern.new(**affix) })
         undefine_attribute_methods
       end
 
@@ -203,7 +203,7 @@ module ActiveModel
       def alias_attribute(new_name, old_name)
         old_name = old_name.to_s
         new_name = new_name.to_s
-        self.attribute_aliases = attribute_aliases.merge(new_name => old_name)
+        self.attribute_aliases = Ractor.make_shareable(attribute_aliases.merge(new_name => old_name))
         aliases_by_attribute_name[old_name] << new_name
         eagerly_generate_alias_attribute_methods(new_name, old_name)
       end
@@ -419,7 +419,17 @@ module ActiveModel
         end
 
         def attribute_method_patterns_matching(method_name)
-          attribute_method_patterns_cache.compute_if_absent(method_name) do
+          # The cache above is a class-ivar +Concurrent::Map+ that is not
+          # frozen and cannot be made shareable, so non-main reads/writes
+          # to it raise +Ractor::IsolationError+. From non-main Ractors we
+          # bypass the cache and recompute per call from the (now-shareable)
+          # +attribute_method_patterns+ array. Trade-off: this drops the
+          # documented ~10% win for non-main Ractors. Profile if hot.
+          if Ractor.main?
+            attribute_method_patterns_cache.compute_if_absent(method_name) do
+              attribute_method_patterns.filter_map { |pattern| pattern.match(method_name) }
+            end
+          else
             attribute_method_patterns.filter_map { |pattern| pattern.match(method_name) }
           end
         end

@@ -64,7 +64,16 @@ module ActiveRecord
 
         module ClassMethods
           ID_ATTRIBUTE_METHODS = %w(id id= id? id_before_type_cast id_was id_in_database id_for_database).to_set
-          PRIMARY_KEY_NOT_SET = BasicObject.new
+          # Sentinel for "primary key not yet resolved". Changed from
+          # +BasicObject.new+ (upstream) to +Object.new.freeze+ so the
+          # sentinel can cross Ractors: +BasicObject+ lacks +Kernel#freeze+
+          # and so cannot be made shareable, which means class ivars
+          # holding a +BasicObject.new+ raise +Ractor::IsolationError+ on
+          # non-main reads. Only object-identity (+equal?+) matters for
+          # this constant — its other +Object+-introduced methods
+          # (+==+, +is_a?+, etc.) are unused. Consumers of this sentinel
+          # are confined to this file. # :nodoc:
+          PRIMARY_KEY_NOT_SET = Object.new.freeze
 
           def instance_method_already_implemented?(method_name)
             super || primary_key && ID_ATTRIBUTE_METHODS.include?(method_name)

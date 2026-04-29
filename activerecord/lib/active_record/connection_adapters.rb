@@ -123,3 +123,4 @@ end
 
 # Eager-required (not autoloaded): non-main Ractors read this at boot, see the stub's docstring.
 require "active_record/connection_adapters/ractor_connection_handler"
+require "active_record/connection_adapters/ractor_query_dispatch"

@@ -395,6 +395,7 @@ module ActiveRecord
 
       # Returns a string like 'Post(id:integer, title:string, body:text)'
       def inspect # :nodoc:
+        return @__cached_inspect if defined?(@__cached_inspect) && @__cached_inspect
         if self == Base || singleton_class?
           super
         elsif abstract_class?
@@ -407,6 +408,22 @@ module ActiveRecord
         else
           "#{super}(Table doesn't exist)"
         end
+      end
+
+      # Eagerly compute and cache +inspect+'s output so non-main Ractors can
+      # read the formatted class description without traversing
+      # +table_exists?+ / +schema_cache+ / +connection_pool+ (which would
+      # raise on the +RactorConnectionHandler+ stub). The schema does not
+      # change at runtime, so the cached value is correct for the lifetime
+      # of the process. Only caches the +table_exists?+ branch — abstract /
+      # +Base+ / unloaded-schema branches are not reached from request
+      # Ractors and we don't want to freeze a "call load_schema" hint.
+      def make_inspect_shareable! # :nodoc:
+        return if defined?(@__cached_inspect) && @__cached_inspect
+        return if self == Base || singleton_class? || abstract_class?
+        return unless schema_loaded? || connected?
+        return unless table_exists?
+        @__cached_inspect = Ractor.make_shareable(inspect.dup)
       end
 
       # Returns an instance of +Arel::Table+ loaded with the current table name.

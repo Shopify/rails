@@ -225,6 +225,14 @@ module ActiveRecord
       super
     end
 
+    # Freeze in place and return a Ractor-shareable form of self. Used by
+    # ActiveRecord::ConnectionAdapters::RactorQueryDispatch to hand a result
+    # built on the main Ractor back to a non-main Ractor.
+    def make_shareable! # :nodoc:
+      freeze
+      Ractor.make_shareable(self)
+    end
+
     def column_indexes # :nodoc:
       @column_indexes ||= begin
         index = 0

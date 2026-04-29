@@ -1168,6 +1168,18 @@ module ActiveRecord
     #
     #   ASYNC Post Load (0.0ms) (db time 2ms)  SELECT "posts".* FROM "posts" LIMIT 100
     def load_async
+      # Async queries from a non-main Ractor are not yet supported. Raise
+      # an explicit +NotImplementedError+ here so callers see the real
+      # limitation rather than the misleading "pass async: false" hint
+      # that +exec_main_query+ would surface (the user never asked for
+      # async — +load_async+ chose it internally based on transaction
+      # state).
+      unless Ractor.main?
+        raise NotImplementedError,
+          "ActiveRecord#load_async from a non-main Ractor is not yet supported. " \
+          "Use #load (synchronous) on non-main Ractors, or run #load_async on the main Ractor."
+      end
+
       with_connection do |c|
         return load if !c.async_enabled?
 
@@ -1469,6 +1481,12 @@ module ActiveRecord
           if where_clause.contradiction?
             [].freeze
           elsif eager_loading?
+            unless Ractor.main?
+              raise NotImplementedError,
+                "ActiveRecord eager-loading from a non-main Ractor is not yet " \
+                "supported (REIMPL-006). Build the relation without #includes / " \
+                "#preload / #eager_load or run the query on the main Ractor."
+            end
             model.with_connection do |c|
               apply_join_dependency do |relation, join_dependency|
                 if relation.null_relation?
@@ -1481,8 +1499,19 @@ module ActiveRecord
               end
             end
           else
-            model.with_connection do |c|
-              model._query_by_sql(c, arel, async: async)
+            if Ractor.main?
+              model.with_connection do |c|
+                model._query_by_sql(c, arel, async: async)
+              end
+            else
+              if async
+                raise NotImplementedError,
+                  "ActiveRecord async queries from a non-main Ractor are not yet " \
+                  "supported. Pass async: false."
+              end
+              ActiveRecord::ConnectionAdapters::RactorQueryDispatch.select_all(
+                model, arel, "#{model.name} Load"
+              )
             end
           end
         end

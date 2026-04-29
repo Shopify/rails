@@ -116,6 +116,24 @@ module ActiveModel
           "#{collection}/#{element}"
         end
       end
+
+      # Force-resolves +@_to_partial_path+ and makes it shareable so that
+      # +_to_partial_path+ / +to_partial_path+ can be invoked from a non-main
+      # Ractor without raising +Ractor::IsolationError+ on the lazy class ivar
+      # write. Used during view partial-path resolution
+      # (+<%= render @collection %>+). The interpolated +"#{collection}/#{element}"+
+      # String is already structurally shareable; we just need it deep-frozen.
+      def make_to_partial_path_shareable! # :nodoc:
+        return if defined?(@_to_partial_path) && @_to_partial_path && Ractor.shareable?(@_to_partial_path)
+        # Skip +ActiveRecord::Base+ itself: it's the framework root and its
+        # +_to_partial_path+ ("active_record/bases/base") is meaningless.
+        # Guarded with +defined?+ so plain ActiveModel users (no ActiveRecord
+        # loaded) are unaffected and we don't introduce a load-order
+        # coupling on the AR constant.
+        return if defined?(ActiveRecord::Base) && self == ActiveRecord::Base
+        _to_partial_path
+        @_to_partial_path = Ractor.make_shareable(@_to_partial_path) if @_to_partial_path
+      end
     end
   end
 end

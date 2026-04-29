@@ -454,6 +454,37 @@ module ActiveRecord
         end
       end
 
+      # Force-resolves the lazy class instance variables that Active Record
+      # populates the first time a model is queried (+@columns_hash+,
+      # +@columns+, +@attributes_builder+, +@symbol_column_to_string_name_hash+,
+      # +@content_columns+) and makes each shareable so that the post-query
+      # +instantiate_instance_of+ / +columns_hash+ / +column_names+ reads from
+      # non-main Ractors do not raise +Ractor::IsolationError+.
+      #
+      # The schema is loaded at boot on the main Ractor; once populated these
+      # values are stable for the lifetime of the process. Idempotent.
+      def make_model_schema_shareable! # :nodoc:
+        # Warm and freeze the schema-loaded ivars. +load_schema!+ is what
+        # populates +@columns_hash+; calling +columns_hash+ triggers it.
+        columns_hash
+        @columns_hash = Ractor.make_shareable(@columns_hash, copy: true) if @columns_hash && !Ractor.shareable?(@columns_hash)
+        # +columns+ already dups+freezes (line 463) but we need a deep-shareable form.
+        columns
+        @columns = Ractor.make_shareable(@columns, copy: true) if @columns && !Ractor.shareable?(@columns)
+        # +attributes_builder+ holds an +AttributeSet::Builder+ that references
+        # +attribute_types+ + a defaults +AttributeSet+. Both upstream are
+        # already shareable via +make_attribute_registration_shareable!+, so
+        # this should deep-freeze cleanly.
+        attributes_builder
+        @attributes_builder = Ractor.make_shareable(@attributes_builder, copy: true) if @attributes_builder && !Ractor.shareable?(@attributes_builder)
+        # +symbol_column_to_string_name_hash+ and +content_columns+ are
+        # downstream of +columns+ and +column_names+; warm and freeze.
+        symbol_column_to_string(nil)
+        @symbol_column_to_string_name_hash = Ractor.make_shareable(@symbol_column_to_string_name_hash, copy: true) if @symbol_column_to_string_name_hash && !Ractor.shareable?(@symbol_column_to_string_name_hash)
+        content_columns
+        @content_columns = Ractor.make_shareable(@content_columns, copy: true) if @content_columns && !Ractor.shareable?(@content_columns)
+      end
+
       def columns_hash # :nodoc:
         load_schema unless @columns_hash
         @columns_hash

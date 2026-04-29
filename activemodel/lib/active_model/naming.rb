@@ -275,6 +275,24 @@ module ActiveModel
       end
     end
 
+    # Force-resolves +@_model_name+ and makes it shareable so that
+    # +model_name+ can be invoked from a non-main Ractor without raising
+    # +Ractor::IsolationError+ on the class instance variable read. Used
+    # by partial path resolution during view rendering. +ActiveModel::Name+
+    # holds a +@klass+ back-reference, so we use +copy: true+ to avoid
+    # entangling the class's other lazy ivars into the deep-freeze.
+    def make_model_name_shareable! # :nodoc:
+      return if defined?(@_model_name) && @_model_name && Ractor.shareable?(@_model_name)
+      # Skip +ActiveRecord::Base+ itself: it's the framework root and its
+      # +model_name+ ("ActiveRecord::Base") is meaningless. Guarded with
+      # +defined?+ so plain ActiveModel users (no ActiveRecord loaded) are
+      # unaffected and we don't introduce a load-order coupling on the AR
+      # constant.
+      return if defined?(ActiveRecord::Base) && self == ActiveRecord::Base
+      model_name
+      @_model_name = Ractor.make_shareable(@_model_name, copy: true) if @_model_name
+    end
+
     # Returns the plural class name of a record or class.
     #
     #   ActiveModel::Naming.plural(post)             # => "posts"

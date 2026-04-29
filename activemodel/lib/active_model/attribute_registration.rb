@@ -45,6 +45,17 @@ module ActiveModel
         end
       end
 
+      # Force-resolves +@default_attributes+ and +@attribute_types+ and makes
+      # both shareable so that +attribute_types+ / +_default_attributes+ /
+      # +type_for_attribute+ can be invoked from non-main Ractors without
+      # raising +Ractor::IsolationError+ on the class instance variable read.
+      # Schema is loaded at boot on the main Ractor, so the resolved values are
+      # correct for the lifetime of the process. Idempotent.
+      def make_attribute_registration_shareable! # :nodoc:
+        @default_attributes = Ractor.make_shareable(_default_attributes, copy: true) unless defined?(@default_attributes) && @default_attributes && Ractor.shareable?(@default_attributes)
+        @attribute_types = Ractor.make_shareable(attribute_types, copy: true) unless defined?(@attribute_types) && @attribute_types && Ractor.shareable?(@attribute_types)
+      end
+
       def type_for_attribute(attribute_name, &block)
         attribute_name = resolve_attribute_name(attribute_name)
 

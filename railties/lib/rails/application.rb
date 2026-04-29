@@ -1044,10 +1044,77 @@ module Rails
         # back-reference to the AR class, so we use +copy: true+ to avoid
         # entangling the AR class's other lazy ivars (addressed in their
         # own leaves) into the deep-freeze.
+        # +Core::ClassMethods#inspect+ traverses +table_exists?+ ->
+        # +schema_cache+ -> +connection_pool+, which hits the
+        # +RactorConnectionHandler+ stub from non-main Ractors (e.g. from
+        # log subscriber / instrumentation payload formatting during view
+        # rendering). Pre-compute and cache the +inspect+ string at boot;
+        # the schema does not change at runtime so the cached value is
+        # safe for the process lifetime.
+        # +ActiveModel::AttributeRegistration::ClassMethods#_default_attributes+
+        # and +#attribute_types+ lazily memoize +@default_attributes+ and
+        # +@attribute_types+ on first read for each AR descendant. The hot path
+        # is +Relation#instantiate_records+ -> +Querying#_load_from_sql+ ->
+        # +attribute_types+, which raises +Ractor::IsolationError+ on the class
+        # ivar read from non-main Ractors. Force-resolve and snapshot a
+        # shareable copy of both at boot. The +AttributeSet+ and types Hash
+        # may hold back-references to the AR class through type objects, so
+        # we use +copy: true+ (matching the +make_arel_table_shareable!+
+        # precedent) to avoid entangling the AR class itself in the
+        # deep-freeze.
+        # Order is load-bearing here. The schema/attribute warmers
+        # (+make_attribute_registration_shareable!+ and
+        # +make_model_schema_shareable!+) replace +@attribute_types+ and the
+        # schema-derived ivars with deep-copied, shareable graphs. Run those
+        # FIRST so that +make_inspect_shareable!+'s cached +inspect+ string
+        # is built from the same +@attribute_types+ the class will keep
+        # afterwards. If the inspect cache were built before the schema
+        # warmers, it would reference types from a Hash the class no longer
+        # holds — currently harmless (it's just a String) but a latent bug
+        # for any future inspect of schema-derived state.
         [ActiveRecord::Base, *ActiveRecord::Base.descendants].each do |ar_class|
           next if ar_class.abstract_class?
           ar_class.make_arel_table_shareable!
           ar_class.make_predicate_builder_shareable!
+          # Force-resolving +@default_attributes+ / +@attribute_types+
+          # requires +columns_hash+ -> +load_schema!+, so skip cases where
+          # the schema can't be resolved at boot:
+          #   - +ActiveRecord::Base+ itself has no table.
+          #   - Classes whose backing table doesn't exist on the connection
+          #     in use (e.g. +SolidCache::Entry+ when its dedicated database
+          #     hasn't been migrated into the primary).
+          # Mirrors the +table_exists?+ guard in +make_inspect_shareable!+.
+          if ar_class != ActiveRecord::Base && ar_class.table_exists?
+            ar_class.make_attribute_registration_shareable!
+            # +ModelSchema::ClassMethods+ memoizes +@columns_hash+,
+            # +@columns+, +@attributes_builder+,
+            # +@symbol_column_to_string_name_hash+, and +@content_columns+
+            # lazily on first query. The hot path is +_load_from_sql+ ->
+            # +instantiate_instance_of+ -> +attributes_builder+, which
+            # raises +Ractor::IsolationError+ on the class ivar read from
+            # non-main Ractors. Force-resolve and snapshot a shareable copy
+            # at boot.
+            ar_class.make_model_schema_shareable!
+          end
+          # Now that +@attribute_types+ is the deep-copied shareable graph
+          # the class will keep, cache +inspect+ off of it.
+          ar_class.make_inspect_shareable!
+          # +ActiveModel::Naming#model_name+ memoizes +@_model_name+ on
+          # first read. View partial-path resolution (+to_partial_path+ ->
+          # +_to_partial_path+ -> +model_name+) reads it from non-main
+          # Ractors during +<%= render @collection %>+, which raises
+          # +Ractor::IsolationError+ until the cached +ActiveModel::Name+
+          # instance is shareable. +copy: true+ avoids entangling the AR
+          # class via the +ActiveModel::Name+'s +@klass+ back-reference.
+          ar_class.make_model_name_shareable!
+          # +ActiveModel::Conversion::ClassMethods#_to_partial_path+ memoizes
+          # +@_to_partial_path+ on first read for each AR descendant. View
+          # partial-path resolution reads it from non-main Ractors during
+          # +<%= render @collection %>+, which raises +Ractor::IsolationError+
+          # on the lazy class ivar write until the value is pre-resolved and
+          # shareable. The result is a plain String like +"posts/post"+; just
+          # warm and freeze.
+          ar_class.make_to_partial_path_shareable!
         end
         # +ActiveRecord::Relation::WhereClause.empty+ memoizes the singleton
         # empty +WhereClause+ in the +@empty+ class ivar via +||=+.
