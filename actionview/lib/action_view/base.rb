@@ -160,7 +160,10 @@ module ActionView # :nodoc:
     include Helpers, ::ERB::Util, Context
 
     # Specify the proc used to decorate input tags that refer to attributes with errors.
-    cattr_accessor :field_error_proc, default: Proc.new { |html_tag, instance| content_tag :div, html_tag, class: "field_with_errors" }
+    # Made shareable so non-main Ractors can read the +@@field_error_proc+ class
+    # variable. The proc captures no outer locals; +content_tag+ is resolved via
+    # +instance_exec+ on the template at call time, so isolation is sound.
+    cattr_accessor :field_error_proc, default: Ractor.make_shareable(Proc.new { |html_tag, instance| content_tag :div, html_tag, class: "field_with_errors" })
 
     # How to complete the streaming when an exception occurs.
     # This is our best guess: first try to close the attribute, then the tag.
