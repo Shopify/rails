@@ -150,6 +150,38 @@ module ActiveRecord
         end
       end
 
+      # Adapter-level metadata constant (SQLite ~64, Postgres 63).
+      # Called once per +AliasTracker.create+ via
+      # +Association#scope+ / +AssociationScope.scope+, which on the
+      # destroy path drives +dependent: :destroy+ cascades. Per-call
+      # dispatch is fine at this rate; consider boot-caching if it
+      # ever becomes a hotspot.
+      def table_alias_length
+        Ractor::Dispatch.main.run do
+          RactorConnectionProxy.dispatched_with_sanitized_errors do
+            ActiveRecord::Base.with_connection do |c|
+              c.table_alias_length
+            end
+          end
+        end
+      end
+
+      # Adapter-level SQL identifier quoting. Per-call because the
+      # input (a String table name) is per-call; result is a frozen
+      # String. Used by +AliasTracker.initial_count_for+ when the
+      # join list contains +Arel::Nodes::StringJoin+ entries.
+      def quote_table_name(name)
+        name_dump = name.frozen? ? name : name.dup.freeze
+        Ractor::Dispatch.main.run do
+          RactorConnectionProxy.dispatched_with_sanitized_errors do
+            ActiveRecord::Base.with_connection do |c|
+              result = c.quote_table_name(name_dump)
+              Ractor.make_shareable(result, copy: true)
+            end
+          end
+        end
+      end
+
       # AR exceptions raised by the adapter (e.g. +StatementInvalid+,
       # +RecordNotUnique+) carry a +@connection_pool+ reference whose
       # graph includes +MonitorMixin+ state and is not shareable. If we
