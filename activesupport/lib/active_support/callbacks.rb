@@ -648,14 +648,12 @@ module ActiveSupport
         # chain can be deeply frozen and shared across Ractors. After this
         # call the +compile+ paths short-circuit on the cached
         # +@all_callbacks+ / +@single_callbacks+ values and never reach the
-        # synchronization block.
-        #
-        # Idempotent: a +CallbackChain+ may be reachable from multiple
-        # classes' +__callbacks+ Hashes (because +class_attribute+'s inherited
-        # hook copies the Hash but not the chain values). Once the receiver
-        # is frozen, subsequent invocations short-circuit so we don't try to
-        # mutate +@mutex+ on a frozen object.
-        def make_shareable!
+        # synchronization block. Hooked on +freeze+ rather than
+        # +make_shareable!+ because the +Ractor.make_shareable+ walker
+        # recurses through child objects via +freeze+, not the AS helper;
+        # the +frozen?+ guard also makes it idempotent when the same chain
+        # is reachable from multiple +__callbacks+ Hashes.
+        def freeze
           return self if frozen?
           compile(nil)
           CALLBACK_FILTER_TYPES.each { |t| compile(t) }
