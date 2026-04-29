@@ -18,10 +18,21 @@ module ActionView
         end
 
         class << self
-          def field_type
-            @field_type ||= name.split("::").last.sub("Field", "").downcase
+          attr_reader :field_type
+
+          def inherited(subclass)
+            super
+            # Anonymous subclasses (Class.new(TextField)) have no name; skip the
+            # hook so we don't NoMethodError on nil#split. Their #field_type
+            # reader will return nil, matching pre-Ractor-safety behavior for
+            # nameless classes.
+            if subclass.name
+              subclass.instance_variable_set(:@field_type, subclass.name.split("::").last.sub("Field", "").downcase.freeze)
+            end
           end
         end
+
+        @field_type = "text"
 
         private
           def field_type

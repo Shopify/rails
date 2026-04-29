@@ -9,11 +9,10 @@ module ActionView
           super
         end
 
-        class << self
-          def field_type
-            @field_type ||= "datetime-local"
-          end
-        end
+        # Load-bearing: the TextField#inherited hook would derive "datetimelocal"
+        # (no hyphen) from the class name. Override explicitly to preserve the
+        # HTML5 input type spelling.
+        @field_type = "datetime-local"
 
         private
           def format_datetime(value)
