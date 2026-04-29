@@ -163,6 +163,27 @@ module ActiveRecord
       def collection_cache_key(collection = all, timestamp_column = :updated_at) # :nodoc:
         collection.send(:compute_cache_key, timestamp_column)
       end
+
+      # Returns the connection's +default_timezone+ Symbol cached on the
+      # class, avoiding a +with_connection+ checkout for what is effectively
+      # static configuration. Resolves the FIXME at +can_use_fast_cache_version?+
+      # ("checking out a connection for this is wasteful"). Set during
+      # +Application#ractorize!+ via +make_cached_connection_default_timezone_shareable!+;
+      # on the main Ractor we resolve lazily as a fallback.
+      def cached_connection_default_timezone
+        return @cached_connection_default_timezone if defined?(@cached_connection_default_timezone) && @cached_connection_default_timezone
+        return ActiveRecord.default_timezone unless Ractor.main?
+        @cached_connection_default_timezone = with_connection(&:default_timezone)
+      end
+
+      # Force-resolves +@cached_connection_default_timezone+ at boot so
+      # +can_use_fast_cache_version?+ doesn't do a +with_connection+ checkout
+      # from non-main Ractors during cache-version computation. The result
+      # is a Symbol (+:utc+ or +:local+) which is already shareable.
+      def make_cached_connection_default_timezone_shareable! # :nodoc:
+        return if defined?(@cached_connection_default_timezone) && @cached_connection_default_timezone
+        @cached_connection_default_timezone = with_connection(&:default_timezone)
+      end
     end
 
     private
@@ -178,10 +199,7 @@ module ActiveRecord
       def can_use_fast_cache_version?(timestamp)
         timestamp.is_a?(String) &&
           cache_timestamp_format == :usec &&
-          # FIXME: checking out a connection for this is wasteful
-          # we should store/cache this information in the schema cache
-          # or similar.
-          self.class.with_connection(&:default_timezone) == :utc &&
+          self.class.cached_connection_default_timezone == :utc &&
           !updated_at_came_from_user?
       end
 

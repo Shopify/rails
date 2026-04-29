@@ -9,6 +9,20 @@ class Time
   class << self
     attr_accessor :zone_default
 
+    # Force-resolves +@zone_default+ on the +Time+ singleton class and
+    # makes it shareable so non-main Ractors can read it through
+    # +Time.zone+ (e.g. from +ActiveRecord+'s +TimeZoneConverter#deserialize+).
+    # The value is populated at boot by +ActiveSupport::Railtie+'s
+    # +active_support.initialize_time_zone+ initializer; here we just
+    # deep-freeze it. +ActiveSupport::TimeZone+ holds a +@tzinfo+ reference
+    # into the TZInfo gem's internal cache, so we use +copy: true+ to avoid
+    # entangling that internal state in the deep-freeze.
+    def make_zone_default_shareable! # :nodoc:
+      return if @zone_default.nil?
+      return if Ractor.shareable?(@zone_default)
+      @zone_default = Ractor.make_shareable(@zone_default, copy: true)
+    end
+
     # Returns the TimeZone for the current request, if this has been set (via Time.zone=).
     # If <tt>Time.zone</tt> has not been set for the current request, returns the TimeZone specified in <tt>config.time_zone</tt>.
     def zone

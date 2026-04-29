@@ -167,17 +167,25 @@ module ActionDispatch
           path_name = :"#{name}_path"
           url_name = :"#{name}_url"
 
-          @path_helpers_module.module_eval do
-            redefine_method(path_name) do |*args|
-              helper.call(self, args, true)
-            end
-          end
+          # Store the helper as a module ivar on both modules so the
+          # generated methods can access it without closures
+          # (closures prevent methods from being called in non-main Ractors).
+          @path_helpers_module.instance_variable_set(:"@_custom_url_helper_#{name}", helper)
+          @url_helpers_module.instance_variable_set(:"@_custom_url_helper_#{name}", helper)
 
-          @url_helpers_module.module_eval do
-            redefine_method(url_name) do |*args|
-              helper.call(self, args, false)
+          @path_helpers_module.module_eval <<~RUBY, __FILE__, __LINE__ + 1
+            def #{path_name}(*args)
+              mod = self.class.ancestors.find { |m| m.instance_variable_defined?(:@_custom_url_helper_#{name}) }
+              mod.instance_variable_get(:@_custom_url_helper_#{name}).call(self, args, true)
             end
-          end
+          RUBY
+
+          @url_helpers_module.module_eval <<~RUBY, __FILE__, __LINE__ + 1
+            def #{url_name}(*args)
+              mod = self.class.ancestors.find { |m| m.instance_variable_defined?(:@_custom_url_helper_#{name}) }
+              mod.instance_variable_get(:@_custom_url_helper_#{name}).call(self, args, false)
+            end
+          RUBY
 
           @path_helpers << path_name
           @url_helpers << url_name
@@ -331,17 +339,26 @@ module ActionDispatch
           #     foo_url(bar, baz, bang, sort_by: 'baz')
           #
           def define_url_helper(mod, name, helper, url_strategy)
-            mod.define_method(name) do |*args|
-              last = args.last
-              options = \
-                case last
-                when Hash
-                  args.pop
-                when ActionController::Parameters
-                  args.pop.to_h
-                end
-              helper.call(self, name, args, options, url_strategy)
-            end
+            # Store the helper and strategy as module ivars so the
+            # generated method can access them without closures
+            # (closures prevent methods from being called in non-main Ractors).
+            mod.instance_variable_set(:"@_url_helper_#{name}", helper)
+            mod.instance_variable_set(:"@_url_strategy_#{name}", url_strategy)
+            mod.module_eval <<~RUBY, __FILE__, __LINE__ + 1
+              def #{name}(*args)
+                last = args.last
+                options = \\
+                  case last
+                  when Hash
+                    args.pop
+                  when ActionController::Parameters
+                    args.pop.to_h
+                  end
+                mod = self.class.ancestors.find { |m| m.instance_variable_defined?(:@_url_helper_#{name}) }
+                mod.instance_variable_get(:@_url_helper_#{name}).call(self, :#{name}, args, options,
+                  mod.instance_variable_get(:@_url_strategy_#{name}))
+              end
+            RUBY
           end
       end
 
@@ -616,20 +633,47 @@ module ActionDispatch
             extend path_helpers
           end
 
+          # Store the route set and supports_path as module instance
+          # variables so methods can access them without closures
+          # (closures prevent methods from being called in non-main Ractors).
+          instance_variable_set(:@_url_helpers_routes, routes)
+          instance_variable_set(:@_url_helpers_supports_path, supports_path)
+
           # plus a singleton class method called _routes ...
           included do
-            redefine_singleton_method(:_routes) { routes }
+            class_eval <<~RUBY, __FILE__, __LINE__ + 1
+              def self._routes
+                ancestors.each do |mod|
+                  if mod.instance_variable_defined?(:@_url_helpers_routes)
+                    return mod.instance_variable_get(:@_url_helpers_routes)
+                  end
+                end
+                nil
+              end
+            RUBY
           end
 
-          # And an instance method _routes. Note that UrlFor (included in this module) add
-          # extra conveniences for working with @_routes.
-          define_method(:_routes) { @_routes || routes }
+          # And an instance method _routes.
+          module_eval <<~RUBY, __FILE__, __LINE__ + 1
+            def _routes
+              return @_routes if @_routes
+              self.class.ancestors.each do |mod|
+                if mod.instance_variable_defined?(:@_url_helpers_routes)
+                  return mod.instance_variable_get(:@_url_helpers_routes)
+                end
+              end
+              nil
+            end
 
-          define_method(:_generate_paths_by_default) do
-            supports_path
-          end
-
-          private :_generate_paths_by_default
+            private def _generate_paths_by_default
+              self.class.ancestors.each do |mod|
+                if mod.instance_variable_defined?(:@_url_helpers_supports_path)
+                  return mod.instance_variable_get(:@_url_helpers_supports_path)
+                end
+              end
+              false
+            end
+          RUBY
 
           # If the module is included more than once (for example, in a subclass of an
           # ancestor that includes the module), ensure that the `_routes` singleton and

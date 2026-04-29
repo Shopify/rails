@@ -1009,6 +1009,13 @@ module Rails
       # registered +Inflections+ (cascading into +Uncountables+ to warm
       # its lazy +@pattern+ Regexp).
       ActiveSupport::Inflector::Inflections.make_shareable! if defined?(ActiveSupport::Inflector::Inflections)
+      # +Time.zone_default+ is set by +ActiveSupport::Railtie+'s
+      # +active_support.initialize_time_zone+ initializer at boot. +Time.zone+
+      # reads +@zone_default+ from the +Time+ singleton class on every
+      # +ActiveRecord+ +TimeZoneConverter#deserialize+ call (datetime / time
+      # column reads), which raises +Ractor::IsolationError+ from non-main
+      # Ractors until the cached value is shareable. Deep-freeze in place.
+      Time.make_zone_default_shareable!
       # +ActiveSupport::ExecutionContext+ owns the +@after_change_callbacks+
       # module ivar that +ExecutionContext.[]=+ and +ExecutionContext.set+
       # iterate on every per-request +Instrumentation#process_action+ (via
@@ -1113,6 +1120,12 @@ module Rails
             # non-main Ractors. Force-resolve and snapshot a shareable copy
             # at boot.
             ar_class.make_model_schema_shareable!
+            # +Integration#can_use_fast_cache_version?+ reads
+            # +self.class.with_connection(&:default_timezone)+ on every cache_version
+            # computation; from non-main Ractors that hits +RactorConnectionHandler#
+            # retrieve_connection_pool+ which is intentionally unimplemented. Cache the
+            # Symbol on the class at boot so the cache-version path is connection-free.
+            ar_class.make_cached_connection_default_timezone_shareable!
           end
           # Now that +@attribute_types+ is the deep-copied shareable graph
           # the class will keep, cache +inspect+ off of it.

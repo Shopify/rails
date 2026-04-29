@@ -77,7 +77,7 @@ module ActiveSupport
           0x02 => Encoding::UTF_8,
           0x03 => Encoding::BINARY,
           0x04 => Encoding::US_ASCII,
-        }
+        }.freeze
 
         COMPRESSED_FLAG = 0x80
 
@@ -99,7 +99,7 @@ module ActiveSupport
           end
         end
 
-        STRING_DESERIALIZERS = STRING_ENCODINGS.transform_values { |encoding| StringDeserializer.new(encoding) }
+        STRING_DESERIALIZERS = Ractor.make_shareable(STRING_ENCODINGS.transform_values { |encoding| StringDeserializer.new(encoding) })
 
         class LazyEntry < Cache::Entry
           def initialize(serializer, compressor, payload, **options)
