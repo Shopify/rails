@@ -2,6 +2,7 @@
 
 require "zlib"
 require "active_support/core_ext/array/extract_options"
+require "active_support/core_ext/class/attribute"
 require "active_support/core_ext/enumerable"
 require "active_support/core_ext/module/attribute_accessors"
 require "active_support/core_ext/numeric/bytes"
@@ -194,8 +195,8 @@ module ActiveSupport
       # Keys are truncated with the Active Support digest if they exceed the limit.
       MAX_KEY_SIZE = 250
 
-      cattr_accessor :logger, instance_writer: true
-      cattr_accessor :raise_on_invalid_cache_expiration_time, default: false
+      class_attribute :logger, instance_predicate: false
+      class_attribute :raise_on_invalid_cache_expiration_time, instance_predicate: false, default: false
 
       attr_reader :silence, :options
       alias :silence? :silence
@@ -796,6 +797,17 @@ module ActiveSupport
         raise NotImplementedError.new("#{self.class.name} does not support clear")
       end
 
+      # Get the current namespace
+      def namespace
+        @options[:namespace]
+      end
+
+      # Set the current namespace. Note, this will be ignored if custom
+      # options are passed to cache wills with a namespace key.
+      def namespace=(namespace)
+        @options[:namespace] = namespace
+      end
+
       private
         def default_serializer
           case Cache.format_version
@@ -925,7 +937,7 @@ module ActiveSupport
 
         def handle_invalid_expires_in(message)
           error = ArgumentError.new(message)
-          if ActiveSupport::Cache::Store.raise_on_invalid_cache_expiration_time
+          if raise_on_invalid_cache_expiration_time
             raise error
           else
             ActiveSupport.error_reporter&.report(error, handled: true, severity: :warning)
@@ -971,7 +983,7 @@ module ActiveSupport
         end
 
         def expand_and_namespace_key(key, options = nil)
-          str_key = expanded_key(key)
+          str_key = key.class == ::String ? key : expanded_key(key)
           raise(ArgumentError, "key cannot be blank") if !str_key || str_key.empty?
 
           namespace_key str_key, options

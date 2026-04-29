@@ -24,7 +24,7 @@ module ActiveRecord
     # The \SQLite3 adapter works with the sqlite3[https://sparklemotion.github.io/sqlite3-ruby/]
     # driver.
     #
-    # Options:
+    # ==== Options
     #
     # * +:database+ (String): Filesystem path to the database file.
     # * +:statement_limit+ (Integer): Maximum number of prepared statements to cache per database connection. (default: 1000)
@@ -41,7 +41,7 @@ module ActiveRecord
     #
     # There may be other options available specific to the SQLite3 driver. Please read the
     # documentation for
-    # {SQLite::Database.new}[https://sparklemotion.github.io/sqlite3-ruby/SQLite3/Database.html#method-c-new]
+    # {SQLite3::Database.new}[https://sparklemotion.github.io/sqlite3-ruby/SQLite3/Database.html#method-c-new]
     #
     class SQLite3Adapter < AbstractAdapter
       ADAPTER_NAME = "SQLite"
@@ -69,6 +69,33 @@ module ActiveRecord
 
         def native_database_types # :nodoc:
           NATIVE_DATABASE_TYPES
+        end
+
+        # Returns a filesystem path to the database.
+        #
+        # The configuration's :database value may be a (slightly nonstandard) SQLite URI, so this
+        # method will resolve those URIs to a string path.
+        #
+        # If Rails.root is available, this is guaranteed to be an absolute path.
+        #
+        # See https://www.sqlite.org/uri.html
+        def resolve_path(database, root: nil)
+          database = database.to_s
+          root ||= defined?(Rails.root) ? Rails.root : nil
+
+          path = if database.start_with?("file:/")
+            URI.parse(database).path
+          elsif database.start_with?("file:")
+            URI.parse(database.split("?").first).opaque
+          else
+            database
+          end
+
+          if root.present?
+            File.expand_path(path, root)
+          else
+            path
+          end
         end
       end
 
@@ -135,11 +162,10 @@ module ActiveRecord
           raise ArgumentError, "No database file specified. Missing argument: database"
         when ":memory:"
           @memory_database = true
-        when /\Afile:/
         else
-          # Otherwise we have a path relative to Rails.root
-          @config[:database] = File.expand_path(@config[:database], Rails.root) if defined?(Rails.root)
-          dirname = File.dirname(@config[:database])
+          database_path = SQLite3Adapter.resolve_path(@config[:database])
+          @config[:database] = database_path unless @config[:database].to_s.start_with?("file:")
+          dirname = File.dirname(database_path)
           unless File.directory?(dirname)
             begin
               FileUtils.mkdir_p(dirname)
@@ -149,7 +175,6 @@ module ActiveRecord
           end
         end
 
-        @last_affected_rows = nil
         @previous_read_uncommitted = nil
         @config[:strict] = ConnectionAdapters::SQLite3Adapter.strict_strings_by_default unless @config.key?(:strict)
 
@@ -282,8 +307,8 @@ module ActiveRecord
       # REFERENTIAL INTEGRITY ====================================
 
       def disable_referential_integrity # :nodoc:
-        old_foreign_keys = query_value("PRAGMA foreign_keys")
-        old_defer_foreign_keys = query_value("PRAGMA defer_foreign_keys")
+        old_foreign_keys = query_value("PRAGMA foreign_keys", nil)
+        old_defer_foreign_keys = query_value("PRAGMA defer_foreign_keys", nil)
 
         begin
           execute("PRAGMA defer_foreign_keys = ON")
@@ -320,7 +345,7 @@ module ActiveRecord
         exec_query "DROP INDEX #{quote_column_name(index_name)}"
       end
 
-      VIRTUAL_TABLE_REGEX = /USING\s+(\w+)\s*\((.+)\)/i
+      VIRTUAL_TABLE_REGEX = /USING\s+(\w+)\s*\((.*)\)/i
 
       # Returns a list of defined virtual tables
       def virtual_tables
@@ -328,8 +353,7 @@ module ActiveRecord
           SELECT name, sql FROM sqlite_master WHERE sql LIKE 'CREATE VIRTUAL %';
         SQL
 
-        exec_query(query, "SCHEMA").cast_values.each_with_object({}) do |row, memo|
-          table_name, sql = row[0], row[1]
+        query_rows(query).each_with_object({}) do |(table_name, sql), memo|
           _, module_name, arguments = sql.match(VIRTUAL_TABLE_REGEX).to_a
           memo[table_name] = [module_name, arguments]
         end.to_a
@@ -338,7 +362,7 @@ module ActiveRecord
       # Creates a virtual table
       #
       # Example:
-      #   create_virtual_table :emails, :fts5, ['sender', 'title',' body']
+      #   create_virtual_table :emails, :fts5, ['sender', 'title', 'body']
       def create_virtual_table(table_name, module_name, values)
         exec_query "CREATE VIRTUAL TABLE IF NOT EXISTS #{table_name} USING #{module_name} (#{values.join(", ")})"
       end
@@ -404,7 +428,7 @@ module ActiveRecord
         validate_change_column_null_argument!(null)
 
         unless null || default.nil?
-          internal_exec_query("UPDATE #{quote_table_name(table_name)} SET #{quote_column_name(column_name)}=#{quote(default)} WHERE #{quote_column_name(column_name)} IS NULL")
+          query_command("UPDATE #{quote_table_name(table_name)} SET #{quote_column_name(column_name)}=#{quote(default)} WHERE #{quote_column_name(column_name)} IS NULL")
         end
         alter_table(table_name) do |definition|
           definition[column_name].null = null
@@ -445,7 +469,7 @@ module ActiveRecord
       DEFERRABLE_REGEX = /DEFERRABLE INITIALLY (\w+)/
       def foreign_keys(table_name)
         # SQLite returns 1 row for each column of composite foreign keys.
-        fk_info = internal_exec_query("PRAGMA foreign_key_list(#{quote(table_name)})", "SCHEMA")
+        fk_info = query_all("PRAGMA foreign_key_list(#{quote(table_name)})")
         # Deferred or immediate foreign keys can only be seen in the CREATE TABLE sql
         fk_defs = table_structure_sql(table_name)
                     .select do |column_string|
@@ -503,7 +527,7 @@ module ActiveRecord
       end
 
       def get_database_version # :nodoc:
-        SQLite3Adapter::Version.new(query_value("SELECT sqlite_version(*)", "SCHEMA"))
+        SQLite3Adapter::Version.new(query_value("SELECT sqlite_version(*)"))
       end
 
       def check_version # :nodoc:
@@ -614,8 +638,8 @@ module ActiveRecord
             yield definition if block_given?
           end
 
-          transaction do
-            disable_referential_integrity do
+          disable_referential_integrity do
+            transaction do
               move_table(table_name, altered_table_name, options.merge(temporary: true))
               move_table(altered_table_name, table_name, &caller)
             end
@@ -646,18 +670,26 @@ module ActiveRecord
                 limit: column.limit,
                 precision: column.precision,
                 scale: column.scale,
-                null: column.null,
                 collation: column.collation,
                 primary_key: column_name == from_primary_key
               }
+
+              # column.null is true unless there is an explicit NOT NULL
+              # constraint:
+              #
+              #   // The PK gets rowids, but column.null is technically true.
+              #   CREATE TABLE foo (id INTEGER PRIMARY KEY)
+              #
+              # We always add a NOT NULL constraint for PKs, and `null: true` is
+              # invalid for them. That is why we skip in that case.
+              column_options[:null] = column.null unless column_name == from_primary_key
 
               if column.virtual?
                 column_options[:as] = column.default_function
                 column_options[:stored] = column.virtual_stored?
                 column_options[:type] = column.type
               elsif column.has_default?
-                # TODO: Remove fetch_cast_type and the need for connection after we release 8.1.
-                default = column.fetch_cast_type(self).deserialize(column.default)
+                default = column.cast_type.deserialize(column.default)
                 default = -> { column.default_function } if default.nil?
 
                 unless column.auto_increment?
@@ -716,7 +748,7 @@ module ActiveRecord
           quoted_columns = columns.map { |col| quote_column_name(col) } * ","
           quoted_from_columns = from_columns_to_copy.map { |col| quote_column_name(col) } * ","
 
-          internal_exec_query("INSERT INTO #{quote_table_name(to)} (#{quoted_columns})
+          query_command("INSERT INTO #{quote_table_name(to)} (#{quoted_columns})
                      SELECT #{quoted_from_columns} FROM #{quote_table_name(from)}")
         end
 
@@ -731,6 +763,8 @@ module ActiveRecord
             NotNullViolation.new(message, sql: sql, binds: binds, connection_pool: @pool)
           elsif exception.message.match?(/FOREIGN KEY constraint failed/i)
             InvalidForeignKey.new(message, sql: sql, binds: binds, connection_pool: @pool)
+          elsif exception.message.match?(/CHECK constraint failed: .*/i)
+            CheckViolation.new(message, sql: sql, binds: binds, connection_pool: @pool)
           elsif exception.message.match?(/called on a closed database/i)
             ConnectionNotEstablished.new(exception, connection_pool: @pool)
           elsif exception.is_a?(::SQLite3::BusyException)
@@ -803,7 +837,7 @@ module ActiveRecord
           #                       "password_digest" varchar COLLATE "NOCASE",
           #                       "o_id" integer,
           #                       CONSTRAINT "fk_rails_78146ddd2e" FOREIGN KEY ("o_id") REFERENCES "os" ("id"));
-          result = query_value(sql, "SCHEMA")
+          result = query_value(sql)
 
           return [] unless result
 
@@ -820,9 +854,9 @@ module ActiveRecord
 
         def table_info(table_name)
           if supports_virtual_columns?
-            internal_exec_query("PRAGMA table_xinfo(#{quote_table_name(table_name)})", "SCHEMA", allow_retry: true)
+            query_all("PRAGMA table_xinfo(#{quote_table_name(table_name)})")
           else
-            internal_exec_query("PRAGMA table_info(#{quote_table_name(table_name)})", "SCHEMA", allow_retry: true)
+            query_all("PRAGMA table_info(#{quote_table_name(table_name)})")
           end
         end
 
@@ -849,18 +883,10 @@ module ActiveRecord
         end
 
         def configure_connection
-          if @config[:timeout] && @config[:retries]
-            raise ArgumentError, "Cannot specify both timeout and retries arguments"
-          elsif @config[:timeout]
+          if @config[:timeout]
             timeout = self.class.type_cast_config_to_integer(@config[:timeout])
             raise TypeError, "timeout must be integer, not #{timeout}" unless timeout.is_a?(Integer)
             @raw_connection.busy_handler_timeout = timeout
-          elsif @config[:retries]
-            ActiveRecord.deprecator.warn(<<~MSG)
-              The retries option is deprecated and will be removed in Rails 8.1. Use timeout instead.
-            MSG
-            retries = self.class.type_cast_config_to_integer(@config[:retries])
-            raw_connection.busy_handler { |count| count <= retries }
           end
 
           super

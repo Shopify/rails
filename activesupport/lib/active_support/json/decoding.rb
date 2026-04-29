@@ -1,12 +1,10 @@
 # frozen_string_literal: true
 
-require "active_support/core_ext/module/attribute_accessors"
-require "active_support/core_ext/module/delegation"
 require "json"
 
 module ActiveSupport
   # Look for and parse JSON strings that look like ISO 8601 times.
-  mattr_accessor :parse_json_times
+  singleton_class.attr_accessor :parse_json_times
 
   module JSON
     # matches YAML-formatted dates
@@ -18,9 +16,9 @@ module ActiveSupport
       # See http://www.json.org for more info.
       #
       #   ActiveSupport::JSON.decode("{\"team\":\"rails\",\"players\":\"36\"}")
-      #   => {"team" => "rails", "players" => "36"}
+      #   # => {"team" => "rails", "players" => "36"}
       #   ActiveSupport::JSON.decode("2.39")
-      #   => 2.39
+      #   # => 2.39
       def decode(json, options = {})
         data = ::JSON.parse(json, options)
 

@@ -56,6 +56,8 @@ module Rails
 
       def execute
         puts "Reloading..."
+        executor = Rails.application.executor
+        executor.run!(reset: true) if executor.active?
         Rails.application.reloader.reload!
       end
     end
@@ -87,7 +89,8 @@ module Rails
 
         env = colorized_env
         prompt_prefix = "%N(#{env})"
-        IRB.conf[:IRB_NAME] = @app.name
+        # Respect user's configured irb name.
+        IRB.conf[:IRB_NAME] = @app.name if IRB.conf[:IRB_NAME] == "irb"
 
         IRB.conf[:PROMPT][:RAILS_PROMPT] = {
           PROMPT_I: "#{prompt_prefix}:%03n> ",

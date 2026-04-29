@@ -1,479 +1,374 @@
-*   Enable passing retryable SqlLiterals to `#where`.
+*   Bump the minimum PostgreSQL version to 10.0.
 
-    *Hartley McGuire*
+    As part of this change, `supports_pgcrypto_uuid?` is deprecated because
+    `pgcrypto` provides `gen_random_uuid()` since PostgreSQL 9.4, which is
+    below the new 10.0 minimum.
 
-*   Set default for primary keys in `insert_all`/`upsert_all`.
+    *Yasuo Honda*
 
-    Previously in Postgres, updating and inserting new records in one upsert wasn't possible
-    due to null primary key values. `nil` primary key values passed into `insert_all`/`upsert_all`
-    are now implicitly set to the default insert value specified by adapter.
+*   Let `add_column` raise `ArgumentError` if `:null` is set to a true value
+    when defining a primary key.
 
-    *Jenny Shen*
+    Primary keys get a `NOT NULL` constraint unconditionally. In particular,
+    `null: true` was being ignored, thus not doing what the user specified.
+    We should rather raise to let the user know the call is invalid.
 
-*   Add a load hook `active_record_database_configurations` for `ActiveRecord::DatabaseConfigurations`
+    *Xavier Noria*
 
-    *Mike Dalessio*
+*   Deprecate the `schema_order` option in PostgreSQL database configurations.
 
-*   Use `TRUE` and `FALSE` for SQLite queries with boolean columns.
+    Use `schema_search_path` instead. The `schema_order` alias will be
+    removed in Rails 8.3.
 
-    *Hartley McGuire*
+    *Eileen M. Uchitelle*
 
-*   Bump minimum supported SQLite to 3.23.0.
+*   Deprecate the `strict` option in MySQL database configurations.
 
-    *Hartley McGuire*
+    The `strict` option for MySQL will be removed in Rails 8.3 because it is the default behavior.
 
-*   Allow allocated Active Records to lookup associations.
+    To change the default behavior of `strict`, use `variables: { sql_mode: "..." }` to configure `sql_mode` directly.
 
-    Previously, the association cache isn't setup on allocated record objects, so association
-    lookups will crash. Test frameworks like mocha use allocate to check for stubbable instance
-    methods, which can trigger an association lookup.
 
-    *Gannon McGibbon*
+    `strict: false` can be replaced with `variables: { sql_mode: "" }`, and `strict: :default` can be replaced with `variables: { sql_mode: :default }`.
 
-*   Encryption now supports `support_unencrypted_data: true` being set per-attribute.
+    *Eileen M. Uchitelle*
 
-    Previously this only worked if `ActiveRecord::Encryption.config.support_unencrypted_data == true`.
-    Now, if the global config is turned off, you can still opt in for a specific attribute.
+*   Allow configuring `SET` queriers for the PostgreSQL and MySQL adapters.
+
+    Individual settings can be skipped by setting them to `false` in
+    `database.yml`, which is useful when connecting through a load balancer or
+    proxy that handles configuration:
+
+    PostgreSQL example:
+
+    ```yaml
+    production:
+      adapter: postgresql
+      standard_conforming_strings: false
+      intervalstyle: false
+      min_messages: false
+      schema_search_path: false
+    ```
+
+    MySQL example:
+
+    ```yaml
+    production:
+      adapter: mysql2
+      wait_timeout: false
+      variables:
+        sql_mode: false
+    ```
+
+    Also deprecates `set_standard_conforming_strings` — it is now handled
+    automatically through the consolidated settings hash.
+
+    *Eileen M. Uchitelle*, *Matthew Draper*
+
+*   MySQL error 1046 (`ER_NO_DB_ERROR: No database selected`) is now retryable as a `ConnectionFailed` exception
+
+    *Clay Harmon*
+
+*   Batch SQL statements when creating tables to improve performance.
+
+    *Andrew Novoselac*
+
+*   Support PostgreSQL `RESET` on readonly queries.
 
     ```ruby
-    # ActiveRecord::Encryption.config.support_unencrypted_data = true
-    class User < ActiveRecord::Base
-      encrypts :name, support_unencrypted_data: false # only supports encrypted data
-      encrypts :email # supports encrypted or unencrypted data
+    ActiveRecord::Base.connected_to(role: :reading, prevent_writes: true) do
+      ActiveRecord::Base.with_connection do |c|
+        c.execute("SET statement_timeout = '7s'")
+        # some queries
+        c.execute("RESET statement_timeout")
+        # => no longer raises ActiveRecord::ReadOnlyError
+      end
     end
     ```
 
+    *Francesco Rodriguez*
+
+*   Add MySQL `lock:` option for `add_index`, `remove_index`, and ALTER TABLE
+    column operations (`add_column`, `remove_column`, `change_column`, `rename_column`).
+
+    Also extend `algorithm:` option support to ALTER TABLE column operations on MySQL.
+
+    MySQL supports `ALGORITHM = {DEFAULT|COPY|INPLACE|INSTANT}` and
+    `LOCK = {DEFAULT|NONE|SHARED|EXCLUSIVE}` to control how DDL operations
+    are performed, enabling online schema changes without blocking reads or writes.
+
     ```ruby
-    # ActiveRecord::Encryption.config.support_unencrypted_data = false
-    class User < ActiveRecord::Base
-      encrypts :name, support_unencrypted_data: true # supports encrypted or unencrypted data
-      encrypts :email  # only supports encrypted data
+    add_index :users, :email, algorithm: :inplace, lock: :none
+    remove_index :users, :email, algorithm: :inplace, lock: :none
+    add_column :users, :name, :string, algorithm: :instant, lock: :none
+    change_column :users, :name, :string, null: false, algorithm: :inplace, lock: :none
+    remove_column :users, :name, algorithm: :inplace, lock: :none
+    rename_column :users, :name, :full_name, algorithm: :inplace, lock: :none
+    ```
+
+    *Dominik Darnel*
+
+*   Avoid issuing a `ROLLBACK` statement following `TransactionRollbackError` during `COMMIT`.
+
+    This prevents the unnecessary "WARNING: there is no transaction in progress" log spilled to stderr directly from libpq.
+
+    *Sorah Fukumori*
+
+*   Add `implicit_persistence_transaction` hook for customizing transaction behavior.
+
+    A new protected method `implicit_persistence_transaction` has been added that wraps
+    persistence operations (`save`, `destroy`, `touch`) in a transaction. This method can be
+    overridden in models to customize transaction behavior, such as setting a specific isolation
+    level or skipping transaction creation when one is already open.
+
+    Example skipping transaction creation if one is already open:
+
+    ```ruby
+    class Account < ApplicationRecord
+      private
+        def implicit_persistence_transaction(connection, &block)
+          if connection.transaction_open?
+            yield
+          else
+            super
+          end
+        end
     end
     ```
 
-    *Alex Ghiculescu*
+    *Israel P Valverde*
 
-*   Model generator no longer needs a database connection to validate column types.
-
-    *Mike Dalessio*
-
-*   Allow signed ID verifiers to be configurable via `Rails.application.message_verifiers`
-
-    Prior to this change, the primary way to configure signed ID verifiers was
-    to set `signed_id_verifier` on each model class:
-
-      ```ruby
-      Post.signed_id_verifier = ActiveSupport::MessageVerifier.new(...)
-      Comment.signed_id_verifier = ActiveSupport::MessageVerifier.new(...)
-      ```
-
-    And if the developer did not set `signed_id_verifier`, a verifier would be
-    instantiated with a secret derived from `secret_key_base` and the following
-    options:
-
-      ```ruby
-      { digest: "SHA256", serializer: JSON, url_safe: true }
-      ```
-
-    Thus it was cumbersome to rotate configuration for all verifiers.
-
-    This change defines a new Rails config: [`config.active_record.use_legacy_signed_id_verifier`][].
-    The default value is `:generate_and_verify`, which preserves the previous
-    behavior. However, when set to `:verify`, signed ID verifiers will use
-    configuration from `Rails.application.message_verifiers` (specifically,
-    `Rails.application.message_verifiers["active_record/signed_id"]`) to
-    generate and verify signed IDs, but will also verify signed IDs using the
-    older configuration.
-
-    To avoid complication, the new behavior only applies when `signed_id_verifier_secret`
-    is not set on a model class or any of its ancestors. Additionally,
-    `signed_id_verifier_secret` is now deprecated. If you are currently setting
-    `signed_id_verifier_secret` on a model class, you can set `signed_id_verifier`
-    instead:
-
-      ```ruby
-      # BEFORE
-      Post.signed_id_verifier_secret = "my secret"
-
-      # AFTER
-      Post.signed_id_verifier = ActiveSupport::MessageVerifier.new("my secret", digest: "SHA256", serializer: JSON, url_safe: true)
-      ```
-
-    To ease migration, `signed_id_verifier` has also been changed to behave as a
-    `class_attribute` (i.e. inheritable), but _only when `signed_id_verifier_secret`
-    is not set_:
-
-      ```ruby
-      # BEFORE
-      ActiveRecord::Base.signed_id_verifier = ActiveSupport::MessageVerifier.new(...)
-      Post.signed_id_verifier == ActiveRecord::Base.signed_id_verifier # => false
-
-      # AFTER
-      ActiveRecord::Base.signed_id_verifier = ActiveSupport::MessageVerifier.new(...)
-      Post.signed_id_verifier == ActiveRecord::Base.signed_id_verifier # => true
-
-      Post.signed_id_verifier_secret = "my secret" # => deprecation warning
-      Post.signed_id_verifier == ActiveRecord::Base.signed_id_verifier # => false
-      ```
-
-    Note, however, that it is recommended to eventually migrate from
-    model-specific verifiers to a unified configuration managed by
-    `Rails.application.message_verifiers`. `ActiveSupport::MessageVerifier#rotate`
-    can facilitate that transition. For example:
-
-      ```ruby
-      # BEFORE
-      # Generate and verify signed Post IDs using Post-specific configuration
-      Post.signed_id_verifier = ActiveSupport::MessageVerifier.new("post secret", ...)
-
-      # AFTER
-      # Generate and verify signed Post IDs using the unified configuration
-      Post.signed_id_verifier = Post.signed_id_verifier.dup
-      # Fall back to Post-specific configuration when verifying signed IDs
-      Post.signed_id_verifier.rotate("post secret", ...)
-      ```
-
-    [`config.active_record.use_legacy_signed_id_verifier`]: https://guides.rubyonrails.org/v8.1/configuring.html#config-active-record-use-legacy-signed-id-verifier
-
-    *Ali Sepehri*, *Jonathan Hefner*
-
-*   Prepend `extra_flags` in postgres' `structure_load`
-
-    When specifying `structure_load_flags` with a postgres adapter, the flags
-    were appended to the default flags, instead of prepended.
-    This caused issues with flags not being taken into account by postgres.
-
-    *Alice Loeser*
-
-*   Allow bypassing primary key/constraint addition in `implicit_order_column`
-
-    When specifying multiple columns in an array for `implicit_order_column`, adding
-    `nil` as the last element will prevent appending the primary key to order
-    conditions. This allows more precise control of indexes used by
-    generated queries. It should be noted that this feature does introduce the risk
-    of API misbehavior if the specified columns are not fully unique.
-
-    *Issy Long*
-
-*   Allow setting the `schema_format` via database configuration.
-
-    ```
-    primary:
-      schema_format: ruby
-    ```
-
-    Useful for multi-database setups when apps require different formats per-database.
-
-    *T S Vallender*
-
-*   Support disabling indexes for MySQL v8.0.0+ and MariaDB v10.6.0+
-
-    MySQL 8.0.0 added an option to disable indexes from being used by the query
-    optimizer by making them "invisible". This allows the index to still be maintained
-    and updated but no queries will be permitted to use it. This can be useful for adding
-    new invisible indexes or making existing indexes invisible before dropping them
-    to ensure queries are not negatively affected.
-    See https://dev.mysql.com/blog-archive/mysql-8-0-invisible-indexes/ for more details.
-
-    MariaDB 10.6.0 also added support for this feature by allowing indexes to be "ignored"
-    in queries. See https://mariadb.com/kb/en/ignored-indexes/ for more details.
-
-    Active Record now supports this option for MySQL 8.0.0+ and MariaDB 10.6.0+ for
-    index creation and alteration where the new index option `enabled: true/false` can be
-    passed to column and index methods as below:
+*   Pass sql query to query log tags.
 
     ```ruby
-    add_index :users, :email, enabled: false
-    enable_index :users, :email
-    add_column :users, :dob, :string, index: { enabled: false }
-
-    change_table :users do |t|
-      t.index :name, enabled: false
-      t.index :dob
-      t.disable_index :dob
-      t.column :username, :string, index: { enabled: false }
-      t.references :account, index: { enabled: false }
-    end
-
-    create_table :users do |t|
-      t.string :name, index: { enabled: false }
-      t.string :email
-      t.index :email, enabled: false
-    end
+    config.active_record.query_log_tags = [
+      sql_length: ->(context) { context[:sql].length }
+    ]
     ```
-
-    *Merve Taner*
-
-*   Respect `implicit_order_column` in `ActiveRecord::Relation#reverse_order`.
-
-    *Joshua Young*
-
-*   Add column types to `ActiveRecord::Result` for SQLite3.
-
-    *Andrew Kane*
-
-*   Raise `ActiveRecord::ReadOnlyError` when pessimistically locking with a readonly role.
-
-    *Joshua Young*
-
-*   Fix using the `SQLite3Adapter`'s `dbconsole` method outside of a Rails application.
-
-    *Hartley McGuire*
-
-*   Fix migrating multiple databases with `ActiveRecord::PendingMigration` action.
-
-    *Gannon McGibbon*
-
-*   Enable automatically retrying idempotent association queries on connection
-    errors.
-
-    *Hartley McGuire*
-
-*   Add `allow_retry` to `sql.active_record` instrumentation.
-
-    This enables identifying queries which queries are automatically retryable on connection errors.
-
-    *Hartley McGuire*
-
-*   Better support UPDATE with JOIN for Postgresql and SQLite3
-
-    Previously when generating update queries with one or more JOIN clauses,
-    Active Record would use a sub query which would prevent to reference the joined
-    tables in the `SET` clause, for instance:
-
-    ```ruby
-    Comment.joins(:post).update_all("title = posts.title")
-    ```
-
-    This is now supported as long as the relation doesn't also use a `LIMIT`, `ORDER` or
-    `GROUP BY` clause. This was supported by the MySQL adapter for a long time.
-
-    *Jean Boussier*
-
-*   Introduce a before-fork hook in `ActiveSupport::Testing::Parallelization` to clear existing
-    connections, to avoid fork-safety issues with the mysql2 adapter.
-
-    Fixes #41776
-
-    *Mike Dalessio*, *Donal McBreen*
-
-*   PoolConfig no longer keeps a reference to the connection class.
-
-    Keeping a reference to the class caused subtle issues when combined with reloading in
-    development. Fixes #54343.
-
-    *Mike Dalessio*
-
-*   Fix SQL notifications sometimes not sent when using async queries.
-
-    ```ruby
-    Post.async_count
-    ActiveSupport::Notifications.subscribed(->(*) { "Will never reach here" }) do
-      Post.count
-    end
-    ```
-
-    In rare circumstances and under the right race condition, Active Support notifications
-    would no longer be dispatched after using an asynchronous query.
-    This is now fixed.
-
-    *Edouard Chin*
-
-*   Eliminate queries loading dumped schema cache on Postgres
-
-    Improve resiliency by avoiding needing to open a database connection to load the
-    type map while defining attribute methods at boot when a schema cache file is
-    configured on PostgreSQL databases.
-
-    *James Coleman*
-
-*   `ActiveRecord::Coder::JSON` can be instantiated
-
-    Options can now be passed to `ActiveRecord::Coder::JSON` when instantiating the coder. This allows:
-    ```ruby
-    serialize :config, coder: ActiveRecord::Coder::JSON.new(symbolize_names: true)
-    ```
-    *matthaigh27*
-
-*   Deprecate using `insert_all`/`upsert_all` with unpersisted records in associations.
-
-    Using these methods on associations containing unpersisted records will now
-    show a deprecation warning, as the unpersisted records will be lost after
-    the operation.
-
-    *Nick Schwaderer*
-
-*   Make column name optional for `index_exists?`.
-
-    This aligns well with `remove_index` signature as well, where
-    index name doesn't need to be derived from the column names.
-
-    *Ali Ismayiliov*
-
-*   Change the payload name of `sql.active_record` notification for eager
-    loading from "SQL" to "#{model.name} Eager Load".
-
-    *zzak*
-
-*   Enable automatically retrying idempotent `#exists?` queries on connection
-    errors.
-
-    *Hartley McGuire*, *classidied*
-
-*   Deprecate usage of unsupported methods in conjunction with `update_all`:
-
-    `update_all` will now print a deprecation message if a query includes either `WITH`,
-    `WITH RECURSIVE` or `DISTINCT` statements. Those were never supported and were ignored
-    when generating the SQL query.
-
-    An error will be raised in a future Rails release. This behaviour will be consistent
-    with `delete_all` which currently raises an error for unsupported statements.
-
-    *Edouard Chin*
-
-*   The table columns inside `schema.rb` are now sorted alphabetically.
-
-    Previously they'd be sorted by creation order, which can cause merge conflicts when two
-    branches modify the same table concurrently.
-
-    *John Duff*
-
-*   Introduce versions formatter for the schema dumper.
-
-    It is now possible to override how schema dumper formats versions information inside the
-    `structure.sql` file. Currently, the versions are simply sorted in the decreasing order.
-    Within large teams, this can potentially cause many merge conflicts near the top of the list.
-
-    Now, the custom formatter can be provided with a custom sorting logic (e.g. by hash values
-    of the versions), which can greatly reduce the number of conflicts.
 
     *fatkodima*
 
-*   Serialized attributes can now be marked as comparable.
+*   Speedup `ActiveRecord::Migration.maintain_test_schema!` when using multiple databases.
 
-    A not rare issue when working with serialized attributes is that the serialized representation of an object
-    can change over time. Either because you are migrating from one serializer to the other (e.g. YAML to JSON or to msgpack),
-    or because the serializer used subtly changed its output.
+    Previously, Active Record would inefficiently connect twice to each database, now it only
+    connects once per database to reverify the schema.
 
-    One example is libyaml that used to have some extra trailing whitespaces, and recently fixed that.
-    When this sorts of thing happen, you end up with lots of records that report being changed even though
-    they aren't, which in the best case leads to a lot more writes to the database and in the worst case lead to nasty bugs.
+    *Iliana Hadzhiatanasova*
 
-    The solution is to instead compare the deserialized representation of the object, however Active Record
-    can't assume the deserialized object has a working `==` method. Hence why this new functionality is opt-in.
+*   Add `unique_by` option to `insert_all!`.
+
+    *Chedli Bourguiba*
+
+*   Fix PostgreSQL schema dumping to handle schema-qualified table names in foreign_key references that span different schemas.
+
+        # before
+        add_foreign_key "hst.event_log_attributes", "hst.event_logs" # emits correctly because they're in the same schema (hst)
+        add_foreign_key "hst.event_log_attributes", "hst.usr.user_profiles", column: "created_by_id" # emits hst.user.* when user.* is expected
+
+        # after
+        add_foreign_key "hst.event_log_attributes", "hst.event_logs"
+        add_foreign_key "hst.event_log_attributes", "usr.user_profiles", column: "created_by_id"
+
+    *Chiperific*
+
+*   Add `PostgreSQLAdapter.register_type_mapping` for custom SQL type registration.
+
+    Third-party gems can now register custom type mappings without prepending
+    internal methods:
+
+        ActiveRecord::ConnectionAdapters::PostgreSQLAdapter.register_type_mapping do |type_map|
+          type_map.register_type("geometry") do |oid, fmod, sql_type|
+            MyGeometryType.new(sql_type)
+          end
+        end
+
+    Callbacks execute in registration order.
+
+    *Abdelkader Boudih*
+
+*   Yield the transaction object to the block when using `with_lock`.
+
+    *Ngan Pham*
+
+*   Fix bug when `current_transaction.isolation` would not have been reset in test env.
+
+    Additionally, extending the change in [#55549](https://github.com/rails/rails/pull/55549)
+    to handle `requires_new: true`.
+
+    *Kir Shatrov*
+
+*   Allow `schema_dump` configuration to be an absolute path.
+
+    Previously, the `schema_dump` configuration was always joined with the
+    `db_dir` path. Now, if an absolute path is provided, it will be used as-is.
+
+    *Mike Dalessio*
+
+*   Decode PostgreSQL bytea and money columns when they appear in direct
+    query results.
+
+    bytea columns are now decoded to binary-encoded Strings, and money columns
+    are decoded to BigDecimal instead of String.
 
     ```ruby
-    serialize :config, type: Hash, coder: JSON, comparable: true
+    ActiveRecord::Base.connection
+         .select_value("select '\\x48656c6c6f'::bytea").encoding #=> Encoding::BINARY
+
+    ActiveRecord::Base.connection
+         .select_value("select '12.34'::money").class #=> BigDecimal
     ```
-
-    *Jean Boussier*
-
-*   Fix MySQL default functions getting dropped when changing a column's nullability.
-
-    *Bastian Bartmann*
-
-*   SQLite extensions can be configured in `config/database.yml`.
-
-    The database configuration option `extensions:` allows an application to load SQLite extensions
-    when using `sqlite3` >= v2.4.0. The array members may be filesystem paths or the names of
-    modules that respond to `.to_path`:
-
-    ``` yaml
-    development:
-      adapter: sqlite3
-      extensions:
-        - SQLean::UUID                     # module name responding to `.to_path`
-        - .sqlpkg/nalgeon/crypto/crypto.so # or a filesystem path
-        - <%= AppExtensions.location %>    # or ruby code returning a path
-    ```
-
-    *Mike Dalessio*
-
-*   `ActiveRecord::Middleware::ShardSelector` supports granular database connection switching.
-
-    A new configuration option, `class_name:`, is introduced to
-    `config.active_record.shard_selector` to allow an application to specify the abstract connection
-    class to be switched by the shard selection middleware. The default class is
-    `ActiveRecord::Base`.
-
-    For example, this configuration tells `ShardSelector` to switch shards using
-    `AnimalsRecord.connected_to`:
-
-    ```
-    config.active_record.shard_selector = { class_name: "AnimalsRecord" }
-    ```
-
-    *Mike Dalessio*
-
-*   Reset relations after `insert_all`/`upsert_all`.
-
-    Bulk insert/upsert methods will now call `reset` if used on a relation, matching the behavior of `update_all`.
-
-    *Milo Winningham*
-
-*   Use `_N` as a parallel tests databases suffixes
-
-    Peviously, `-N` was used as a suffix. This can cause problems for RDBMSes
-    which do not support dashes in database names.
-
-    *fatkodima*
-
-*   Remember when a database connection has recently been verified (for
-    two seconds, by default), to avoid repeated reverifications during a
-    single request.
-
-    This should recreate a similar rate of verification as in Rails 7.1,
-    where connections are leased for the duration of a request, and thus
-    only verified once.
 
     *Matthew Draper*
 
-*   Allow to reset cache counters for multiple records.
+*   Add support for configuring migration strategy on a per-adapter basis.
+
+    `migration_strategy` can now be set on individual adapter classes, overriding
+    the global `ActiveRecord.migration_strategy`. This allows individual databases to
+    customize migration execution logic:
+
+    ```ruby
+    class CustomPostgresStrategy < ActiveRecord::Migration::DefaultStrategy
+      def drop_table(*)
+        # Custom logic specific to PostgreSQL
+      end
+    end
+
+    ActiveRecord::ConnectionAdapters::PostgreSQLAdapter.migration_strategy = CustomPostgresStrategy
+    ```
+
+    *Adrianna Chang*
+
+*   Allow either explain format syntax for EXPLAIN queries.
+
+    MySQL uses FORMAT=JSON whereas Postgres uses FORMAT JSON. We should be
+    able to accept both formats as options.
+
+    *Gannon McGibbon*
+
+*   On MySQL parallel test database table reset to use `DELETE` instead of `TRUNCATE`.
+
+    Truncating on MySQL is very slow even on empty or nearly empty tables.
+
+    As a result of this change auto increment counters are now no longer reset between test
+    runs on MySQL and the `SKIP_TEST_DATABASE_TRUNCATE` environment variable no longer has
+    any effect.
+
+    *Donal McBreen*
+
+*   Fix inconsistency in PostgreSQL handling of unbounded time range types
+
+    Use `-infinity` rather than `NULL` for the lower value of PostgreSQL time
+    ranges when saving records with a Ruby range that begins with `nil`.
+
+    ```ruby
+    create_table :products do |t|
+      t.tsrange :period
+    end
+    class Product < ActiveRecord::Base; end
+
+    t = Time.utc(2000)
+
+    Product.create(period: t...nil)
+    Product.create(period: nil...t)
+    ```
+
+    Previously this would create two records using different values to represent
+    lower-unbounded and upper-unbounded ranges.
 
     ```
-    Aircraft.reset_counters([1, 2, 3], :wheels_count)
+    ["2000-01-01 00:00:00",infinity)
+    (NULL,"2000-01-01 00:00:00")
     ```
 
-    It produces much fewer queries compared to the custom implementation using looping over ids.
-    Previously: `O(ids.size * counters.size)` queries, now: `O(ids.size + counters.size)` queries.
+    Now both will use `-infinity`/`infinity` which are handled differently than
+    `NULL` by some PostgreSQL range operators (e.g., `lower_inf`) and support
+    both exclusive and inclusive bounds.
+
+    ```
+    ["2000-01-01 00:00:00",infinity)
+    [-infinity,"2000-01-01 00:00:00")
+    ```
+
+    *Martin-Alexander*
+
+*   Database-specific shard swap prohibition
+
+    In #43485 (v7.0.0), shard swapping prohibition was introduced as a global
+    switch that applied to all databases.
+
+    For the use case of a multi-database application, the global prohibition is
+    overly broad, and so with this change the method `prohibit_shard_swapping`
+    will scope the prohibition to the same connection class (i.e.,
+    `connection_specification_name`). This allows an application to prohibit
+    shard swapping on a specific database while allowing it on all others.
+
+    *Mike Dalessio*
+
+*   Fix upsert_all when using repeated timestamp attributes.
+
+    *Gannon McGibbon*
+
+*   PostgreSQL enable drop database FORCE option.
+
+    One of the benefits of developing with MySQL is that it allows dropping the
+    current database without first disconnecting clients. As a result developers
+    can use `bin/rails db:reset` and similar, without first shutting down
+    instances of the app, Rails consoles, background workers, etc. By default
+    PostgreSQL fails to drop a database when clients are connected and displays
+    the following error:
+
+      > PG::ObjectInUse: ERROR:  database "xyz" is being accessed by other users (PG::ObjectInUse)
+
+    This is frustrating when working in development where the database may be
+    dropped frequently.
+
+    PostgreSQL 13 added the `FORCE` option to the `DROP DATABASE` statement
+    ([PostgreSQL docs](https://www.postgresql.org/docs/current/sql-dropdatabase.html))
+    which automatically disconnects clients before dropping the database.
+    This option is automatically enabled for supported PostgreSQL versions.
+
+    *Steven Webb*
+
+*   Raise specific exception when a prohibited shard change is attempted.
+
+    The new `ShardSwapProhibitedError` exception allows applications and
+    connection-related libraries to more easily recover from this specific
+    scenario. Previously an `ArgumentError` was raised, so the new exception
+    subclasses `ArgumentError` for backwards compatibility.
+
+    *Mike Dalessio*
+
+*   Fix SQLite3 data loss during table alterations with CASCADE foreign keys.
+
+    When altering a table in SQLite3 that is referenced by child tables with
+    `ON DELETE CASCADE` foreign keys, ActiveRecord would silently delete all
+    data from the child tables. This occurred because SQLite requires table
+    recreation for schema changes, and during this process the original table
+    is temporarily dropped, triggering CASCADE deletes on child tables.
+
+    The root cause was incorrect ordering of operations. The original code
+    wrapped `disable_referential_integrity` inside a transaction, but
+    `PRAGMA foreign_keys` cannot be modified inside a transaction in SQLite -
+    attempting to do so simply has no effect. This meant foreign keys remained
+    enabled during table recreation, causing CASCADE deletes to fire.
+
+    The fix reverses the order to follow the official SQLite 12-step ALTER TABLE
+    procedure: `disable_referential_integrity` now wraps the transaction instead
+    of being wrapped by it. This ensures foreign keys are properly disabled
+    before the transaction starts and re-enabled after it commits, preventing
+    CASCADE deletes while maintaining data integrity through atomic transactions.
+
+    *Ruy Rocha*
+
+*   Fix negative scopes for enums to include records with `nil` values.
 
     *fatkodima*
 
-*   Add `affected_rows` to `sql.active_record` Notification.
+*   Improve support for SQLite database URIs.
 
-    *Hartley McGuire*
+    The `db:create` and `db:drop` tasks now correctly handle SQLite database URIs, and the
+    SQLite3Adapter will create the parent directory if it does not exist.
 
-*   Fix `sum` when performing a grouped calculation.
+    *Mike Dalessio*
 
-    `User.group(:friendly).sum` no longer worked. This is fixed.
-
-    *Edouard Chin*
-
-*   Add support for enabling or disabling transactional tests per database.
-
-    A test class can now override the default `use_transactional_tests` setting
-    for individual databases, which can be useful if some databases need their
-    current state to be accessible to an external process while tests are running.
-
-    ```ruby
-    class MostlyTransactionalTest < ActiveSupport::TestCase
-      self.use_transactional_tests = true
-      skip_transactional_tests_for_database :shared
-    end
-    ```
-
-    *Matthew Cheetham*, *Morgan Mareve*
-
-*   Cast `query_cache` value when using URL configuration.
-
-    *zzak*
-
-*   NULLS NOT DISTINCT works with UNIQUE CONSTRAINT as well as UNIQUE INDEX.
-
-    *Ryuta Kamizono*
-
-*   `PG::UnableToSend: no connection to the server` is now retryable as a connection-related exception
-
-    *Kazuma Watanabe*
-
-Please check [8-0-stable](https://github.com/rails/rails/blob/8-0-stable/activerecord/CHANGELOG.md) for previous changes.
+Please check [8-1-stable](https://github.com/rails/rails/blob/8-1-stable/activerecord/CHANGELOG.md) for previous changes.

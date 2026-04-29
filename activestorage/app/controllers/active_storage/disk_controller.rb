@@ -17,6 +17,8 @@ class ActiveStorage::DiskController < ActiveStorage::BaseController
     end
   rescue Errno::ENOENT
     head :not_found
+  rescue ActiveStorage::InvalidKeyError
+    head :not_found
   end
 
   def update
@@ -25,13 +27,15 @@ class ActiveStorage::DiskController < ActiveStorage::BaseController
         named_disk_service(token[:service_name]).upload token[:key], request.body, checksum: token[:checksum]
         head :no_content
       else
-        head :unprocessable_entity
+        head ActionDispatch::Constants::UNPROCESSABLE_CONTENT
       end
     else
       head :not_found
     end
   rescue ActiveStorage::IntegrityError
-    head :unprocessable_entity
+    head ActionDispatch::Constants::UNPROCESSABLE_CONTENT
+  rescue ActiveStorage::InvalidKeyError
+    head ActionDispatch::Constants::UNPROCESSABLE_CONTENT
   end
 
   private

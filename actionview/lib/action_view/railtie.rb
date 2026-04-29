@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
-require "action_view"
 require "rails"
+require "action_view"
 
 module ActionView
   # = Action View Railtie
@@ -16,6 +16,8 @@ module ActionView
     config.action_view.prepend_content_exfiltration_prevention = false
 
     config.eager_load_namespaces << ActionView
+
+    guard_load_hooks(:action_view, :action_view_test_case)
 
     config.after_initialize do |app|
       ActionView::Helpers::FormTagHelper.embed_authenticity_token_in_remote_forms =
@@ -78,8 +80,13 @@ module ActionView
     end
 
     config.after_initialize do |app|
+      config.after_initialize do
+        ActionView.render_tracker = config.action_view.render_tracker
+      end
+
       ActiveSupport.on_load(:action_view) do
         app.config.action_view.each do |k, v|
+          next if k == :render_tracker
           send "#{k}=", v
         end
       end

@@ -4,8 +4,7 @@ module ActiveRecord
   # See ActiveRecord::Transactions::ClassMethods for documentation.
   module Transactions
     extend ActiveSupport::Concern
-    # :nodoc:
-    ACTIONS = [:create, :destroy, :update]
+    ACTIONS = [:create, :destroy, :update] # :nodoc:
 
     included do
       define_callbacks :commit, :rollback,
@@ -230,27 +229,28 @@ module ActiveRecord
       # See the ConnectionAdapters::DatabaseStatements#transaction API docs.
       def transaction(**options, &block)
         with_connection do |connection|
-          connection.transaction(**options, &block)
+          connection.pool.with_pool_transaction_isolation_level(ActiveRecord.default_transaction_isolation_level, connection.transaction_open?) do
+            connection.transaction(**options, &block)
+          end
         end
       end
 
-      # Makes all transactions initiated within the block use the isolation level
-      # that you set as the default. Useful for gradually migrating apps onto new isolation level.
-      def with_default_isolation_level(isolation_level, &block)
+      # Makes all transactions the current pool use the isolation level initiated within the block.
+      def with_pool_transaction_isolation_level(isolation_level, &block)
         if current_transaction.open?
           raise ActiveRecord::TransactionIsolationError, "cannot set default isolation level while transaction is open"
         end
 
-        old_level = connection_pool.default_isolation_level
-        connection_pool.default_isolation_level = isolation_level
+        old_level = connection_pool.pool_transaction_isolation_level
+        connection_pool.pool_transaction_isolation_level = isolation_level
         yield
       ensure
-        connection_pool.default_isolation_level = old_level
+        connection_pool.pool_transaction_isolation_level = old_level
       end
 
-      # Returns the default isolation level for the connection pool, set earlier by #with_default_isolation_level.
-      def default_isolation_level
-        connection_pool.default_isolation_level
+      # Returns the default isolation level for the connection pool, set earlier by #with_pool_transaction_isolation_level.
+      def pool_transaction_isolation_level
+        connection_pool.pool_transaction_isolation_level
       end
 
       # Returns a representation of the current transaction state,
@@ -424,20 +424,22 @@ module ActiveRecord
     #
     # This method is available within the context of an ActiveRecord::Base
     # instance.
-    def with_transaction_returning_status
+    def with_transaction_returning_status # :nodoc:
       self.class.with_connection do |connection|
-        status = nil
-        ensure_finalize = !connection.transaction_open?
+        connection.pool.with_pool_transaction_isolation_level(ActiveRecord.default_transaction_isolation_level, connection.transaction_open?) do
+          status = nil
+          ensure_finalize = !connection.transaction_open?
 
-        connection.transaction do
-          add_to_transaction(ensure_finalize || has_transactional_callbacks?)
-          remember_transaction_record_state
+          implicit_persistence_transaction(connection) do
+            add_to_transaction(ensure_finalize || has_transactional_callbacks?)
+            remember_transaction_record_state
 
-          status = yield
-          raise ActiveRecord::Rollback unless status
+            status = yield
+            raise ActiveRecord::Rollback unless status
+          end
+          @_last_transaction_return_status = status
+          status
         end
-        @_last_transaction_return_status = status
-        status
       end
     end
 
@@ -538,6 +540,34 @@ module ActiveRecord
 
       def has_transactional_callbacks?
         !_rollback_callbacks.empty? || !_commit_callbacks.empty? || !_before_commit_callbacks.empty?
+      end
+
+      # Method called to execute persistence method operations (+save+, +destroy+, +touch+),
+      # creating a transaction on the provided +connection+.
+      #
+      # Override this method to customize transaction behavior, for example to set a specific
+      # isolation level.
+      #
+      # The +connection+ parameter provides access to the current database
+      # connection, allowing conditional logic based on connection state
+      # (e.g., whether a transaction is already open).
+      # The +block+ parameter contains the persistence operation to be executed.
+      #
+      # Example skipping transaction creation if one is already open:
+      #
+      #   class Account < ApplicationRecord
+      #     private
+      #       def implicit_persistence_transaction(connection, &block)
+      #         if connection.transaction_open?
+      #           yield
+      #         else
+      #           super
+      #         end
+      #       end
+      #   end
+      #
+      def implicit_persistence_transaction(connection, &block)
+        connection.transaction(&block)
       end
   end
 end

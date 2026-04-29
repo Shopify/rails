@@ -4,6 +4,8 @@ require "cases/helper"
 require "models/author"
 require "models/book"
 require "models/clothing_item"
+require "models/lesson"
+require "models/student"
 
 module ActiveRecord
   class InstrumentationTest < ActiveRecord::TestCase
@@ -46,7 +48,8 @@ module ActiveRecord
     def test_payload_name_on_eager_load
       ActiveRecord::Base.schema_cache.add(Author.table_name)
       notification = capture_notifications("sql.active_record") { Book.eager_load(:author).to_a }
-      assert_equal "Book Eager Load", notification.first.payload[:name]
+        .find { _1.payload[:sql].match?("SELECT") }
+      assert_equal "Book Eager Load", notification.payload[:name]
     end
 
     def test_payload_name_on_destroy
@@ -155,15 +158,12 @@ module ActiveRecord
     end
 
     def test_payload_affected_rows
-      affected_row_values = []
-
-      ActiveSupport::Notifications.subscribed(
-        -> (event) { affected_row_values << event.payload[:affected_rows] },
-        "sql.active_record",
-      ) do
-        # The combination of MariaDB + Trilogy returns 0 for affected_rows with
-        # INSERT ... RETURNING
+      # The combination of MariaDB + Trilogy returns 0 for affected_rows with
+      # INSERT ... RETURNING
+      events = capture_notifications("sql.active_record") do
         Book.insert_all!([{ name: "One" }, { name: "Two" }, { name: "Three" }, { name: "Four" }], returning: false)
+
+        Book.where(name: ["One", "Two", "Three"]).pluck(:id)
 
         Book.where(name: ["One", "Two", "Three"]).update_all(status: :published)
 
@@ -171,8 +171,28 @@ module ActiveRecord
 
         Book.where(name: ["Three", "Four"]).delete_all
       end
+      affected_row_values = events.map { |e| e.payload[:affected_rows] }
 
-      assert_equal [4, 3, 2, 0], affected_row_values
+      assert_equal 4, affected_row_values.first
+      assert_not_equal affected_row_values.first, affected_row_values.second
+      assert_equal 3, affected_row_values.third
+      assert_equal 2, affected_row_values.fourth
+      assert_equal 0, affected_row_values.fifth
+    end
+
+    def test_payload_affected_rows_cascade
+      events = capture_notifications("sql.active_record") do
+        l = Lesson.create!(name: "Algebra")
+        l.students.create!(name: "Jim")
+
+        Student.delete_all
+      end
+      affected_row_values = events
+        .reject { |e| e.payload[:name].in?(["SCHEMA", "TRANSACTION"]) }
+        .map { |e| e.payload[:affected_rows] }
+
+      assert_equal 4, affected_row_values.length
+      assert_equal 1, affected_row_values.fourth
     end
 
     def test_no_instantiation_notification_when_no_records

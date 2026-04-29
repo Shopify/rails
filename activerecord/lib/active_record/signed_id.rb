@@ -16,7 +16,7 @@ module ActiveRecord
       module DeprecateSignedIdVerifierSecret
         def signed_id_verifier_secret=(secret)
           ActiveRecord.deprecator.warn(<<~MSG)
-            ActiveRecord::Base.signed_id_verifier_secret is deprecated and will be removed in the future.
+            ActiveRecord::Base.signed_id_verifier_secret is deprecated and will be removed in Rails 8.2.
 
             If the secret is model-specific, set Model.signed_id_verifier instead.
 
@@ -70,16 +70,16 @@ module ActiveRecord
 
         options = { on_rotation: on_rotation }.compact
         if id = signed_id_verifier.verified(signed_id, purpose: combine_signed_id_purposes(purpose), **options)
-          find_by primary_key => id
+          find_by(primary_key => [id])
         end
       end
 
-      # Works like find_signed, but will raise an +ActiveSupport::MessageVerifier::InvalidSignature+
+      # Works like find_signed, but will raise an ActiveSupport::MessageVerifier::InvalidSignature
       # exception if the +signed_id+ has either expired, has a purpose mismatch, is for another record,
-      # or has been tampered with. It will also raise an +ActiveRecord::RecordNotFound+ exception if
+      # or has been tampered with. It will also raise an ActiveRecord::RecordNotFound exception if
       # the valid signed id can't find a record.
       #
-      # === Examples
+      # ==== Examples
       #
       #   User.find_signed! "bad data" # => ActiveSupport::MessageVerifier::InvalidSignature
       #

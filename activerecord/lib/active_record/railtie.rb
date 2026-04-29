@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
-require "active_record"
 require "rails"
+require "active_record"
 require "active_support/core_ext/object/try"
 require "active_model/railtie"
 
@@ -23,8 +23,8 @@ module ActiveRecord
     config.action_dispatch.rescue_responses.merge!(
       "ActiveRecord::RecordNotFound"   => :not_found,
       "ActiveRecord::StaleObjectError" => :conflict,
-      "ActiveRecord::RecordInvalid"    => :unprocessable_entity,
-      "ActiveRecord::RecordNotSaved"   => :unprocessable_entity
+      "ActiveRecord::RecordInvalid"    => ActionDispatch::Constants::UNPROCESSABLE_CONTENT,
+      "ActiveRecord::RecordNotSaved"   => ActionDispatch::Constants::UNPROCESSABLE_CONTENT
     )
 
     config.active_record.use_schema_cache_dump = true
@@ -40,10 +40,17 @@ module ActiveRecord
     config.active_record.belongs_to_required_validates_foreign_key = true
     config.active_record.generate_secure_token_on = :create
     config.active_record.use_legacy_signed_id_verifier = :generate_and_verify
+    config.active_record.deprecated_associations_options = { mode: :warn, backtrace: false }
 
     config.active_record.queues = ActiveSupport::InheritableOptions.new
 
     config.eager_load_namespaces << ActiveRecord
+
+    guard_load_hooks(
+      :active_record, :active_record_encryption, :active_record_fixture_set, :active_record_fixtures,
+      :active_record_mysql2adapter, :active_record_postgresqladapter, :active_record_sqlite3adapter,
+      :active_record_trilogyadapter,
+    )
 
     rake_tasks do
       namespace :db do
@@ -196,12 +203,16 @@ To keep using the current cache store, you can turn off cache versioning entirel
       end
     end
 
-    initializer "active_record.postgresql_adapter_decode_dates" do
+    initializer "active_record.postgresql_adapter_decodes" do
       config.after_initialize do
-        if config.active_record.postgresql_adapter_decode_dates
-          ActiveSupport.on_load(:active_record_postgresqladapter) do
-            self.decode_dates = true
-          end
+        decode_bytea = config.active_record.postgresql_adapter_decode_bytea
+        decode_dates = config.active_record.postgresql_adapter_decode_dates
+        decode_money = config.active_record.postgresql_adapter_decode_money
+
+        ActiveSupport.on_load(:active_record_postgresqladapter) do
+          self.decode_bytea = true if decode_bytea
+          self.decode_dates = true if decode_dates
+          self.decode_money = true if decode_money
         end
       end
     end
@@ -236,6 +247,8 @@ To keep using the current cache store, you can turn off cache versioning entirel
           :check_schema_cache_dump_version,
           :use_schema_cache_dump,
           :postgresql_adapter_decode_dates,
+          :postgresql_adapter_decode_money,
+          :postgresql_adapter_decode_bytea,
           :use_legacy_signed_id_verifier,
         )
 
@@ -275,6 +288,13 @@ To keep using the current cache store, you can turn off cache versioning entirel
       require "active_record/railties/job_runtime"
       ActiveSupport.on_load(:active_job) do
         include ActiveRecord::Railties::JobRuntime
+      end
+    end
+
+    initializer "active_record.job_checkpoints" do
+      require "active_record/railties/job_checkpoints"
+      ActiveSupport.on_load(:active_job_continuable) do
+        prepend ActiveRecord::Railties::JobCheckpoints
       end
     end
 
@@ -321,6 +341,10 @@ To keep using the current cache store, you can turn off cache versioning entirel
       ActiveSupport.on_load(:active_record) do
         self.filter_attributes += Rails.application.config.filter_parameters
       end
+    end
+
+    initializer "active_record.filter_attributes_as_log_parameters" do |app|
+      ActiveRecord::FilterAttributeHandler.new(app).enable
     end
 
     initializer "active_record.configure_message_verifiers" do |app|

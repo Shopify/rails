@@ -7,6 +7,8 @@ module Arel # :nodoc: all
     STRING_OR_SYMBOL_CLASS = [Symbol, String]
 
     def initialize(table = nil)
+      super
+
       @ast = Nodes::SelectStatement.new(table)
       @ctx = @ast.cores.last
     end
@@ -255,8 +257,12 @@ module Arel # :nodoc: all
     end
 
     def comment(*values)
-      @ctx.comment = Nodes::Comment.new(values)
-      self
+      if values.any?
+        @ctx.comment = Nodes::Comment.new(values)
+        self
+      else
+        @ctx.comment
+      end
     end
 
     private

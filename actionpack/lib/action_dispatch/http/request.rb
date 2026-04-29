@@ -469,6 +469,22 @@ module ActionDispatch
       get_header("REDIRECT_X_HTTP_AUTHORIZATION")
     end
 
+    # Returns the bearer token embedded in the authorization header or nil if missing.
+    def bearer_token
+      authorization.to_s[/\ABearer (.+)\z/, 1]
+    end
+
+    # True if the request method is safe per RFC 9110 §9.2.1
+    # (GET, HEAD, OPTIONS, or TRACE).
+    def safe_method?
+      get? || head? || options? || trace?
+    end
+
+    # True if the request method may modify resources. Inverse of #safe_method?.
+    def unsafe_method?
+      !safe_method?
+    end
+
     # True if the request came from localhost, 127.0.0.1, or ::1.
     def local?
       LOCALHOST.match?(remote_addr) && LOCALHOST.match?(remote_ip)

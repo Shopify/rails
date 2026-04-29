@@ -108,10 +108,6 @@ module ActiveRecord
       def aliased_types(name, fallback)
         "timestamp" == name ? :datetime : fallback
       end
-
-      def fetch_cast_type(connection)
-        cast_type
-      end
     end
 
     AddColumnDefinition = Struct.new(:column) # :nodoc:
@@ -120,7 +116,7 @@ module ActiveRecord
 
     ChangeColumnDefaultDefinition = Struct.new(:column, :default) # :nodoc:
 
-    CreateIndexDefinition = Struct.new(:index, :algorithm, :if_not_exists) # :nodoc:
+    CreateIndexDefinition = Struct.new(:index, :algorithm, :if_not_exists, :lock) # :nodoc:
 
     PrimaryKeyDefinition = Struct.new(:name) # :nodoc:
 
@@ -327,17 +323,6 @@ module ActiveRecord
       def primary_key(name, type = :primary_key, **options)
         column(name, type, **options, primary_key: true)
       end
-
-      ##
-      # :method: column
-      # :call-seq: column(name, type, **options)
-      #
-      # Appends a column or columns of a specified type.
-      #
-      #  t.string(:goat)
-      #  t.string(:goat, :sheep)
-      #
-      # See TableDefinition#column
 
       define_column_methods :bigint, :binary, :boolean, :date, :datetime, :decimal,
         :float, :integer, :json, :string, :text, :time, :timestamp, :virtual
@@ -571,7 +556,14 @@ module ActiveRecord
         end
 
         options[:primary_key] ||= type == :primary_key
-        options[:null] = false if options[:primary_key]
+
+        if options[:primary_key]
+          if options[:null]
+            raise ArgumentError, "primary keys cannot be NULL"
+          end
+          options[:null] = false
+        end
+
         create_column_definition(name, type, options)
       end
 

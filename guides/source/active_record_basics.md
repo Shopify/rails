@@ -205,6 +205,8 @@ SQL. A migration for the `books` table above can be generated like this:
 $ bin/rails generate migration CreateBooks title:string author:string
 ```
 
+NOTE: If you don't specify a type for a field (e.g., `title` instead of `title:string`), Rails will default to type `string`.
+
 and results in this:
 
 ```ruby
@@ -213,7 +215,7 @@ and results in this:
 # Columns `created_at` and `updated_at` are added by `t.timestamps`.
 
 # db/migrate/20240220143807_create_books.rb
-class CreateBooks < ActiveRecord::Migration[8.1]
+class CreateBooks < ActiveRecord::Migration[8.2]
   def change
     create_table :books do |t|
       t.string :title
@@ -366,9 +368,7 @@ complicates the access to the column value. The application will have to use the
 [`id_value`]: https://api.rubyonrails.org/classes/ActiveRecord/ModelSchema.html#method-i-id_value
 
 NOTE: If you try to create a column named `id` which is not the primary key,
-Rails will throw an error during migrations such as: `you can't redefine the
-primary key column 'id' on 'my_books'.` `To define a custom primary key, pass {
-id: false } to create_table.`
+Rails will throw an error during migrations such as: `you can't redefine the primary key column 'id' on 'my_books'. To define a custom primary key, pass { id: false } to create_table.`
 
 CRUD: Reading and Writing Data
 ------------------------------
@@ -673,7 +673,7 @@ files which are executed against any database that Active Record supports.
 Here's a migration that creates a new table called `publications`:
 
 ```ruby
-class CreatePublications < ActiveRecord::Migration[8.1]
+class CreatePublications < ActiveRecord::Migration[8.2]
   def change
     create_table :publications do |t|
       t.string :title

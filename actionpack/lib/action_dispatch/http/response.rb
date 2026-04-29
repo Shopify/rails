@@ -46,6 +46,20 @@ module ActionDispatch # :nodoc:
       Headers = ::Rack::Utils::HeaderHash
     end
 
+    class << self
+      if ActionDispatch::Constants::UNPROCESSABLE_CONTENT == :unprocessable_content
+        def rack_status_code(status) # :nodoc:
+          status = :unprocessable_content if status == :unprocessable_entity
+          Rack::Utils.status_code(status)
+        end
+      else
+        def rack_status_code(status) # :nodoc:
+          status = :unprocessable_entity if status == :unprocessable_content
+          Rack::Utils.status_code(status)
+        end
+      end
+    end
+
     # To be deprecated:
     Header = Headers
 
@@ -136,7 +150,8 @@ module ActionDispatch # :nodoc:
 
         @str_body = nil
         @response.commit!
-        @buf.push string
+        @buf.push string.frozen? ? string : string.dup
+        string.bytesize
       end
       alias_method :<<, :write
 
@@ -257,7 +272,7 @@ module ActionDispatch # :nodoc:
 
     # Sets the HTTP status code.
     def status=(status)
-      @status = Rack::Utils.status_code(status)
+      @status = Response.rack_status_code(status)
     end
 
     # Sets the HTTP response's content MIME type. For example, in the controller you

@@ -3,7 +3,6 @@
 require "fileutils"
 require "digest/md5"
 require "rails/version" unless defined?(Rails::VERSION)
-require "open-uri"
 require "tsort"
 require "uri"
 require "rails/generators"
@@ -16,7 +15,7 @@ module Rails
       include AppName
       include BundleHelper
 
-      NODE_LTS_VERSION = "20.11.1"
+      NODE_LTS_VERSION = "22.21.1"
       BUN_VERSION = "1.0.1"
 
       JAVASCRIPT_OPTIONS = %w( importmap bun webpack esbuild rollup )
@@ -105,6 +104,9 @@ module Rails
 
         class_option :skip_brakeman,       type: :boolean, default: nil,
                                            desc: "Skip brakeman setup"
+
+        class_option :skip_bundler_audit,  type: :boolean, default: nil,
+                                           desc: "Skip bundler-audit setup"
 
         class_option :skip_ci,             type: :boolean, default: nil,
                                            desc: "Skip GitHub CI files"
@@ -290,7 +292,7 @@ module Rails
       end
 
       def web_server_gemfile_entry # :doc:
-        GemfileEntry.new "puma", ">= 5.0", "Use the Puma web server [https://github.com/puma/puma]"
+        GemfileEntry.new "puma", ">= 7.1", "Use the Puma web server [https://github.com/puma/puma]"
       end
 
       def asset_pipeline_gemfile_entry
@@ -398,6 +400,10 @@ module Rails
 
       def skip_brakeman?
         options[:skip_brakeman]
+      end
+
+      def skip_bundler_audit?
+        options[:skip_bundler_audit]
       end
 
       def skip_ci?
@@ -529,31 +535,39 @@ module Rails
         using_js_runtime? && %w[bun].include?(options[:javascript])
       end
 
+      def using_css_bundling?
+        css_gemfile_entry&.name == "cssbundling-rails"
+      end
+
+      def capture_command(command, pattern = nil)
+        output = `#{command}`
+        if pattern
+          output[pattern]
+        else
+          output
+        end
+      rescue SystemCallError
+        nil
+      end
+
       def node_version
         if using_node?
           ENV.fetch("NODE_VERSION") do
-            `node --version`[/\d+\.\d+\.\d+/]
-          rescue
-            NODE_LTS_VERSION
+            capture_command("node --version", /\d+\.\d+\.\d+/) || NODE_LTS_VERSION
           end
         end
       end
 
       def dockerfile_yarn_version
-        using_node? and `yarn --version`[/\d+\.\d+\.\d+/]
-      rescue
-        "latest"
+        capture_command("yarn --version", /\d+\.\d+\.\d+/) || "latest"
       end
 
       def yarn_through_corepack?
-        true if dockerfile_yarn_version == "latest"
-        dockerfile_yarn_version >= "2"
+        using_node? and "#{dockerfile_yarn_version}" >= "2"
       end
 
       def dockerfile_bun_version
-        using_bun? and `bun --version`[/\d+\.\d+\.\d+/]
-      rescue
-        BUN_VERSION
+        capture_command("bun --version", /\d+\.\d+\.\d+/) || BUN_VERSION
       end
 
       def dockerfile_binfile_fixups
@@ -653,6 +667,11 @@ module Rails
         end
       end
 
+      def rails_command(command, command_options = {})
+        command_options[:capture] = true if options[:quiet]
+        super
+      end
+
       def bundle_install?
         !(options[:skip_bundle] || options[:pretend])
       end
@@ -662,7 +681,7 @@ module Rails
       end
 
       def depend_on_bootsnap?
-        !options[:skip_bootsnap] && !options[:dev] && !defined?(JRUBY_VERSION)
+        !options[:skip_bootsnap] && !options[:dev] && !jruby?
       end
 
       def target_rails_prerelease(self_command = "new")
@@ -738,13 +757,30 @@ module Rails
       end
 
       def add_bundler_platforms
-        if bundle_install?
+        if bundle_install? && !jruby?
           # The vast majority of Rails apps will be deployed on `x86_64-linux`.
           bundle_command("lock --add-platform=x86_64-linux")
 
           # Users that develop on M1 mac may use docker and would need `aarch64-linux` as well.
           bundle_command("lock --add-platform=aarch64-linux") if RUBY_PLATFORM.start_with?("arm64")
         end
+      end
+
+      def jruby?
+        defined?(JRUBY_VERSION)
+      end
+
+      def version_manager_ruby_version
+        return ENV["RBENV_VERSION"] if ENV["RBENV_VERSION"]
+        return ENV["rvm_ruby_string"] if ENV["rvm_ruby_string"]
+
+        version = if RUBY_ENGINE == "ruby"
+          Gem.ruby_version.to_s.sub(/\.([a-zA-Z])/, '-\1')
+        else
+          RUBY_ENGINE_VERSION
+        end
+
+        "#{RUBY_ENGINE}-#{version}"
       end
 
       def empty_directory_with_keep_file(destination, config = {})
@@ -757,11 +793,13 @@ module Rails
       end
 
       def user_default_branch
-        @user_default_branch ||= `git config init.defaultbranch`
+        @user_default_branch ||= capture_command("git config init.defaultbranch").strip.presence || "main"
       end
 
       def git_init_command
-        return "git init" if user_default_branch.strip.present?
+        if capture_command("git config init.defaultbranch").present?
+          return "git init"
+        end
 
         git_version = `git --version`[/\d+\.\d+\.\d+/]
 

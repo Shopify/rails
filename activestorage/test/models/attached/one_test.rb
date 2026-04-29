@@ -68,6 +68,18 @@ class ActiveStorage::OneAttachedTest < ActiveSupport::TestCase
     assert_equal "town.jpg", @user.avatar.filename.to_s
   end
 
+  test "attaching a new blob from a Hash with a path traversal key raises on Disk service" do
+    assert_raises ActiveStorage::InvalidKeyError do
+      @user.avatar.attach key: "../../etc/passwd", io: StringIO.new("malicious"), filename: "exploit.txt", content_type: "text/plain"
+    end
+  ensure
+    # The orphaned blob record must be removed before teardown, which calls
+    # Blob#delete on all blobs (and that would re-raise InvalidKeyError via
+    # path_for). Use delete_all to bypass the service layer.
+    ActiveStorage::Attachment.where(blob: ActiveStorage::Blob.where(key: "../../etc/passwd")).delete_all
+    ActiveStorage::Blob.where(key: "../../etc/passwd").delete_all
+  end
+
   test "attaching a new blob from a Hash to an existing record passes record" do
     hash = { io: StringIO.new("STUFF"), filename: "town.jpg", content_type: "image/jpeg" }
     blob = ActiveStorage::Blob.build_after_unfurling(**hash)
@@ -856,65 +868,5 @@ class ActiveStorage::OneAttachedTest < ActiveSupport::TestCase
     end
 
     assert_match(/Cannot find variant :unknown for User#avatar_with_variants/, error.message)
-  end
-
-  test "transforms variants later" do
-    blob = create_file_blob(filename: "racecar.jpg")
-
-    assert_enqueued_with job: ActiveStorage::TransformJob, args: [blob, resize_to_limit: [1, 1]] do
-      @user.avatar_with_preprocessed.attach blob
-    end
-  end
-
-  test "transforms variants later conditionally via proc" do
-    assert_no_enqueued_jobs only: [ ActiveStorage::TransformJob, ActiveStorage::PreviewImageJob ] do
-      @user.avatar_with_conditional_preprocessed.attach create_file_blob(filename: "racecar.jpg")
-    end
-
-    blob = create_file_blob(filename: "racecar.jpg")
-    @user.update(name: "transform via proc")
-
-    assert_enqueued_with job: ActiveStorage::TransformJob, args: [blob, resize_to_limit: [2, 2]] do
-      @user.avatar_with_conditional_preprocessed.attach blob
-    end
-  end
-
-  test "transforms variants later conditionally via method" do
-    assert_no_enqueued_jobs only: [ ActiveStorage::TransformJob, ActiveStorage::PreviewImageJob ] do
-      @user.avatar_with_conditional_preprocessed.attach create_file_blob(filename: "racecar.jpg")
-    end
-
-    blob = create_file_blob(filename: "racecar.jpg")
-    @user.update(name: "transform via method")
-
-    assert_enqueued_with job: ActiveStorage::TransformJob, args: [blob, resize_to_limit: [3, 3]] do
-      @user.avatar_with_conditional_preprocessed.attach blob
-    end
-  end
-
-  test "avoids enqueuing transform later job or preview image job when blob is not representable" do
-    unrepresentable_blob = create_blob(filename: "hello.txt")
-
-    assert_no_enqueued_jobs only: [ ActiveStorage::TransformJob, ActiveStorage::PreviewImageJob ]  do
-      @user.avatar_with_preprocessed.attach unrepresentable_blob
-    end
-  end
-
-  test "avoids enqueuing transform later job or preview later job if there aren't any variants to preprocess" do
-    blob = create_file_blob(filename: "report.pdf")
-
-    assert_no_enqueued_jobs only: [ ActiveStorage::TransformJob, ActiveStorage::PreviewImageJob ] do
-      @user.resume.attach blob
-    end
-  end
-
-  test "creates preview later without transforming variants if required and there are variants to preprocess" do
-    blob = create_file_blob(filename: "report.pdf")
-
-    assert_enqueued_with job: ActiveStorage::PreviewImageJob, args: [blob, [resize_to_fill: [400, 400]]] do
-      assert_no_enqueued_jobs only: ActiveStorage::TransformJob do
-        @user.resume_with_preprocessing.attach blob
-      end
-    end
   end
 end

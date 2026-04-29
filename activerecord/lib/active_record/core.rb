@@ -276,7 +276,7 @@ module ActiveRecord
         return super if StatementCache.unsupported_value?(id)
 
         cached_find_by([primary_key], [id]) ||
-          raise(RecordNotFound.new("Couldn't find #{name} with '#{primary_key}'=#{id}", name, primary_key, id))
+          raise(RecordNotFound.new("Couldn't find #{name} with '#{primary_key}'=#{id.inspect}", name, primary_key, id))
       end
 
       def find_by(*args) # :nodoc:
@@ -347,7 +347,11 @@ module ActiveRecord
       # Returns columns which shouldn't be exposed while calling +#inspect+.
       def filter_attributes
         if @filter_attributes.nil?
-          superclass.filter_attributes
+          if superclass <= Base
+            superclass.filter_attributes
+          else
+            nil
+          end
         else
           @filter_attributes
         end
@@ -356,7 +360,15 @@ module ActiveRecord
       # Specifies columns which shouldn't be exposed while calling +#inspect+.
       def filter_attributes=(filter_attributes)
         @inspection_filter = nil
-        @filter_attributes = filter_attributes
+        previous = if @filter_attributes
+          self.filter_attributes
+        else
+          Base.filter_attributes
+        end
+        changes = @filter_attributes = filter_attributes
+
+        changes -= previous if previous
+        FilterAttributeHandler.sensitive_attribute_was_declared(self, changes)
       end
 
       def inspection_filter # :nodoc:
@@ -496,7 +508,7 @@ module ActiveRecord
     #   post.title # => 'hello world'
     def init_with(coder, &block)
       coder = LegacyYamlAdapter.convert(coder)
-      attributes = self.class.yaml_encoder.decode(coder)
+      attributes = ActiveModel::AttributeSet::YAMLEncoder.decode(coder, self.class.attribute_types)
       init_with_attributes(attributes, coder["new_record"], &block)
     end
 
@@ -584,7 +596,7 @@ module ActiveRecord
     #   Post.new.encode_with(coder)
     #   coder # => {"attributes" => {"id" => nil, ... }}
     def encode_with(coder)
-      self.class.yaml_encoder.encode(@attributes, coder)
+      ActiveModel::AttributeSet::YAMLEncoder.encode(@attributes, coder, self.class.attribute_types)
       coder["new_record"] = new_record?
       coder["active_record_yaml_version"] = 2
     end
@@ -599,7 +611,7 @@ module ActiveRecord
     #
     #   topic = Topic.new(title: "Budget", author_name: "Jason")
     #   topic.slice(:title, :author_name)
-    #   => { "title" => "Budget", "author_name" => "Jason" }
+    #   # => { "title" => "Budget", "author_name" => "Jason" }
     #
     #--
     # Implemented by ActiveModel::Access#slice.
@@ -613,7 +625,7 @@ module ActiveRecord
     #
     #   topic = Topic.new(title: "Budget", author_name: "Jason")
     #   topic.values_at(:title, :author_name)
-    #   => ["Budget", "Jason"]
+    #   # => ["Budget", "Jason"]
     #
     #--
     # Implemented by ActiveModel::Access#values_at.
@@ -641,7 +653,7 @@ module ActiveRecord
       id = self.id
 
       if self.class.composite_primary_key? ? primary_key_values_present? : id
-        self.class.hash ^ id.hash
+        [self.class, id].hash
       else
         super
       end
@@ -690,12 +702,14 @@ module ActiveRecord
     # Sets the record to strict_loading mode. This will raise an error
     # if the record tries to lazily load an association.
     #
+    # NOTE: Strict loading is disabled during validation in order to let the record validate its association.
+    #
     #   user = User.first
     #   user.strict_loading! # => true
     #   user.address.city
-    #   => ActiveRecord::StrictLoadingViolationError
+    #   # => ActiveRecord::StrictLoadingViolationError
     #   user.comments.to_a
-    #   => ActiveRecord::StrictLoadingViolationError
+    #   # => ActiveRecord::StrictLoadingViolationError
     #
     # ==== Parameters
     #
@@ -715,7 +729,7 @@ module ActiveRecord
     #   user.address.city # => "Tatooine"
     #   user.comments.to_a # => [#<Comment:0x00...]
     #   user.comments.first.ratings.to_a
-    #   => ActiveRecord::StrictLoadingViolationError
+    #   # => ActiveRecord::StrictLoadingViolationError
     def strict_loading!(value = true, mode: :all)
       unless [:all, :n_plus_one_only].include?(mode)
         raise ArgumentError, "The :mode option must be one of [:all, :n_plus_one_only] but #{mode.inspect} was provided."
@@ -854,7 +868,7 @@ module ActiveRecord
         self.class.instance_method(:inspect).owner != ActiveRecord::Base.instance_method(:inspect).owner
       end
 
-      class InspectionMask < DelegateClass(::String)
+      class InspectionMask < ActiveSupport::Delegation::DelegateClass(::String)
         def pretty_print(pp)
           pp.text __getobj__
         end

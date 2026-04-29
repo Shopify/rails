@@ -6,12 +6,12 @@ module ActiveRecord
       module SchemaStatements # :nodoc:
         # Returns an array of indexes for the given table.
         def indexes(table_name)
-          internal_exec_query("PRAGMA index_list(#{quote_table_name(table_name)})", "SCHEMA").filter_map do |row|
+          query_all("PRAGMA index_list(#{quote_table_name(table_name)})").filter_map do |row|
             # Indexes SQLite creates implicitly for internal use start with "sqlite_".
             # See https://www.sqlite.org/fileformat2.html#intschema
             next if row["name"].start_with?("sqlite_")
 
-            index_sql = query_value(<<~SQL, "SCHEMA")
+            index_sql = query_value(<<~SQL)
               SELECT sql
               FROM sqlite_master
               WHERE name = #{quote(row['name'])} AND type = 'index'
@@ -23,7 +23,7 @@ module ActiveRecord
 
             /\bON\b\s*"?(\w+?)"?\s*\((?<expressions>.+?)\)(?:\s*WHERE\b\s*(?<where>.+))?(?:\s*\/\*.*\*\/)?\z/i =~ index_sql
 
-            columns = internal_exec_query("PRAGMA index_info(#{quote(row['name'])})", "SCHEMA").map do |col|
+            columns = query_all("PRAGMA index_info(#{quote(row['name'])})").map do |col|
               col["name"]
             end
 
@@ -63,33 +63,23 @@ module ActiveRecord
         end
 
         def remove_foreign_key(from_table, to_table = nil, **options)
-          return if options.delete(:if_exists) == true && !foreign_key_exists?(from_table, to_table, **options.slice(:column))
+          return if options.delete(:if_exists) && !foreign_key_exists?(from_table, to_table, **options.slice(:column))
 
           to_table ||= options[:to_table]
           options = options.except(:name, :to_table, :validate)
+          fkey = foreign_key_for!(from_table, to_table: to_table, **options)
+
           foreign_keys = foreign_keys(from_table)
-
-          fkey = foreign_keys.detect do |fk|
-            table = to_table || begin
-              table = options[:column].to_s.delete_suffix("_id")
-              Base.pluralize_table_names ? table.pluralize : table
-            end
-            table = strip_table_name_prefix_and_suffix(table)
-            options = options.slice(*fk.options.keys)
-            fk_to_table = strip_table_name_prefix_and_suffix(fk.to_table)
-            fk_to_table == table && options.all? { |k, v| fk.options[k].to_s == v.to_s }
-          end || raise(ArgumentError, "Table '#{from_table}' has no foreign key for #{to_table || options}")
-
           foreign_keys.delete(fkey)
           alter_table(from_table, foreign_keys)
         end
 
         def virtual_table_exists?(table_name)
-          query_values(data_source_sql(table_name, type: "VIRTUAL TABLE"), "SCHEMA").any?
+          query_values(data_source_sql(table_name, type: "VIRTUAL TABLE")).any?
         end
 
         def check_constraints(table_name)
-          table_sql = query_value(<<-SQL, "SCHEMA")
+          table_sql = query_value(<<-SQL)
             SELECT sql
             FROM sqlite_master
             WHERE name = #{quote(table_name)} AND type = 'table'

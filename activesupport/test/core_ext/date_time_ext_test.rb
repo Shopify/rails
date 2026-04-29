@@ -78,13 +78,8 @@ class DateTimeExtCalculationsTest < ActiveSupport::TestCase
     with_env_tz "US/Eastern" do
       assert_instance_of Time, DateTime.new(2005, 2, 21, 10, 11, 12, 0).to_time
 
-      if ActiveSupport.to_time_preserves_timezone
-        assert_equal Time.local(2005, 2, 21, 5, 11, 12).getlocal(0), DateTime.new(2005, 2, 21, 10, 11, 12, 0).to_time
-        assert_equal Time.local(2005, 2, 21, 5, 11, 12).getlocal(0).utc_offset, DateTime.new(2005, 2, 21, 10, 11, 12, 0).to_time.utc_offset
-      else
-        assert_equal Time.local(2005, 2, 21, 5, 11, 12), DateTime.new(2005, 2, 21, 10, 11, 12, 0).to_time
-        assert_equal Time.local(2005, 2, 21, 5, 11, 12).utc_offset, DateTime.new(2005, 2, 21, 10, 11, 12, 0).to_time.utc_offset
-      end
+      assert_equal Time.local(2005, 2, 21, 5, 11, 12).getlocal(0), DateTime.new(2005, 2, 21, 10, 11, 12, 0).to_time
+      assert_equal Time.local(2005, 2, 21, 5, 11, 12).getlocal(0).utc_offset, DateTime.new(2005, 2, 21, 10, 11, 12, 0).to_time.utc_offset
     end
   end
 
@@ -360,6 +355,33 @@ class DateTimeExtCalculationsTest < ActiveSupport::TestCase
       assert_equal false,  DateTime.civil(2005, 2, 10, 20, 30, 44).future?
       assert_equal false,  DateTime.civil(2005, 2, 10, 20, 30, 45).future?
       assert_equal true,  DateTime.civil(2005, 2, 10, 20, 30, 46).future?
+    end
+  end
+
+  def test_this_week
+    Date.stub(:current, Date.new(2000, 1, 5)) do # Wed, 2000-01-05
+      assert_equal false, Time.utc(2000, 1, 2, 23, 59, 59).this_week?
+      assert_equal true,  Time.utc(2000, 1, 3, 0, 0, 0).this_week?
+      assert_equal true,  Time.utc(2000, 1, 9, 23, 59, 59).this_week?
+      assert_equal false, Time.utc(2000, 1, 10, 0, 0, 0).this_week?
+    end
+  end
+
+  def test_this_month
+    Date.stub(:current, Date.new(2000, 1, 15)) do
+      assert_equal false, Time.utc(1999, 12, 31, 23, 59, 59).this_month?
+      assert_equal true,  Time.utc(2000, 1, 1, 0, 0, 0).this_month?
+      assert_equal true,  Time.utc(2000, 1, 31, 23, 59, 59).this_month?
+      assert_equal false, Time.utc(2000, 2, 1, 0, 0, 0).this_month?
+    end
+  end
+
+  def test_this_year
+    Date.stub(:current, Date.new(2000, 6, 30)) do
+      assert_equal false, Time.utc(1999, 12, 31, 23, 59, 59).this_year?
+      assert_equal true,  Time.utc(2000, 1, 1, 0, 0, 0).this_year?
+      assert_equal true,  Time.utc(2000, 12, 31, 23, 59, 59).this_year?
+      assert_equal false, Time.utc(2001, 1, 1, 0, 0, 0).this_year?
     end
   end
 

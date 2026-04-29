@@ -192,19 +192,19 @@ class BasicsTest < ActiveRecord::TestCase
 
   def test_invalid_limit
     assert_raises(ArgumentError) do
-      Topic.limit("asdfadf").to_a
+      Topic.limit("asdfadf")
     end
   end
 
   def test_limit_should_sanitize_sql_injection_for_limit_without_commas
     assert_raises(ArgumentError) do
-      Topic.limit("1 select * from schema").to_a
+      Topic.limit("1 select * from schema")
     end
   end
 
   def test_limit_should_sanitize_sql_injection_for_limit_with_commas
     assert_raises(ArgumentError) do
-      Topic.limit("1, 7 procedure help()").to_a
+      Topic.limit("1, 7 procedure help()")
     end
   end
 
@@ -1176,6 +1176,20 @@ class BasicsTest < ActiveRecord::TestCase
       end
     end
 
+    def test_switching_default_time_zone_with_find_by_sql
+      with_env_tz do
+        with_timezone_config default: :utc do
+          default = Default.create!
+          assert_equal Time.utc(2004, 1, 1, 0, 0, 0, 0), default.fixed_time
+
+          ActiveRecord.default_timezone = :local
+
+          time = Default.find_by_sql("SELECT * FROM defaults WHERE id = #{default.id}").first.fixed_time
+          assert_equal Time.local(2004, 1, 1, 0, 0, 0, 0), time
+        end
+      end
+    end
+
     def test_mutating_time_objects
       with_env_tz do
         with_timezone_config default: :local do
@@ -1377,16 +1391,16 @@ class BasicsTest < ActiveRecord::TestCase
   end
 
   def test_count_with_join
-    res = Post.count_by_sql "SELECT COUNT(*) FROM posts LEFT JOIN comments ON posts.id=comments.post_id WHERE posts.#{QUOTED_TYPE} = 'Post'"
-    res2 = Post.where("posts.#{QUOTED_TYPE} = 'Post'").joins("LEFT JOIN comments ON posts.id=comments.post_id").count
+    res = Post.count_by_sql "SELECT COUNT(*) FROM posts LEFT JOIN comments ON posts.id=comments.post_id WHERE posts.#{ARTest::QUOTED_TYPE} = 'Post'"
+    res2 = Post.where("posts.#{ARTest::QUOTED_TYPE} = 'Post'").joins("LEFT JOIN comments ON posts.id=comments.post_id").count
     assert_equal res, res2
 
-    res4 = Post.count_by_sql "SELECT COUNT(p.id) FROM posts p, comments co WHERE p.#{QUOTED_TYPE} = 'Post' AND p.id=co.post_id"
-    res5 = Post.where("p.#{QUOTED_TYPE} = 'Post' AND p.id=co.post_id").joins("p, comments co").select("p.id").count
+    res4 = Post.count_by_sql "SELECT COUNT(p.id) FROM posts p, comments co WHERE p.#{ARTest::QUOTED_TYPE} = 'Post' AND p.id=co.post_id"
+    res5 = Post.where("p.#{ARTest::QUOTED_TYPE} = 'Post' AND p.id=co.post_id").joins("p, comments co").select("p.id").count
     assert_equal res4, res5
 
-    res6 = Post.count_by_sql "SELECT COUNT(DISTINCT p.id) FROM posts p, comments co WHERE p.#{QUOTED_TYPE} = 'Post' AND p.id=co.post_id"
-    res7 = Post.where("p.#{QUOTED_TYPE} = 'Post' AND p.id=co.post_id").joins("p, comments co").select("p.id").distinct.count
+    res6 = Post.count_by_sql "SELECT COUNT(DISTINCT p.id) FROM posts p, comments co WHERE p.#{ARTest::QUOTED_TYPE} = 'Post' AND p.id=co.post_id"
+    res7 = Post.where("p.#{ARTest::QUOTED_TYPE} = 'Post' AND p.id=co.post_id").joins("p, comments co").select("p.id").distinct.count
     assert_equal res6, res7
   end
 
@@ -1833,6 +1847,31 @@ class BasicsTest < ActiveRecord::TestCase
     assert_respond_to SymbolIgnoredDeveloper.new, :last_name?
   end
 
+  test "permitted columns have attribute methods" do
+    assert_respond_to OnlyColumnsDeveloper.new, OnlyColumnsDeveloper.primary_key
+    assert_respond_to OnlyColumnsDeveloper.new, :name
+    assert_respond_to OnlyColumnsDeveloper.new, :name=
+    assert_respond_to OnlyColumnsDeveloper.new, :name?
+    assert_respond_to OnlyColumnsDeveloper.new, :salary
+    assert_respond_to OnlyColumnsDeveloper.new, :salary=
+    assert_respond_to OnlyColumnsDeveloper.new, :salary?
+    assert_respond_to OnlyColumnsDeveloper.new, :firm_id
+    assert_respond_to OnlyColumnsDeveloper.new, :firm_id=
+    assert_respond_to OnlyColumnsDeveloper.new, :firm_id?
+    assert_respond_to OnlyColumnsDeveloper.new, :mentor_id
+    assert_respond_to OnlyColumnsDeveloper.new, :mentor_id=
+    assert_respond_to OnlyColumnsDeveloper.new, :mentor_id?
+  end
+
+  test "not permitted columns have not attribute methods" do
+    assert_not_respond_to OnlyColumnsDeveloper.new, :first_name
+    assert_not_respond_to OnlyColumnsDeveloper.new, :first_name=
+    assert_not_respond_to OnlyColumnsDeveloper.new, :first_name?
+    assert_not_respond_to OnlyColumnsDeveloper.new, :legacy_created_at
+    assert_not_respond_to OnlyColumnsDeveloper.new, :legacy_created_at=
+    assert_not_respond_to OnlyColumnsDeveloper.new, :legacy_created_at?
+  end
+
   test "ignored columns are stored as an array of string" do
     assert_equal(%w(first_name last_name), Developer.ignored_columns)
     assert_equal(%w(first_name last_name), SymbolIgnoredDeveloper.ignored_columns)
@@ -1884,15 +1923,53 @@ class BasicsTest < ActiveRecord::TestCase
   end
 
   test "protected environments by default is an array with production" do
-    assert_equal ["production"], ActiveRecord::Base.protected_environments
+    assert_equal ["production"], ActiveRecord.protected_environments
+
+    assert_deprecated(ActiveRecord.deprecator) do
+      assert_equal ["production"], ActiveRecord::Base.protected_environments
+    end
   end
 
   def test_protected_environments_are_stored_as_an_array_of_string
-    previous_protected_environments = ActiveRecord::Base.protected_environments
-    ActiveRecord::Base.protected_environments = [:staging, "production"]
-    assert_equal ["staging", "production"], ActiveRecord::Base.protected_environments
+    previous_protected_environments = ActiveRecord.protected_environments
+
+    ActiveRecord.protected_environments = [:staging, "production"]
+
+    assert_equal ["staging", "production"], ActiveRecord.protected_environments
+    assert_deprecated(ActiveRecord.deprecator) do
+      assert_equal ["staging", "production"], ActiveRecord::Base.protected_environments
+    end
+
+    assert_deprecated(ActiveRecord.deprecator) do
+      ActiveRecord::Base.protected_environments = [:prod, :staging]
+    end
+
+    assert_equal ["prod", "staging"], ActiveRecord.protected_environments
+    assert_deprecated(ActiveRecord.deprecator) do
+      assert_equal ["prod", "staging"], ActiveRecord::Base.protected_environments
+    end
   ensure
-    ActiveRecord::Base.protected_environments = previous_protected_environments
+    ActiveRecord.protected_environments = previous_protected_environments
+  end
+
+  def test_deprecated_protected_environments_on_subclasses
+    model = Class.new(ActiveRecord::Base)
+
+    assert_deprecated(ActiveRecord.deprecator) do
+      assert_equal ["production"], model.protected_environments
+    end
+
+    assert_deprecated(ActiveRecord.deprecator) do
+      model.protected_environments = [:prod]
+    end
+
+    assert_deprecated(ActiveRecord.deprecator) do
+      assert_equal ["prod"], model.protected_environments
+    end
+
+    assert_deprecated(ActiveRecord.deprecator) do
+      assert_equal ["production"], ActiveRecord::Base.protected_environments
+    end
   end
 
   test "#present? and #blank? on ActiveRecord::Base classes" do

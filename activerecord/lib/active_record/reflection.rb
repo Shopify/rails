@@ -426,13 +426,13 @@ module ActiveRecord
       def _klass(class_name) # :nodoc:
         if active_record.name.demodulize == class_name
           begin
-            compute_class("::#{class_name}")
-          rescue NameError
-            compute_class(class_name)
+            return compute_class("::#{class_name}")
+          rescue
+            # Ignored
           end
-        else
-          compute_class(class_name)
         end
+
+        compute_class(class_name)
       end
 
       def compute_class(name)
@@ -520,6 +520,8 @@ module ActiveRecord
 
       def initialize(name, scope, options, active_record)
         super
+
+        @validated = false
         @type = -(options[:foreign_type]&.to_s || "#{options[:as]}_type") if options[:as]
         @foreign_type = -(options[:foreign_type]&.to_s || "#{name}_type") if options[:polymorphic]
         @join_table = nil
@@ -537,6 +539,8 @@ module ActiveRecord
         if options[:foreign_key].is_a?(Array)
           options[:query_constraints] = options.delete(:foreign_key)
         end
+
+        @deprecated = !!options[:deprecated]
 
         ensure_option_not_given_as_class!(:class_name)
       end
@@ -567,13 +571,12 @@ module ActiveRecord
         else
           derived_fk = derive_foreign_key(infer_from_inverse_of: infer_from_inverse_of)
 
-          if active_record.has_query_constraints?
+          if !derived_fk.is_a?(Array) && active_record.has_query_constraints?
             derived_fk = derive_fk_query_constraints(derived_fk)
           end
 
           if derived_fk.is_a?(Array)
-            derived_fk.map! { |fk| -fk.freeze }
-            derived_fk.freeze
+            derived_fk.map { |fk| -fk.freeze }.freeze
           else
             -derived_fk.freeze
           end
@@ -620,6 +623,8 @@ module ActiveRecord
       end
 
       def check_validity!
+        return if @validated
+
         check_validity_of_inverse!
 
         if !polymorphic? && (klass.composite_primary_key? || active_record.composite_primary_key?)
@@ -629,6 +634,8 @@ module ActiveRecord
             raise CompositePrimaryKeyMismatchError.new(self)
           end
         end
+
+        @validated = true
       end
 
       def check_eager_loadable!
@@ -744,6 +751,10 @@ module ActiveRecord
 
       def extensions
         Array(options[:extend])
+      end
+
+      def deprecated?
+        @deprecated
       end
 
       private
@@ -979,6 +990,8 @@ module ActiveRecord
 
       def initialize(delegate_reflection)
         super()
+
+        @validated = false
         @delegate_reflection = delegate_reflection
         @klass = delegate_reflection.options[:anonymous_class]
         @source_reflection_name = delegate_reflection.options[:source]
@@ -1088,7 +1101,11 @@ module ActiveRecord
         # Get the "actual" source reflection if the immediate source reflection has a
         # source reflection itself
         if primary_key = actual_source_reflection.options[:primary_key]
-          @association_primary_key ||= -primary_key.to_s
+          @association_primary_key ||= if primary_key.is_a?(Array)
+            primary_key.map { |pk| pk.to_s.freeze }.freeze
+          else
+            -primary_key.to_s
+          end
         else
           primary_key(klass || self.klass)
         end
@@ -1142,6 +1159,8 @@ module ActiveRecord
       end
 
       def check_validity!
+        return if @validated
+
         if through_reflection.nil?
           raise HasManyThroughAssociationNotFoundError.new(active_record, self)
         end
@@ -1179,6 +1198,8 @@ module ActiveRecord
         end
 
         check_validity_of_inverse!
+
+        @validated = true
       end
 
       def constraints
@@ -1197,6 +1218,10 @@ module ActiveRecord
 
       def add_as_through(seed)
         collect_join_reflections(seed + [self])
+      end
+
+      def deprecated_nested_reflections
+        @deprecated_nested_reflections ||= collect_deprecated_nested_reflections
       end
 
       protected
@@ -1221,6 +1246,19 @@ module ActiveRecord
         def derive_class_name
           # get the class_name of the belongs_to association of the through reflection
           options[:source_type] || source_reflection.class_name
+        end
+
+        def collect_deprecated_nested_reflections
+          result = []
+          [through_reflection, source_reflection].each do |reflection|
+            result << reflection if reflection.deprecated?
+            # Both the through and the source reflections could be through
+            # themselves. Nesting can go an arbitrary number of levels down.
+            if reflection.through_reflection?
+              result.concat(reflection.deprecated_nested_reflections)
+            end
+          end
+          result
         end
 
         delegate_methods = AssociationReflection.public_instance_methods -

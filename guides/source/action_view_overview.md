@@ -456,7 +456,7 @@ render a partial template for each object in the collection. This pattern has
 been implemented as a single method that accepts an array and renders a partial
 for each one of the elements in the array.
 
-So this example for rendering all the products:
+For example, to render all products:
 
 ```erb
 <% @products.each do |product| %>
@@ -523,6 +523,8 @@ view, starting with a value of `0` on the first render.
 
 This also works when the local variable name is changed using the `as:` option.
 So if you did `as: :item`, the counter variable would be `item_counter`.
+
+NOTE: When rendering collections with instances of different models, the counter variable increments for each partial, regardless of the class of the model being rendered.
 
 Note: The following two sections, [Strict Locals](#strict-locals) and [Local
 Assigns with Pattern Matching](#local-assigns-with-pattern-matching) are more

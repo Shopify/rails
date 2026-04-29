@@ -24,22 +24,22 @@ module ActiveRecord
     #   TravelRoute.primary_key = [:origin, :destination]
     #
     #   TravelRoute.find(["Ottawa", "London"])
-    #   => #<TravelRoute origin: "Ottawa", destination: "London">
+    #   # => #<TravelRoute origin: "Ottawa", destination: "London">
     #
     #   TravelRoute.find([["Paris", "Montreal"]])
-    #   => [#<TravelRoute origin: "Paris", destination: "Montreal">]
+    #   # => [#<TravelRoute origin: "Paris", destination: "Montreal">]
     #
     #   TravelRoute.find(["New York", "Las Vegas"], ["New York", "Portland"])
-    #   => [
-    #        #<TravelRoute origin: "New York", destination: "Las Vegas">,
-    #        #<TravelRoute origin: "New York", destination: "Portland">
-    #      ]
+    #   # => [
+    #   #      #<TravelRoute origin: "New York", destination: "Las Vegas">,
+    #   #      #<TravelRoute origin: "New York", destination: "Portland">
+    #   #    ]
     #
     #   TravelRoute.find([["Berlin", "London"], ["Barcelona", "Lisbon"]])
-    #   => [
-    #        #<TravelRoute origin: "Berlin", destination: "London">,
-    #        #<TravelRoute origin: "Barcelona", destination: "Lisbon">
-    #      ]
+    #   # => [
+    #   #      #<TravelRoute origin: "Berlin", destination: "London">,
+    #   #      #<TravelRoute origin: "Barcelona", destination: "Lisbon">
+    #   #    ]
     #
     # NOTE: The returned records are in the same order as the ids you provide.
     # If you want the results to be sorted by database, you can use ActiveRecord::QueryMethods#where
@@ -124,7 +124,7 @@ module ActiveRecord
     #
     #   Person.take # returns an object fetched by SELECT * FROM people LIMIT 1
     #   Person.take(5) # returns 5 objects fetched by SELECT * FROM people LIMIT 5
-    #   Person.where(["name LIKE '%?'", name]).take
+    #   Person.where("name LIKE ?", "%#{name}").take
     def take(limit = nil)
       limit ? find_take_with_limit(limit) : find_take
     end
@@ -139,7 +139,7 @@ module ActiveRecord
     # record is found. Raises ActiveRecord::SoleRecordExceeded if more than one
     # record is found.
     #
-    #   Product.where(["price = %?", price]).sole
+    #   Product.where(["price = ?", price]).sole
     def sole
       found, undesired = take(2)
 
@@ -148,7 +148,7 @@ module ActiveRecord
       elsif undesired.nil?
         found
       else
-        raise ActiveRecord::SoleRecordExceeded.new(model)
+        raise ActiveRecord::SoleRecordExceeded.new(self)
       end
     end
 
@@ -156,7 +156,7 @@ module ActiveRecord
     # record is found. Raises ActiveRecord::SoleRecordExceeded if more than one
     # record is found.
     #
-    #   Product.find_sole_by(["price = %?", price])
+    #   Product.find_sole_by(["price = ?", price])
     def find_sole_by(arg, *args)
       where(arg, *args).sole
     end
@@ -165,8 +165,7 @@ module ActiveRecord
     # If no order is defined it will order by primary key.
     #
     #   Person.first # returns the first object fetched by SELECT * FROM people ORDER BY people.id LIMIT 1
-    #   Person.where(["user_name = ?", user_name]).first
-    #   Person.where(["user_name = :u", { u: user_name }]).first
+    #   Person.where(user_name: user_name).first
     #   Person.order("created_on DESC").offset(5).first
     #   Person.first(3) # returns the first three objects fetched by SELECT * FROM people ORDER BY people.id LIMIT 3
     #
@@ -188,7 +187,7 @@ module ActiveRecord
     # If no order is defined it will order by primary key.
     #
     #   Person.last # returns the last object fetched by SELECT * FROM people
-    #   Person.where(["user_name = ?", user_name]).last
+    #   Person.where(user_name: user_name).last
     #   Person.order("created_on DESC").offset(5).last
     #   Person.last(3) # returns the last three objects fetched by SELECT * FROM people.
     #
@@ -219,7 +218,7 @@ module ActiveRecord
     #
     #   Person.second # returns the second object fetched by SELECT * FROM people
     #   Person.offset(3).second # returns the second object from OFFSET 3 (which is OFFSET 4)
-    #   Person.where(["user_name = :u", { u: user_name }]).second
+    #   Person.where(user_name: user_name).second
     def second
       find_nth 1
     end
@@ -235,7 +234,7 @@ module ActiveRecord
     #
     #   Person.third # returns the third object fetched by SELECT * FROM people
     #   Person.offset(3).third # returns the third object from OFFSET 3 (which is OFFSET 5)
-    #   Person.where(["user_name = :u", { u: user_name }]).third
+    #   Person.where(user_name: user_name).third
     def third
       find_nth 2
     end
@@ -251,7 +250,7 @@ module ActiveRecord
     #
     #   Person.fourth # returns the fourth object fetched by SELECT * FROM people
     #   Person.offset(3).fourth # returns the fourth object from OFFSET 3 (which is OFFSET 6)
-    #   Person.where(["user_name = :u", { u: user_name }]).fourth
+    #   Person.where(user_name: user_name).fourth
     def fourth
       find_nth 3
     end
@@ -267,7 +266,7 @@ module ActiveRecord
     #
     #   Person.fifth # returns the fifth object fetched by SELECT * FROM people
     #   Person.offset(3).fifth # returns the fifth object from OFFSET 3 (which is OFFSET 7)
-    #   Person.where(["user_name = :u", { u: user_name }]).fifth
+    #   Person.where(user_name: user_name).fifth
     def fifth
       find_nth 4
     end
@@ -283,7 +282,7 @@ module ActiveRecord
     #
     #   Person.forty_two # returns the forty-second object fetched by SELECT * FROM people
     #   Person.offset(3).forty_two # returns the forty-second object from OFFSET 3 (which is OFFSET 44)
-    #   Person.where(["user_name = :u", { u: user_name }]).forty_two
+    #   Person.where(user_name: user_name).forty_two
     def forty_two
       find_nth 41
     end
@@ -299,7 +298,7 @@ module ActiveRecord
     #
     #   Person.third_to_last # returns the third-to-last object fetched by SELECT * FROM people
     #   Person.offset(3).third_to_last # returns the third-to-last object from OFFSET 3
-    #   Person.where(["user_name = :u", { u: user_name }]).third_to_last
+    #   Person.where(user_name: user_name).third_to_last
     def third_to_last
       find_nth_from_last 3
     end
@@ -315,7 +314,7 @@ module ActiveRecord
     #
     #   Person.second_to_last # returns the second-to-last object fetched by SELECT * FROM people
     #   Person.offset(3).second_to_last # returns the second-to-last object from OFFSET 3
-    #   Person.where(["user_name = :u", { u: user_name }]).second_to_last
+    #   Person.where(user_name: user_name).second_to_last
     def second_to_last
       find_nth_from_last 2
     end
@@ -348,6 +347,7 @@ module ActiveRecord
     #
     #   Person.exists?(5)
     #   Person.exists?('5')
+    #   Person.exists?('name LIKE ?', "%#{query}%")
     #   Person.exists?(['name LIKE ?', "%#{query}%"])
     #   Person.exists?(id: [1, 4, 8])
     #   Person.exists?(name: 'David')
@@ -424,12 +424,13 @@ module ActiveRecord
         error << " with#{conditions}" if conditions
         raise RecordNotFound.new(error, name, key)
       elsif Array.wrap(ids).size == 1
-        error = "Couldn't find #{name} with '#{key}'=#{ids}#{conditions}"
+        id = Array.wrap(ids)[0]
+        error = "Couldn't find #{name} with '#{key}'=#{id.inspect}#{conditions}"
         raise RecordNotFound.new(error, name, key, ids)
       else
         error = +"Couldn't find all #{name.pluralize} with '#{key}': "
-        error << "(#{ids.join(", ")})#{conditions} (found #{result_size} results, but was looking for #{expected_size})."
-        error << " Couldn't find #{name.pluralize(not_found_ids.size)} with #{key.to_s.pluralize(not_found_ids.size)} #{not_found_ids.join(', ')}." if not_found_ids
+        error << "(#{ids.map(&:inspect).join(", ")})#{conditions} (found #{result_size} results, but was looking for #{expected_size})."
+        error << " Couldn't find #{name.pluralize(not_found_ids.size)} with #{key.to_s.pluralize(not_found_ids.size)} #{not_found_ids.map(&:inspect).join(', ')}." if not_found_ids
         raise RecordNotFound.new(error, name, key, ids)
       end
     end
@@ -638,8 +639,27 @@ module ActiveRecord
       end
 
       def ordered_relation
-        if order_values.empty? && !_order_columns.empty?
-          order(_order_columns.map { |column| table[column].asc })
+        if order_values.empty?
+          if !_order_columns.empty?
+            return order(_order_columns.map { |column| table[column].asc })
+          end
+
+          if ActiveRecord.raise_on_missing_required_finder_order_columns
+            raise MissingRequiredOrderError, <<~MSG.squish
+              Relation has no order values, and #{model} has no order columns to use as a default.
+              Set at least one of `implicit_order_column`, `query_constraints` or `primary_key` on
+              the model when no `order `is specified on the relation.
+            MSG
+          else
+            ActiveRecord.deprecator.warn(<<~MSG)
+              Calling order dependent finder methods (e.g. `#first`, `#second`) without `order` values on the relation,
+              and on a model (#{model}) that does not have any order columns (`implicit_order_column`, `query_constraints`,
+              or `primary_key`) to fall back on is deprecated and will raise `ActiveRecord::MissingRequiredOrderError`
+              in Rails 8.2.
+            MSG
+
+            self
+          end
         else
           self
         end
