@@ -154,6 +154,47 @@ module ActionController
         end
       end
 
+      # Force-resolves the lazy +include+ and +name+ memos under +@mutex+
+      # so post-freeze reads can short-circuit on +@include_set+ /
+      # +@name_set+ before touching the mutex. Called from
+      # +Rails.application#ractorize!+'s controller-descendant walker at
+      # boot.
+      def warm_lazy_state! # :nodoc:
+        # Trigger lazy resolution under the mutex when we have a +klass+
+        # to resolve against. The default +Options.from_hash(format: [])+
+        # in the +included+ block constructs an Options with +klass+ nil;
+        # both lazy bodies (+include+ via +_default_wrap_model+ and
+        # +name+ via +klass.anonymous?+) would NoMethodError on nil here,
+        # so skip the resolve and rely on the unconditional flag set
+        # below. The readers short-circuit on +@*_set+ and return
+        # whatever +super+ yields (nil/[]/false), which is the correct
+        # semantic for a klass-less default.
+        unless klass.nil?
+          include
+          name
+        end
+        # Belt-and-braces: regardless of whether the lazy bodies ran (or
+        # whether the constructor was passed truthy +include+/+name+
+        # args), mark both flags so post-freeze reads short-circuit
+        # before touching the cleared mutex.
+        @include_set = true
+        @name_set = true
+        self
+      end
+
+      # Drop the +@mutex+ before freezing so +Ractor.make_shareable+'s
+      # deep-freeze can complete. The mutex is only used to gate the
+      # first-read lazy resolution of +include+ and +name+. After
+      # +warm_lazy_state!+ has forced both +@include_set+ and +@name_set+
+      # to +true+, the readers short-circuit on the +return super if
+      # @*_set+ guard before ever touching +@mutex+. Mirrors the
+      # +MonitorMixin#freeze+ pattern of clearing dead synchronization
+      # state at freeze time.
+      def freeze # :nodoc:
+        @mutex = nil
+        super
+      end
+
       private
         # Determine the wrapper model from the controller's name. By convention, this
         # could be done by trying to find the defined model that has the same singular
@@ -248,6 +289,22 @@ module ActionController
           klass._wrapper_options = params
         end
         super
+      end
+
+      # Force-resolves the lazy +Options#include+ and +Options#name+ memos
+      # for this controller's +_wrapper_options+, then deep-freezes the
+      # +Options+ instance so it can be read from non-main Ractors.
+      # +process_action+ -> +_wrapper_enabled?+ -> +_wrapper_formats+ reads
+      # the +_wrapper_options+ class_attribute on every request, which
+      # raises +Ractor::IsolationError+ on the singleton-class ivar read
+      # from non-main Ractors until the value is shareable. Called from
+      # +Rails.application#ractorize!+'s controller-descendant walker at
+      # boot. Mirrors the +make_controller_name_shareable!+ pattern.
+      def make_wrapper_options_shareable! # :nodoc:
+        opts = _wrapper_options
+        return if opts.nil? || Ractor.shareable?(opts)
+        opts.warm_lazy_state!
+        opts.make_shareable!
       end
     end
 

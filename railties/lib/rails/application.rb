@@ -1227,6 +1227,19 @@ module Rails
       if defined?(ActionController::Metal)
         [ActionController::Metal, *ActionController::Metal.descendants].each do |controller_class|
           controller_class.make_controller_name_shareable!
+          # +ActionController::ParamsWrapper+ (included in +ActionController::Base+
+          # and +ActionController::API+) exposes +_wrapper_options+ as a
+          # +class_attribute+. The default +Options+ instance carries a
+          # +Mutex+ used to gate first-read lazy resolution of +include+
+          # and +name+; +process_action+ -> +_wrapper_enabled?+ ->
+          # +_wrapper_formats+ reads the class_attribute on every request,
+          # which raises +Ractor::IsolationError+ on the singleton-class
+          # ivar read from non-main Ractors until the +Options+ is
+          # shareable. Warm the lazy memos and deep-freeze (clearing the
+          # mutex via +Options#freeze+) for every controller descendant.
+          if controller_class.respond_to?(:make_wrapper_options_shareable!)
+            controller_class.make_wrapper_options_shareable!
+          end
         end
       end
       # Detach Propshaft::Assembly before deep-freeze. Its lazy ivars
