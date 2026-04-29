@@ -1245,6 +1245,15 @@ module Rails
         # +||=+ is a no-op at request time. See
         # +make_finder_needs_type_condition_shareable!+ for the full
         # rationale.
+        # +ActiveRecord::Enum+ stores per-class enum metadata in the
+        # +defined_enums+ class_attribute, default +{}+, deep-duped for each
+        # descendant in +Enum#inherited+. +UniquenessValidator#map_enum_attribute+
+        # reads it on every save that runs a uniqueness validation (and other
+        # enum-aware lookups), which from non-main Ractors raises
+        # +Ractor::IsolationError+ on +instance_variable_get+ of the singleton-
+        # class ivar +@__class_attr_defined_enums+. Snapshot a shareable copy
+        # on every AR class for the same reason +__callbacks+ is walked here.
+        # See +make_defined_enums_shareable!+ for the full rationale.
         [ActiveRecord::Base, *ActiveRecord::Base.descendants].each do |ar_class|
           ar_class.make_callback_chains_shareable!
           ar_class.make_normalized_attributes_shareable! if ar_class.respond_to?(:make_normalized_attributes_shareable!)
@@ -1252,6 +1261,7 @@ module Rails
           ar_class.make_attr_readonly_shareable! if ar_class.respond_to?(:make_attr_readonly_shareable!)
           ar_class.make_default_scope_override_shareable! if ar_class.respond_to?(:make_default_scope_override_shareable!)
           ar_class.make_finder_needs_type_condition_shareable! if ar_class.respond_to?(:make_finder_needs_type_condition_shareable!)
+          ar_class.make_defined_enums_shareable! if ar_class.respond_to?(:make_defined_enums_shareable!)
         end
         # +ActiveRecord::Relation::WhereClause.empty+ memoizes the singleton
         # empty +WhereClause+ in the +@empty+ class ivar via +||=+.

@@ -218,6 +218,19 @@ module ActiveRecord
       _enum(name, values, **options)
     end
 
+    # Force-resolve +defined_enums+ and snapshot a shareable copy so non-main
+    # Ractors can read this +class_attribute+'s singleton-class ivar
+    # (+@__class_attr_defined_enums+). Default is a mutable +{}+ stored on
+    # +ActiveRecord::Base+ and deep-duped for each descendant in +inherited+;
+    # reached on every save by +UniquenessValidator#map_enum_attribute+ -> the
+    # generated reader -> +instance_variable_get+. +copy: true+ keeps caller-
+    # held references unentangled.
+    def make_defined_enums_shareable! # :nodoc:
+      current = defined_enums
+      return if Ractor.shareable?(current)
+      self.defined_enums = Ractor.make_shareable(current, copy: true)
+    end
+
     private
       def _enum(name, values, prefix: nil, suffix: nil, scopes: true, instance_methods: true, validate: false, **options)
         values = assert_valid_enum_definition_values(values)
