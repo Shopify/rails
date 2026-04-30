@@ -7,6 +7,11 @@ require "action_text/version"
 require "action_text/deprecator"
 
 require "nokogiri"
+begin
+  require "nokogiri/html5"
+rescue LoadError
+  # Nokogiri::HTML5 is unavailable; fall back to HTML4.
+end
 
 # :markup: markdown
 # :include: ../README.md
@@ -50,16 +55,11 @@ module ActionText
   end
 
   class << self
-    def html_document_class
-      return @html_document_class if defined?(@html_document_class)
-      @html_document_class =
-        defined?(Nokogiri::HTML5) ? Nokogiri::HTML5::Document : Nokogiri::HTML4::Document
-    end
-
-    def html_document_fragment_class
-      return @html_document_fragment_class if defined?(@html_document_fragment_class)
-      @html_document_fragment_class =
-        defined?(Nokogiri::HTML5) ? Nokogiri::HTML5::DocumentFragment : Nokogiri::HTML4::DocumentFragment
-    end
+    attr_reader :html_document_class, :html_document_fragment_class
   end
+
+  @html_document_class =
+    defined?(Nokogiri::HTML5) ? Nokogiri::HTML5::Document : Nokogiri::HTML4::Document
+  @html_document_fragment_class =
+    defined?(Nokogiri::HTML5) ? Nokogiri::HTML5::DocumentFragment : Nokogiri::HTML4::DocumentFragment
 end
