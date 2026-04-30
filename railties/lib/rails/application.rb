@@ -1225,6 +1225,13 @@ module Rails
             # retrieve_connection_pool+ which is intentionally unimplemented. Cache the
             # Symbol on the class at boot so the cache-version path is connection-free.
             ar_class.make_cached_connection_default_timezone_shareable!
+            # +AttributeMethods::ClassMethods#define_attribute_methods+ is called
+            # from +init_internals+ on every model instantiation. The fast path
+            # short-circuits on +@attribute_methods_generated+, but the slow path
+            # acquires +GeneratedAttributeMethods::LOCK+ (a +Monitor+) which is
+            # non-shareable. Pre-generate at boot so non-main Ractors never reach
+            # the LOCK.
+            ar_class.define_attribute_methods
           end
           # +PredicateBuilder#expand_from_hash+ calls
           # +TableMetadata#associated_with(key)+ for every key in a +where+
