@@ -94,6 +94,22 @@ module ActiveSupport
       )
     end
 
+    # +Hash#to_xml+ reads +TYPE_NAMES+ + +DEFAULT_ENCODINGS+ +
+    # +FORMATTING+ on every value via +XmlMini.to_tag+ (line 133/143/146
+    # below). The +PublicExceptions+ XML render path on a non-main
+    # Ractor (Accept: application/xml on a 4xx/5xx) raises
+    # +Ractor::IsolationError+ on the first constant read otherwise.
+    # All four are computed once at load time (the +TimeWithZone+
+    # alias on line 54 + the +PARSING.update+ above are the only
+    # post-+unless defined?+ writes; both happen once at load) and
+    # never mutated again. +FORMATTING+ / +PARSING+ hold Procs whose
+    # lexical self is the +XmlMini+ module (shareable), so
+    # +Ractor.make_shareable+ deep-freezes the Hashes + Procs in place.
+    Ractor.make_shareable(TYPE_NAMES)
+    Ractor.make_shareable(DEFAULT_ENCODINGS)
+    Ractor.make_shareable(FORMATTING)
+    Ractor.make_shareable(PARSING)
+
     attr_accessor :depth
     self.depth = 100
 

@@ -195,7 +195,15 @@ module ActiveSupport
 
     GEM_SILENCER = ->(line) { FORMATTED_GEMS_PATTERN.match?(line) }.make_shareable!
 
-    STDLIB_SILENCER = ->(line) { line.start_with?(RbConfig::CONFIG["rubylibdir"]) }.make_shareable!
+    # Capture +rubylibdir+ at load time into a frozen +String+ so the
+    # silencer lambda does not need to read +RbConfig::CONFIG+ (a
+    # non-shareable +Hash+) at call time. Without this, every non-main
+    # backtrace cleaning (every error in a Ractor request) raises
+    # +Ractor::IsolationError+ on the constant read -- masks the real
+    # exception (e.g. +UnknownFormat+ -> 406) behind a 500.
+    STDLIB_PREFIX = RbConfig::CONFIG["rubylibdir"].dup.freeze
+    private_constant :STDLIB_PREFIX
+    STDLIB_SILENCER = ->(line) { line.start_with?(STDLIB_PREFIX) }.make_shareable!
 
     GEM_FILTER = begin
       gems_paths = (Gem.path | [Gem.default_dir]).map { |p| Regexp.escape(p) }

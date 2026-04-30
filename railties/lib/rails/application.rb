@@ -1039,6 +1039,45 @@ module Rails
       # +Mime::Type.register+ / +register_alias+ / +register_callback+ /
       # +unregister+ raise +FrozenError+ pointing back here.
       Mime::Type.make_shareable! if defined?(Mime::Type)
+      # +Builder::XChar+ (from the +builder+ gem, used by
+      # +Hash#to_xml+ via +ActiveSupport+) computes ~10 module-level
+      # constants once at load time and never mutates them again:
+      # +CP1252+ (Hash), +PREDEFINED+ (Hash), +VALID+ (Array of
+      # Integer/Range), +REPLACEMENT_CHAR+ (String), +CP1252_DIFFERENCES+
+      # / +UNICODE_EQUIVALENT+ (packed UTF-8 Strings),
+      # +XML_PREDEFINED+ / +INVALID_XML_CHAR+ (Regexps built via
+      # +Regexp.new+), +ENCODING_BINARY+ / +UTF8+ / +ISO1+ (Encoding
+      # objects). +XChar.encode+ reads +CP1252_DIFFERENCES+ +
+      # +UNICODE_EQUIVALENT+ + +INVALID_XML_CHAR+ + +XML_PREDEFINED+
+      # on every call, so a non-main render through Builder (e.g.
+      # +PublicExceptions+ rendering an XML 406 page) raises
+      # +Ractor::IsolationError+ on the first constant read.
+      # Per the no-gem-code rule, deep-freeze each constant here at
+      # boot via +Ractor.make_shareable+. Skipped if Builder is not
+      # loaded (apps without XML rendering).
+      # +Hash#to_xml+ lazy-requires +active_support/builder+ on first
+      # call, which means at +ractorize!+ time +Builder+ is usually
+      # not loaded and the eager-warm below is a no-op. Eager-require
+      # it now so the constants exist before the freeze pass; the
+      # gem is already a Gemfile dependency since +PublicExceptions+
+      # XML rendering needs it.
+      begin
+        require "active_support/builder"
+      rescue LoadError
+        # +builder+ gem not installed -- skip silently, exactly like
+        # apps that don't ever render XML.
+      end
+      if defined?(::Builder::XChar)
+        [:CP1252, :PREDEFINED, :VALID, :REPLACEMENT_CHAR,
+         :CP1252_DIFFERENCES, :UNICODE_EQUIVALENT,
+         :XML_PREDEFINED, :INVALID_XML_CHAR,
+         :ENCODING_BINARY, :ENCODING_UTF8, :ENCODING_ISO1].each do |const|
+          if ::Builder::XChar.const_defined?(const)
+            value = ::Builder::XChar.const_get(const)
+            Ractor.make_shareable(value) unless Ractor.shareable?(value)
+          end
+        end
+      end
       # +ActiveSupport::JSON::Encoding+ caches two encoder instances on
       # its singleton (+@encoder_without_options+ / +@encoder_without_escape+)
       # that +ActiveSupport::JSON.encode+ reads from non-main Ractors on
