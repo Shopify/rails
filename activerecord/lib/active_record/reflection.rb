@@ -250,7 +250,10 @@ module ActiveRecord
           # and the clone start out validated. Skip aggregate reflections
           # (no +check_validity!+) and only call when the reflection's
           # context is resolvable (has +klass+ for non-polymorphic).
-          if reflection.is_a?(AssociationReflection)
+          # +ThroughReflection+ inherits from +AbstractReflection+ directly
+          # (not from +AssociationReflection+), but defines its own
+          # +check_validity!+ — include it explicitly.
+          if reflection.is_a?(AssociationReflection) || reflection.is_a?(ThroughReflection)
             begin
               reflection.check_validity!
             rescue NameError, ActiveRecord::AssociationNotFoundError => e
@@ -274,17 +277,25 @@ module ActiveRecord
           end
 
           # +ThroughReflection+ memoizes +@source_reflection_name+ via the
-          # private +source_reflection_name+. Warm only on ThroughReflection
-          # (the only class that defines a memoized version; the abstract
-          # +through_reflection?+ predicate identifies it).
+          # private +source_reflection_name+, and +@deprecated_nested_reflections+
+          # via +deprecated_nested_reflections+ (called from the preloader
+          # branch). Warm only on ThroughReflection (the only class that
+          # defines memoized versions; the abstract +through_reflection?+
+          # predicate identifies it).
           if reflection.through_reflection?
             reflection.send(:source_reflection_name)
+            reflection.deprecated_nested_reflections
           end
 
           # AssociationReflection-specific lazy memos (foreign keys, inverses,
           # counter caches). Skipped for AggregateReflection (which doesn't
-          # define them).
-          if reflection.is_a?(AssociationReflection)
+          # define them). +ThroughReflection+ delegates these to its
+          # +@delegate_reflection+ — the delegate is a HasMany / HasOne /
+          # BelongsTo reflection that is NOT in +_reflections+ on its own
+          # (only the ThroughReflection wrapping it is), so reaching it
+          # through the through-reflection here is the only way to warm
+          # the delegate's +@inverse_name+ etc. before the deep-freeze.
+          if reflection.is_a?(AssociationReflection) || reflection.is_a?(ThroughReflection)
             reflection.foreign_key
             reflection.active_record_primary_key
             reflection.counter_cache_column
