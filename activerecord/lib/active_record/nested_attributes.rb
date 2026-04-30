@@ -371,6 +371,25 @@ module ActiveRecord
         end
       end
 
+      # Force-resolve +nested_attributes_options+ and snapshot a shareable
+      # copy so non-main Ractors can read the singleton-class ivar
+      # +@__class_attr_nested_attributes_options+ that backs this
+      # +class_attribute+. The default is a mutable +{}+ stored on
+      # +ActiveRecord::Base+; +accepts_nested_attributes_for+ writes a fresh
+      # Hash of +{ assoc_sym => options_hash }+ on the declaring class.
+      # +ActiveRecord::NestedAttributes#assign_nested_attributes_for_collection_association+
+      # (and its one_to_one counterpart) reads the value via the generated
+      # reader on every nested-attributes write, which from non-main Ractors
+      # raises +Ractor::IsolationError+ on +instance_variable_get+ until the
+      # Hash and its option Hashes are shareable. +copy: true+ avoids
+      # entangling caller-held references to the option Hashes (which may
+      # contain user-supplied +reject_if:+ Procs).
+      def make_nested_attributes_options_shareable! # :nodoc:
+        current = nested_attributes_options
+        return if Ractor.shareable?(current)
+        self.nested_attributes_options = Ractor.make_shareable(current, copy: true)
+      end
+
       private
         # Generates a writer method for this association. Serves as a point for
         # accessing the objects in the association. For example, this method

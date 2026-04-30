@@ -1386,6 +1386,21 @@ module Rails
         # class ivar +@__class_attr_defined_enums+. Snapshot a shareable copy
         # on every AR class for the same reason +__callbacks+ is walked here.
         # See +make_defined_enums_shareable!+ for the full rationale.
+        # +ActiveRecord::NestedAttributes+ stores per-class options for
+        # +accepts_nested_attributes_for+ in the +nested_attributes_options+
+        # class_attribute, default +{}+, written by +accepts_nested_attributes_for+
+        # at boot as +{ assoc_sym => options_hash }+.
+        # +assign_nested_attributes_for_collection_association+ (and its
+        # one_to_one counterpart) reads it on every nested-attributes write
+        # (e.g. +Post.new(comments_attributes: ...)+ via the generated
+        # +comments_attributes=+ writer), which from non-main Ractors raises
+        # +Ractor::IsolationError+ on +instance_variable_get+ of the singleton-
+        # class ivar +@__class_attr_nested_attributes_options+. The test path
+        # is +GET /posts/nested_attributes_test+ where +Post+ declares
+        # +accepts_nested_attributes_for :comments, allow_destroy: true+.
+        # Snapshot a shareable copy on every AR class for the same reason
+        # +__callbacks+ is walked here. See
+        # +make_nested_attributes_options_shareable!+ for the full rationale.
         # +ActiveRecord::Validations::UniquenessValidator+ memoizes the list
         # of validator attributes covered by a unique index in the instance
         # ivar +@covered+ via +@covered ||=+. Validators are reachable from
@@ -1406,6 +1421,7 @@ module Rails
           ar_class.make_default_scope_override_shareable! if ar_class.respond_to?(:make_default_scope_override_shareable!)
           ar_class.make_finder_needs_type_condition_shareable! if ar_class.respond_to?(:make_finder_needs_type_condition_shareable!)
           ar_class.make_defined_enums_shareable! if ar_class.respond_to?(:make_defined_enums_shareable!)
+          ar_class.make_nested_attributes_options_shareable! if ar_class.respond_to?(:make_nested_attributes_options_shareable!)
           ar_class.make_encrypted_attributes_shareable! if ar_class.respond_to?(:make_encrypted_attributes_shareable!)
         end
         # +ActiveRecord::Relation::WhereClause.empty+ memoizes the singleton
