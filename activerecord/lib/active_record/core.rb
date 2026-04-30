@@ -291,6 +291,35 @@ module ActiveRecord
         self.attributes_for_inspect = Ractor.make_shareable(current, copy: true)
       end
 
+      # Snapshot a shareable copy of +@filter_attributes+ and eagerly populate
+      # +@inspection_filter+. Both are plain singleton-class ivars (not
+      # +class_attribute+s); +ActiveRecord::Core::ClassMethods#filter_attributes=+
+      # writes +@filter_attributes+ to a mutable Array (the default is
+      # +self.filter_attributes = []+ on +ActiveRecord::Base+), and
+      # +inspection_filter+ memoizes a +ParameterFilter+ in +@inspection_filter+
+      # via +||=+ on first call. From a non-main Ractor, +Post#inspect+ ->
+      # +format_for_inspect+ -> +inspection_filter+ raises
+      # +Ractor::IsolationError+ on the +@filter_attributes+ read at
+      # +core.rb:400+ until the value is shareable, and on the +||=+ write of
+      # +@inspection_filter+ until the memo is already populated.
+      def make_filter_attributes_shareable! # :nodoc:
+        if defined?(@filter_attributes) && !@filter_attributes.nil? && !Ractor.shareable?(@filter_attributes)
+          @filter_attributes = Ractor.make_shareable(@filter_attributes, copy: true)
+        end
+        # Eagerly resolve the +||=+ memo so the lazy write never fires from
+        # non-main. +inspection_filter+ falls through to +superclass.inspection_filter+
+        # when +@filter_attributes+ is nil on this class, which means the
+        # memo lives on whichever ancestor first sets +filter_attributes+;
+        # walking every AR descendant + +ActiveRecord::Base+ in +ractorize!+
+        # ensures all reachable receivers are warmed.
+        if defined?(@filter_attributes) && !@filter_attributes.nil?
+          inspection_filter
+          if defined?(@inspection_filter) && @inspection_filter && !Ractor.shareable?(@inspection_filter)
+            @inspection_filter = Ractor.make_shareable(@inspection_filter, copy: true)
+          end
+        end
+      end
+
       def find(*ids) # :nodoc:
         # We don't have cache keys for this stuff yet
         return super unless ids.length == 1
