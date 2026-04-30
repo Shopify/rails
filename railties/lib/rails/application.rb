@@ -1299,6 +1299,19 @@ module Rails
         # building; a class ivar write from non-main Ractors raises.
         ActiveRecord::Type.make_default_value_shareable!
       end
+      # +ActiveJob::Base+ uses the same +__callbacks+ class_attribute graph as
+      # AR, walked separately because it's a different inheritance tree.
+      # Reached via +ActiveJob::Callbacks#run_callbacks(:enqueue)+ during
+      # +SomeJob.perform_later+ from a non-main Ractor (controller action
+      # enqueuing background work), which reads the +@__class_attr___callbacks+
+      # singleton-class ivar via +ActiveSupport::ClassAttribute+'s generated
+      # reader and raises +Ractor::IsolationError+ until the chain is
+      # shareable.
+      if defined?(ActiveJob::Base)
+        [ActiveJob::Base, *ActiveJob::Base.descendants].each do |job_class|
+          job_class.make_callback_chains_shareable!
+        end
+      end
       # +AbstractController::Caching+ exposes +_view_cache_dependencies+ as a
       # +class_attribute+; the default +[]+ stored on +ActionController::Base+'s
       # singleton class is mutable and would raise +Ractor::IsolationError+ when
