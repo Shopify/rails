@@ -213,6 +213,26 @@ module ActiveRecord
         attr_reader :name, :mapping
     end
 
+    # Build a Ractor-shareable scope lambda: -> { where(name => value) }.
+    # Defined here (self is the Enum module) so the lambda's lexical self is
+    # shareable; the captures are bound to fresh shareable locals so
+    # +Ractor.make_shareable+ accepts them.
+    def self.build_eq_scope(name, value) # :nodoc:
+      shareable_name = Ractor.make_shareable(name.dup)
+      shareable_value = value.is_a?(String) ? Ractor.make_shareable(value.dup) : value
+      Ractor.make_shareable(-> { where(shareable_name => shareable_value) })
+    end
+
+    # Build a Ractor-shareable scope lambda for not_<value>:
+    # -> { where(predicate_builder[name, value, :is_distinct_from]) }.
+    # +predicate_builder+ is resolved at scope-call time (self is then a
+    # Relation); only +name+ and +value+ are captured here.
+    def self.build_neq_scope(name, value) # :nodoc:
+      shareable_name = Ractor.make_shareable(name.dup)
+      shareable_value = value.is_a?(String) ? Ractor.make_shareable(value.dup) : value
+      Ractor.make_shareable(-> { where(predicate_builder[shareable_name, shareable_value, :is_distinct_from]) })
+    end
+
     def enum(name, values = nil, **options)
       values, options = options, {} unless values
       _enum(name, values, **options)
@@ -326,11 +346,11 @@ module ActiveRecord
             if scopes
               # scope :active, -> { where(status: 0) }
               klass.send(:detect_enum_conflict!, name, value_method_name, true)
-              klass.scope value_method_name, -> { where(name => value) }
+              klass.scope value_method_name, ::ActiveRecord::Enum.build_eq_scope(name, value)
 
               # scope :not_active, -> { where.not(status: 0) }
               klass.send(:detect_enum_conflict!, name, "not_#{value_method_name}", true)
-              klass.scope "not_#{value_method_name}", -> { where(predicate_builder[name, value, :is_distinct_from]) }
+              klass.scope "not_#{value_method_name}", ::ActiveRecord::Enum.build_neq_scope(name, value)
             end
           end
       end
