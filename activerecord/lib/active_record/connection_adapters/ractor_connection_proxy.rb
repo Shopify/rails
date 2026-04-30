@@ -277,6 +277,25 @@ module ActiveRecord
         end
       end
 
+      # Truncates a table alias to the adapter's column-name length
+      # (table_name[0...table_alias_length].tr(".", "_") in the
+      # abstract adapter). Pure helper that only depends on the
+      # input String + adapter constant, but +ColumnAliasTracker#
+      # column_alias_for+ calls it via +@connection+, so the proxy
+      # has to satisfy the call. Per-call dispatch is fine -- same
+      # cost shape as +quote_table_name+ next to it.
+      def table_alias_for(table_name)
+        name_dump = table_name.frozen? ? table_name : table_name.dup.freeze
+        Ractor::Dispatch.main.run do
+          RactorConnectionProxy.dispatched_with_sanitized_errors do
+            ActiveRecord::Base.with_connection do |c|
+              result = c.table_alias_for(name_dump)
+              Ractor.make_shareable(result, copy: true)
+            end
+          end
+        end
+      end
+
       # Adapter-level SQL identifier quoting. Per-call because the
       # input (a String table name) is per-call; result is a frozen
       # String. Used by +AliasTracker.initial_count_for+ when the
