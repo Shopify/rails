@@ -718,6 +718,20 @@ module Rails
       env_config
       routes
 
+      require "rails/logging/actor"
+      require "rails/logging/proxy"
+      old_logger = Rails.logger
+      logger_actor = Rails::Logging::Actor.new(old_logger)
+      ractor_logger = Rails::Logging::Proxy.new(
+        logger_actor,
+        level: old_logger.level,
+        progname: old_logger.progname || "Rails",
+        )
+      Rails.logger = ractor_logger
+      @app_env_config["action_dispatch.logger"] = ractor_logger
+      @ractor_logger_actor = logger_actor
+      at_exit { logger_actor.shutdown rescue nil }
+
       # +Concurrent::NULL+ is a sentinel +::Object.new+ used by
       # +Concurrent::Map#compute_if_absent+ for fast-path identity checks.
       # The gem ships it unfrozen; reading the constant from a non-main
