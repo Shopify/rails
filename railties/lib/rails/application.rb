@@ -1263,6 +1263,13 @@ module Rails
             # prefetch_primary_key?+, which is intentionally not
             # implemented. Cache the bool on the class at boot.
             ar_class.make_prefetch_primary_key_shareable!
+            # +Timestamp#_create_record+ / +record_update_timestamps+ read
+            # +timestamp_attributes_for_create_in_model+ /
+            # +_update_in_model+ / +all_timestamp_attributes_in_model+ on
+            # every save, which lazily write class ivars and raise
+            # +Ractor::IsolationError+ from non-main Ractors. The values
+            # are pure functions of +column_names+, so warming is safe.
+            ar_class.make_timestamp_attributes_shareable!
           end
           # Now that +@attribute_types+ is the deep-copied shareable graph
           # the class will keep, cache +inspect+ off of it.

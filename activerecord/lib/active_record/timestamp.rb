@@ -76,6 +76,23 @@ module ActiveRecord
           (timestamp_attributes_for_create_in_model + timestamp_attributes_for_update_in_model).freeze
       end
 
+      # Force-resolve +@timestamp_attributes_for_create_in_model+,
+      # +@timestamp_attributes_for_update_in_model+, and
+      # +@all_timestamp_attributes_in_model+ so the lazy memos never fire from
+      # a non-main Ractor. The hot path is +Timestamp#_create_record+ /
+      # +record_update_timestamps+ on every save, which raises
+      # +Ractor::IsolationError+ on the class ivar write until the values are
+      # already memoized. All three are pure functions of +column_names+,
+      # which is set at boot from the schema and doesn't change at runtime,
+      # so warming is safe.
+      def make_timestamp_attributes_shareable! # :nodoc:
+        return if defined?(@timestamp_attributes_shareable) && @timestamp_attributes_shareable
+        timestamp_attributes_for_create_in_model
+        timestamp_attributes_for_update_in_model
+        all_timestamp_attributes_in_model
+        @timestamp_attributes_shareable = true
+      end
+
       def current_time_from_proper_timezone
         # Use the +Symbol+ cached on the AR class at boot
         # (+make_cached_connection_default_timezone_shareable!+) so that
