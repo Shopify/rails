@@ -910,6 +910,34 @@ module Rails
         if backend.respond_to?(:init_translations, true) && !backend.instance_variable_get(:@initialized)
           backend.send(:init_translations)
         end
+        # +I18n::Backend::Transliterator#transliterate+ (mixed into
+        # +I18n::Backend::Base+ and therefore +Backend::Simple+) lazily writes
+        # +@transliterators ||= {}+ and +@transliterators[locale] ||= ...+ on
+        # the backend instance on first use. Reached from
+        # +ActionDispatch::Http::ContentDisposition#ascii_filename+ ->
+        # +I18n.transliterate+ on every +send_data+/+send_file+ response that
+        # builds a Content-Disposition header, which raises +FrozenError+ once
+        # +Ractor.make_shareable(backend)+ below deep-freezes the backend.
+        # Pre-resolve the transliterator for every known locale here so the
+        # +||=+ pair becomes a no-op at request time.
+        if backend.respond_to?(:transliterate)
+          locales = []
+          locales << I18n.default_locale if I18n.respond_to?(:default_locale)
+          locales << I18n.locale if I18n.respond_to?(:locale)
+          if I18n.respond_to?(:available_locales) && I18n.available_locales_initialized?
+            locales.concat(I18n.available_locales)
+          end
+          locales.compact.uniq.each do |loc|
+            begin
+              backend.transliterate(loc, "")
+            rescue I18n::ArgumentError
+              # Some locales may not have a transliteration rule defined; the
+              # default Hash branch in +Transliterator.get+ handles that, but
+              # custom rules can raise. Swallowing here keeps boot non-fatal;
+              # request-time calls would fail with the same error on main.
+            end
+          end
+        end
         if I18n::Config.class_variable_defined?(:@@backend) && backend && !Ractor.shareable?(backend)
           I18n::Config.class_variable_set(:@@backend, Ractor.make_shareable(backend))
         end
