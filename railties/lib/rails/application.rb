@@ -1426,6 +1426,43 @@ module Rails
           end
         end
       end
+      # The +turbo-rails+ gem registers a +:turbo_stream+ renderer in its
+      # +turbo.renderer+ initializer (gems/turbo-rails/lib/turbo/engine.rb:80):
+      #
+      #     ActionController::Renderers.add :turbo_stream do |turbo_streams_html, options|
+      #       self.content_type = Mime[:turbo_stream] if media_type.nil?
+      #       turbo_streams_html
+      #     end
+      #
+      # The block is defined with +self+ being a +Turbo::Engine+ instance.
+      # +Renderers.add+ tries +Ractor.make_shareable(block)+ but the engine
+      # carries non-shareable ivars (config OrderedOptions, autoload paths
+      # held by mutable Concurrent maps, etc.), so the +rescue+ leaves the
+      # block as-is. The resulting +_render_with_renderer_turbo_stream+
+      # instance method then raises "defined with an un-shareable Proc in
+      # a different Ractor" on every non-main +render turbo_stream: ...+.
+      #
+      # The block body doesn't actually depend on the engine — it only
+      # touches controller methods (+content_type=+, +media_type+) and the
+      # frozen +Mime[:turbo_stream]+ lookup. Reinstall the method with an
+      # explicitly-shareable proc whose +self+ is +main+ at definition time.
+      # +ActionController::Renderers::RENDERERS+ may already be frozen by
+      # the prior +make_shareable!+ pass, but +define_method+ on the
+      # module itself does not touch +RENDERERS+, so the rebind goes
+      # through whether the freeze has happened or not.
+      if defined?(::ActionController::Renderers) && defined?(Mime) && Mime::Type.lookup_by_extension(:turbo_stream)
+        turbo_stream_mime = Mime[:turbo_stream]
+        # +shareable_proc+ detaches the proc from the enclosing
+        # +Application+ +self+ (which is non-shareable), so the resulting
+        # Proc passes Ruby's "defined with un-shareable Proc" check at
+        # call time. The captured +turbo_stream_mime+ is a frozen
+        # +Mime::Type+ — already shareable post chunk-32 walker.
+        ractor_safe_turbo_stream = shareable_proc do |turbo_streams_html, options|
+          self.content_type = turbo_stream_mime if media_type.nil?
+          turbo_streams_html
+        end
+        ::ActionController::Renderers.send(:define_method, :_render_with_renderer_turbo_stream, &ractor_safe_turbo_stream)
+      end
       # Detach Propshaft::Assembly before deep-freeze. Its lazy ivars
       # (@compilers, @load_path, @resolver, @prefix) write at request time,
       # so deep-freezing the Application transitively freezes the Assembly
