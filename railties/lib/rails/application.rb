@@ -128,15 +128,22 @@ module Rails
       routes
       app
 
-      # Replace the logger with a Ractor-local proxy that creates
-      # per-Ractor loggers with fresh IOs to the same destination.
-      require "active_support/ractor_local_logger"
+      # Replace the logger with an Actor-model proxy. One consumer
+      # Thread owns the real device; every Ractor's Rails.logger is a
+      # shareable proxy that sends messages to the actor.
+      require "rails/logging/actor"
+      require "rails/logging/proxy"
       old_logger = Rails.logger
-      ractor_logger = ActiveSupport::RactorLocalLogger.new(old_logger)
+      logger_actor = Rails::Logging::Actor.new(old_logger)
+      ractor_logger = Rails::Logging::Proxy.new(
+        logger_actor,
+        level: old_logger.level,
+        progname: old_logger.progname || "Rails",
+      )
       Rails.logger = ractor_logger
       @app_env_config["action_dispatch.logger"] = ractor_logger
-
-
+      @ractor_logger_actor = logger_actor
+      at_exit { logger_actor.shutdown rescue nil }
 
       # Update component loggers that cached the old BroadcastLogger
       ::ActiveRecord::Base.logger = ractor_logger if defined?(::ActiveRecord::Base)
