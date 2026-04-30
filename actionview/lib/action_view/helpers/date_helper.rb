@@ -889,14 +889,23 @@ module ActionView
 
       private
         %w( sec min hour day month year ).each do |method|
-          define_method(method) do
+          # +define_method+ bodies are stored on the class as +Proc+s that
+          # capture their enclosing lexical scope, so on a non-main Ractor
+          # any caller invoking the resulting method raises "defined with
+          # an un-shareable Proc in a different Ractor". Bind the captures
+          # into fresh shareable locals and detach the +Proc+ from this
+          # method's binding via +shareable_proc+.
+          method_name = Ractor.make_shareable(method.dup)
+          method_sym = method_name.to_sym
+          body = shareable_proc do
             case @datetime
-            when Hash then @datetime[method.to_sym]
+            when Hash then @datetime[method_sym]
             when Numeric then @datetime
             when nil then nil
-            else @datetime.send(method)
+            else @datetime.send(method_name)
             end
           end
+          define_method(method_name, &body)
         end
 
         def prompt_text(prompt, type)
