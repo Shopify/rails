@@ -1078,6 +1078,35 @@ module Rails
           end
         end
       end
+      # The +json+ stdlib gem keeps three module-level class-instance
+      # ivars on +::JSON+ -- +@dump_default_options+,
+      # +@load_default_options+, +@unsafe_load_default_options+ -- that
+      # are declared via +deprecated_singleton_attr_accessor+ in
+      # +json/common.rb+ and initialized once at gem load to mutable
+      # Hashes. The generated +_dump_default_options+ /
+      # +_load_default_options+ / +_unsafe_load_default_options+ readers
+      # touch these ivars on every +JSON.dump+ / +JSON.load+ /
+      # +JSON.unsafe_load+ call, so any non-main Ractor invocation
+      # (notably +ActiveRecord::Encryption::MessageSerializer#dump+,
+      # +ActiveJob+ payload serialization, and several +ActiveSupport+
+      # JSON fallback paths) raises +Ractor::IsolationError+ on the
+      # class-ivar read. Per the no-gem-edits rule the freeze lives
+      # here: deep-freeze each Hash in place via
+      # +Ractor.make_shareable(value, copy: true)+ so the gem's existing
+      # references continue to work and the readers return a shareable
+      # value. Skipped silently if +::JSON+ is somehow not loaded; in
+      # practice it is always required by +active_support+ before this
+      # runs. Any post-+ractorize!+ assignment to one of these options
+      # raises +FrozenError+ pointing back here, which is the desired
+      # behavior in production.
+      if defined?(::JSON)
+        [:@dump_default_options, :@load_default_options, :@unsafe_load_default_options].each do |ivar|
+          next unless ::JSON.instance_variable_defined?(ivar)
+          value = ::JSON.instance_variable_get(ivar)
+          next if Ractor.shareable?(value)
+          ::JSON.instance_variable_set(ivar, Ractor.make_shareable(value, copy: true))
+        end
+      end
       # +ActiveSupport::JSON::Encoding+ caches two encoder instances on
       # its singleton (+@encoder_without_options+ / +@encoder_without_escape+)
       # that +ActiveSupport::JSON.encode+ reads from non-main Ractors on
