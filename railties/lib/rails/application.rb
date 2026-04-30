@@ -1326,6 +1326,55 @@ module Rails
         # +QueryMethods#build_cast_value+ during +order(...)+ relation
         # building; a class ivar write from non-main Ractors raises.
         ActiveRecord::Type.make_default_value_shareable!
+        # +ActiveRecord::Encryption::Contexts+ is mixed into the
+        # +ActiveRecord::Encryption+ module and installs the class variable
+        # +@@default_context+ (a +Context.new+) at load time. Reads of an
+        # encrypted attribute (+EncryptedAttributeType#decrypt_as_text+ ->
+        # +Configurable#encryptor+ -> +Contexts#context+) walk through that
+        # cvar on every per-request decrypt. From non-main Ractors that
+        # raises +Ractor::IsolationError+ ("can not read non-shareable class
+        # variable @@default_context from non-main Ractors") because the
+        # +Context+ instance carries non-shareable lazy ivars
+        # (+@key_provider+, +@key_generator+, +@cipher+, +@encryptor+,
+        # +@message_serializer+, +@frozen_encryption+).
+        #
+        # Force-resolve every lazy ivar on the +Context+ and its sub-objects
+        # at boot, then snapshot a deep-frozen +copy: true+ shareable
+        # +Context+ back into the cvar. Skip when encryption isn't
+        # configured (+config.primary_key.nil?+) — apps without encryption
+        # have no encrypted attributes to decrypt and therefore no non-main
+        # read pressure on +@@default_context+, and warming +key_provider+
+        # in that case would crash inside +DerivedSecretKeyProvider#new(nil)+.
+        #
+        # The companion +current_custom_context+ path
+        # (+with_encryption_context+ -> +default_context.dup+) mutates a
+        # thread-local stack of +Context+ instances and is intentionally not
+        # addressed here: that's the write-side / explicit-context boundary,
+        # a separate domain from the implicit decrypt path this fixes.
+        if defined?(ActiveRecord::Encryption) &&
+            ActiveRecord::Encryption.respond_to?(:default_context) &&
+            !ActiveRecord::Encryption.config.primary_key.nil?
+          ctx = ActiveRecord::Encryption.default_context
+          # +Context#key_provider+ is the only public accessor with a
+          # +||=+-memoized backing ivar (+build_default_key_provider+ ->
+          # +DerivedSecretKeyProvider.new(config.primary_key)+). Force the
+          # write on the main side so the deep-freeze below captures the
+          # built provider and not a bare +nil+.
+          ctx.key_provider
+          # +KeyGenerator+ holds two private +||=+ memos
+          # (+@key_derivation_salt+ from +config.key_derivation_salt+ and
+          # +@key_length+ from +ActiveRecord::Encryption.cipher.key_length+,
+          # which itself opens an +OpenSSL::Cipher+). +KeyGenerator#derive_key_from+
+          # is reached during +DerivedSecretKeyProvider#initialize+ above,
+          # which already warms both — but call them explicitly so the
+          # warming is local to this block and not coupled to provider-init
+          # order.
+          if ctx.key_generator
+            ctx.key_generator.send(:key_derivation_salt)
+            ctx.key_generator.send(:key_length)
+          end
+          ActiveRecord::Encryption.default_context = Ractor.make_shareable(ctx, copy: true)
+        end
       end
       # +ActiveJob::Base+ uses the same +__callbacks+ class_attribute graph as
       # AR, walked separately because it's a different inheritance tree.
