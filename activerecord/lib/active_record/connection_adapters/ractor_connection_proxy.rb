@@ -486,6 +486,39 @@ module ActiveRecord
         end
       end
 
+      # +Visitor#accept(node, collector = nil)+ walks the AST and returns
+      # the (mutated) collector. Reached from +Arel::Nodes::Node#to_sql+
+      # (e.g. +Relation#sole+ via +select_manager.where_sql+ ->
+      # +where_clause.ast.to_sql(engine)+ on the request path), which
+      # then chains +.value+ to read the +SQLString+ collector's +@str+.
+      # The visitor's dispatch hash holds non-shareable Procs, so the
+      # walk has to run on the main side. Marshal the input node and
+      # collector across the boundary, run +accept+ on the real visitor,
+      # Marshal the resulting collector back as a shareable +String+,
+      # and reload it on the request side -- the loaded collector is a
+      # fresh local object on this Ractor, so the caller's +.value+ is
+      # an in-Ractor read of +@str+ with no boundary concerns.
+      def accept(node, collector = nil)
+        node_dump      = Marshal.dump(node).freeze
+        collector_dump = collector.nil? ? nil : Marshal.dump(collector).freeze
+
+        result_dump = Ractor::Dispatch.main.run do
+          RactorConnectionProxy.dispatched_with_sanitized_errors do
+            node_ = Marshal.load(node_dump)
+            ActiveRecord::Base.with_connection do |c|
+              result = if collector_dump
+                c.visitor.accept(node_, Marshal.load(collector_dump))
+              else
+                c.visitor.accept(node_)
+              end
+              Ractor.make_shareable(Marshal.dump(result), copy: true)
+            end
+          end
+        end
+
+        Marshal.load(result_dump)
+      end
+
       def respond_to_missing?(name, include_private = false)
         false
       end
