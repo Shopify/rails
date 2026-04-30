@@ -312,6 +312,58 @@ module ActiveRecord
         end
       end
 
+      # Adapter-level bound-value casting. Defaults to identity in the
+      # abstract adapter but MySQL etc. override it, so the call must
+      # run on a real adapter on the main side. Reached from
+      # +Sanitization#quote_bound_value+ (the +find_by_sql+ /
+      # +where("col = ?", v)+ path), which calls
+      # +connection.quote(connection.cast_bound_value(value))+ inside
+      # +replace_bind_variable+. Per-call dispatch is the right shape
+      # here: the input is whatever bind value the caller passed
+      # (Integer, String, Date, AR::Base via +id_for_database+, ...),
+      # which is not generally shareable on input, so we Marshal the
+      # value across the boundary and +make_shareable+ the result on
+      # the way back. Return shape mirrors the adapter contract:
+      # whatever the underlying type cast returns (often the value
+      # unchanged, sometimes a coerced primitive).
+      def cast_bound_value(value)
+        value_dump = Marshal.dump(value).freeze
+        Ractor::Dispatch.main.run do
+          RactorConnectionProxy.dispatched_with_sanitized_errors do
+            loaded = Marshal.load(value_dump)
+            ActiveRecord::Base.with_connection do |c|
+              result = c.cast_bound_value(loaded)
+              Ractor.make_shareable(result, copy: true)
+            end
+          end
+        end
+      end
+
+      # Adapter-level SQL value quoting. Case-dispatched in the
+      # abstract adapter on String / Symbol / true / false / nil /
+      # BigDecimal / Numeric / Type::Binary::Data / Type::Time::Value
+      # / Date / Time / Class, with adapter overrides for
+      # +quote_string+, +quoted_binary+, etc., so it has to run on a
+      # real adapter on the main side. Reached from the same
+      # +Sanitization#quote_bound_value+ call site as +cast_bound_value+
+      # above (and the empty-array / array-map branches of that
+      # method). Input is the cast bind value -- not generally
+      # shareable on input -- so we Marshal it across the boundary;
+      # result is a +String+ (the SQL literal), made shareable with
+      # +copy: true+ so the request side can read it.
+      def quote(value)
+        value_dump = Marshal.dump(value).freeze
+        Ractor::Dispatch.main.run do
+          RactorConnectionProxy.dispatched_with_sanitized_errors do
+            loaded = Marshal.load(value_dump)
+            ActiveRecord::Base.with_connection do |c|
+              result = c.quote(loaded)
+              Ractor.make_shareable(result, copy: true)
+            end
+          end
+        end
+      end
+
       # AR exceptions raised by the adapter (e.g. +StatementInvalid+,
       # +RecordNotUnique+) carry a +@connection_pool+ reference whose
       # graph includes +MonitorMixin+ state and is not shareable. If we
