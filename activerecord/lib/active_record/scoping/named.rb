@@ -170,18 +170,12 @@ module ActiveRecord
 
           extension = Module.new(&block) if block
 
+          extension.freeze if extension && !extension.frozen?
+
           if body.respond_to?(:to_proc)
-            singleton_class.define_method(name) do |*args|
-              scope = all._exec_scope(*args, &body)
-              scope = scope.extending(extension) if extension
-              scope
-            end
+            singleton_class.define_method(name, &_build_shareable_scope_method(body, extension))
           else
-            singleton_class.define_method(name) do |*args|
-              scope = body.call(*args) || all
-              scope = scope.extending(extension) if extension
-              scope
-            end
+            singleton_class.define_method(name, &_build_shareable_callable_scope_method(body, extension))
           end
           singleton_class.send(:ruby2_keywords, name)
 
@@ -195,6 +189,41 @@ module ActiveRecord
             # respond_to is a fast check, but we don't want to define methods
             # only on the module (ex. Module#name)
             generate_relation_method(name) if Kernel.respond_to?(name) && (Kernel.method_defined?(name) || Kernel.private_method_defined?(name)) && !ActiveRecord::Relation.method_defined?(name)
+          end
+
+          # Build a singleton-method body for a scope whose `body` is a Proc/lambda.
+          # Attempts to produce a Ractor-shareable proc so non-main Ractors can
+          # invoke the scope. Falls back to the original (non-shareable) wrapper
+          # when the user's lambda or extension captures non-shareable state.
+          def _build_shareable_scope_method(body, extension)
+            shareable_body = Ractor.make_shareable(body)
+            Ractor.make_shareable(proc do |*args|
+              scope = all._exec_scope(*args, &shareable_body)
+              scope = scope.extending(extension) if extension
+              scope
+            end)
+          rescue Ractor::IsolationError
+            proc do |*args|
+              scope = all._exec_scope(*args, &body)
+              scope = scope.extending(extension) if extension
+              scope
+            end
+          end
+
+          # Build a singleton-method body for a scope whose `body` is a callable
+          # object that is not a Proc (responds to `:call` but not `:to_proc`).
+          def _build_shareable_callable_scope_method(body, extension)
+            Ractor.make_shareable(proc do |*args|
+              scope = body.call(*args) || all
+              scope = scope.extending(extension) if extension
+              scope
+            end)
+          rescue Ractor::IsolationError
+            proc do |*args|
+              scope = body.call(*args) || all
+              scope = scope.extending(extension) if extension
+              scope
+            end
           end
       end
     end
