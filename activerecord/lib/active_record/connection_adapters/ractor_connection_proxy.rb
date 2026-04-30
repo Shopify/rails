@@ -638,6 +638,23 @@ module ActiveRecord
         end
       end
 
+      # +QueryCache::ClassMethods#uncached+ wraps a block (typically a
+      # batch fetch like +Post.find_each+ / +Post.in_batches+) by calling
+      # +connection_pool.disable_query_cache(dirties: ..., &block)+. On
+      # the real pool, that toggles +query_cache.enabled+ around the
+      # yield. The request-side +RactorConnectionPool+ has no per-Ractor
+      # query cache of its own — every query dispatched through here
+      # already hits the main-side pool fresh, and within a batch each
+      # query carries different bind values (LIMIT / OFFSET / ID ranges)
+      # so the main-side cache wouldn't return stale rows in practice.
+      # Yield directly: the proxy preserves the block contract without
+      # touching the request-side pool's nonexistent cache state, and
+      # the main-side cache toggle doesn't apply because dispatched
+      # queries don't read the request-side pool's flag.
+      def disable_query_cache(dirties: true, &block)
+        block.call
+      end
+
       # Returns the request-side schema-cache proxy. The real
       # +ConnectionPool#schema_cache+ holds a non-shareable pool
       # reference; the proxy dispatches per-call schema reads to the
