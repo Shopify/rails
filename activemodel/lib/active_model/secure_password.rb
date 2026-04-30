@@ -204,6 +204,9 @@ module ActiveModel
           algorithm
         end
 
+        # Make the algorithm shareable so define_method bodies that capture it can be made shareable too.
+        algorithm = Ractor.make_shareable(algorithm) unless Ractor.shareable?(algorithm)
+
         include InstanceMethodsOnActivation.new(attribute, reset_token: reset_token, algorithm: algorithm)
 
         if validations
@@ -265,16 +268,22 @@ module ActiveModel
       def initialize(attribute, reset_token:, algorithm:)
         attr_reader attribute
 
-        define_method("#{attribute}=") do |unencrypted_password|
+        # Bind to fresh single-write locals so make_shareable's reassignability analysis accepts them.
+        shareable_attribute = attribute
+        shareable_algorithm = algorithm
+
+        # Shareable bodies so non-main Ractors can invoke these define_method-defined methods.
+        setter_body = Ractor.make_shareable(proc do |unencrypted_password|
           if unencrypted_password.nil?
-            instance_variable_set("@#{attribute}", nil)
-            self.public_send("#{attribute}_digest=", nil)
+            instance_variable_set("@#{shareable_attribute}", nil)
+            self.public_send("#{shareable_attribute}_digest=", nil)
           elsif !unencrypted_password.empty?
-            instance_variable_set("@#{attribute}", unencrypted_password)
-            password_digest = algorithm.hash_password(unencrypted_password)
-            self.public_send("#{attribute}_digest=", password_digest)
+            instance_variable_set("@#{shareable_attribute}", unencrypted_password)
+            password_digest = shareable_algorithm.hash_password(unencrypted_password)
+            self.public_send("#{shareable_attribute}_digest=", password_digest)
           end
-        end
+        end)
+        define_method("#{attribute}=", &setter_body)
 
         attr_accessor :"#{attribute}_confirmation", :"#{attribute}_challenge"
 
@@ -288,29 +297,33 @@ module ActiveModel
         #   user.save
         #   user.authenticate_password('notright')      # => false
         #   user.authenticate_password('mUc3m00RsqyRe') # => user
-        define_method("authenticate_#{attribute}") do |unencrypted_password|
-          attribute_digest = public_send("#{attribute}_digest")
-          attribute_digest.present? && algorithm.verify_password(unencrypted_password, attribute_digest) && self
-        end
+        authenticate_body = Ractor.make_shareable(proc do |unencrypted_password|
+          attribute_digest = public_send("#{shareable_attribute}_digest")
+          attribute_digest.present? && shareable_algorithm.verify_password(unencrypted_password, attribute_digest) && self
+        end)
+        define_method("authenticate_#{attribute}", &authenticate_body)
 
         # Returns the salt, a small chunk of random data added to the password before it's hashed.
-        define_method("#{attribute}_salt") do
-          attribute_digest = public_send("#{attribute}_digest")
-          attribute_digest.present? ? algorithm.password_salt(attribute_digest) : nil
-        end
+        salt_body = Ractor.make_shareable(proc do
+          attribute_digest = public_send("#{shareable_attribute}_digest")
+          attribute_digest.present? ? shareable_algorithm.password_salt(attribute_digest) : nil
+        end)
+        define_method("#{attribute}_salt", &salt_body)
 
         alias_method :authenticate, :authenticate_password if attribute == :password
 
         if reset_token
           # Returns the class-level configured reset token for the password.
-          define_method("#{attribute}_reset_token") do
-            generate_token_for(:"#{attribute}_reset")
-          end
+          reset_token_body = Ractor.make_shareable(proc do
+            generate_token_for(:"#{shareable_attribute}_reset")
+          end)
+          define_method("#{attribute}_reset_token", &reset_token_body)
         end
 
-        define_method("#{attribute}_algorithm") do
-          algorithm.algorithm_name
-        end
+        algorithm_body = Ractor.make_shareable(proc do
+          shareable_algorithm.algorithm_name
+        end)
+        define_method("#{attribute}_algorithm", &algorithm_body)
       end
     end
   end
