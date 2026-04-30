@@ -53,7 +53,11 @@ module ActionText
       def has_rich_text(name, encrypted: false, strict_loading: strict_loading_by_default, store_if_blank: true)
         class_eval <<-CODE, __FILE__, __LINE__ + 1
           def #{name}
-            rich_text_#{name} || build_rich_text_#{name}
+            rich_text_#{name} || begin
+              built = build_rich_text_#{name}
+              built.name = #{name.to_s.dump}
+              built
+            end
           end
 
           def #{name}?

@@ -40,7 +40,19 @@ module ActionText
     def initialize(content = nil, options = {})
       options.with_defaults! canonicalize: true
 
-      if options[:canonicalize]
+      if !Ractor.main? && defined?(::Ractor::Dispatch)
+        c = content.to_s.freeze
+        canon = options[:canonicalize]
+        klass = self.class
+        html = ::Ractor::Dispatch.main.run do
+          if canon
+            klass.fragment_by_canonicalizing_content(c).to_html.freeze
+          else
+            ActionText::Fragment.wrap(c).to_html.freeze
+          end
+        end
+        @fragment = ActionText::Fragment.new(ActionText::RactorHtmlProxy.new(html))
+      elsif options[:canonicalize]
         @fragment = self.class.fragment_by_canonicalizing_content(content)
       else
         @fragment = ActionText::Fragment.wrap(content)
@@ -85,8 +97,12 @@ module ActionText
     #     content = ActionText::Content.new(html)
     #     content.attachables # => [attachable]
     def attachables
-      @attachables ||= attachment_nodes.map do |node|
-        ActionText::Attachable.from_node(node)
+      @attachables ||= if fragment.source.is_a?(ActionText::RactorHtmlProxy)
+        []
+      else
+        attachment_nodes.map do |node|
+          ActionText::Attachable.from_node(node)
+        end
       end
     end
 
@@ -129,7 +145,14 @@ module ActionText
     #     content.to_plain_text # => "<script>alert()</script>"
     #     ActionText::ContentHelper.sanitizer.sanitize(content.to_plain_text) # => ""
     def to_plain_text
-      render_attachments(with_full_attributes: false, &:to_plain_text).fragment.to_plain_text
+      if fragment.source.is_a?(ActionText::RactorHtmlProxy)
+        h = fragment.source.html
+        ::Ractor::Dispatch.main.run do
+          ActionText::Content.new(h).to_plain_text.freeze
+        end
+      else
+        render_attachments(with_full_attributes: false, &:to_plain_text).fragment.to_plain_text
+      end
     end
 
     # Returns a Markdown version of the markup contained by the content.

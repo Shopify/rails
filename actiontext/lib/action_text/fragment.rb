@@ -3,6 +3,42 @@
 # :markup: markdown
 
 module ActionText
+  class RactorHtmlProxy # :nodoc:
+    attr_reader :html
+
+    def initialize(html)
+      @html = html.freeze
+    end
+
+    def to_html(options = {})
+      h = @html
+      o = options.empty? ? nil : Marshal.dump(options).freeze
+      ::Ractor::Dispatch.main.run do
+        opts = o ? Marshal.load(o) : {}
+        ActionText::HtmlConversion.fragment_for_html(h).to_html(opts).freeze
+      end
+    end
+
+    def to_s
+      to_html
+    end
+
+    def css(selector)
+      h = @html
+      s = selector.freeze
+      ::Ractor::Dispatch.main.run do
+        ActionText::HtmlConversion.fragment_for_html(h).css(s)
+      end
+    end
+
+    def elements
+      h = @html
+      ::Ractor::Dispatch.main.run do
+        ActionText::HtmlConversion.fragment_for_html(h).elements
+      end
+    end
+  end
+
   class Fragment
     class << self
       def wrap(fragment_or_html)
@@ -17,7 +53,12 @@ module ActionText
       end
 
       def from_html(html)
-        new(ActionText::HtmlConversion.fragment_for_html(html.to_s.strip))
+        stripped = html.to_s.strip
+        if !Ractor.main? && defined?(::Ractor::Dispatch)
+          new(RactorHtmlProxy.new(stripped))
+        else
+          new(ActionText::HtmlConversion.fragment_for_html(stripped))
+        end
       end
     end
 
@@ -48,7 +89,15 @@ module ActionText
     end
 
     def to_plain_text
-      @plain_text ||= PlainTextConversion.node_to_plain_text(source)
+      @plain_text ||= if source.is_a?(RactorHtmlProxy)
+        h = source.html
+        ::Ractor::Dispatch.main.run do
+          node = ActionText::HtmlConversion.fragment_for_html(h)
+          PlainTextConversion.node_to_plain_text(node).freeze
+        end
+      else
+        PlainTextConversion.node_to_plain_text(source)
+      end
     end
 
     def to_markdown
