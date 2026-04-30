@@ -31,6 +31,19 @@ module ActiveRecord
 
         @context_properties[:encryptor] = Encryptor.new(compress: @compress) unless @compress
         @context_properties[:encryptor] = Encryptor.new(compressor: compressor) if compressor
+
+        # Eagerly resolve the lazy +@key_provider_from_key+ and
+        # +@deterministic_key_provider+ memos that +key_provider+ falls
+        # through. Each was previously a +||=+ pattern (lines 91, 97); when
+        # the caller provided neither +key:+ nor +deterministic:+ those
+        # right-hand sides evaluate to +nil+, but +||=+ on an undefined ivar
+        # still writes +nil+ on every call. Once the +Scheme+ is reachable
+        # from a deep-frozen +EncryptedAttributeType+ (the AR attribute_types
+        # graph deep-freezes everything reachable at +ractorize!+), that
+        # write raises +FrozenError+ on every non-main decrypt. Compute the
+        # values once, here, while the +Scheme+ is still mutable.
+        @key_provider_from_key = @key.present? ? DerivedSecretKeyProvider.new(@key) : nil
+        @deterministic_key_provider = @deterministic ? DeterministicKeyProvider.new(ActiveRecord::Encryption.config.deterministic_key) : nil
       end
 
       def ignore_case?
@@ -87,17 +100,10 @@ module ActiveRecord
           raise Errors::Configuration, "compressor: can't be used with encryptor" if @compressor && @context_properties[:encryptor]
         end
 
-        def key_provider_from_key
-          @key_provider_from_key ||= if @key.present?
-            DerivedSecretKeyProvider.new(@key)
-          end
-        end
-
-        def deterministic_key_provider
-          @deterministic_key_provider ||= if @deterministic
-            DeterministicKeyProvider.new(ActiveRecord::Encryption.config.deterministic_key)
-          end
-        end
+        # Eagerly populated in +initialize+ so the +Scheme+ remains
+        # immutable post-+ractorize!+ deep-freeze. See the note in
+        # +#initialize+ for the +||=+/FrozenError pairing this avoids.
+        attr_reader :key_provider_from_key, :deterministic_key_provider
 
         def default_key_provider
           ActiveRecord::Encryption.key_provider
