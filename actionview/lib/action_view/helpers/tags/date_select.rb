@@ -20,7 +20,7 @@ module ActionView
 
         class << self
           def select_type
-            @select_type ||= name.split("::").last.sub("Select", "").downcase
+            "date"
           end
         end
 
