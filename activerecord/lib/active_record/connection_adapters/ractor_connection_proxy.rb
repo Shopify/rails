@@ -246,6 +246,21 @@ module ActiveRecord
         end
       end
 
+      # The adapter's Arel visitor on the request side. The real
+      # +visitor+ is bound to the underlying connection (it holds
+      # +@connection+ for adapter-specific quoting), so it cannot ride
+      # the boundary directly. Returns the request-side visitor proxy
+      # which dispatches +compile(node)+ per call to main.
+      #
+      # Reached from +Calculations#execute_grouped_calculation+
+      # (line 544: +field = connection.visitor.compile(field) if
+      # Arel.arel_node?(field)+) and the +pluck+/+timestamp_column+
+      # paths in +relation.rb+. All three callers use +visitor.compile+
+      # only, so the proxy surface is intentionally just +compile+.
+      def visitor
+        RactorVisitorProxy
+      end
+
       # Adapter-level metadata constant (SQLite ~64, Postgres 63).
       # Called once per +AliasTracker.create+ via
       # +Association#scope+ / +AssociationScope.scope+, which on the
@@ -312,6 +327,54 @@ module ActiveRecord
           "intentionally limited; if you hit this, extend the proxy at " \
           "#{__FILE__} or route the caller through the real connection " \
           "on the main Ractor."
+      end
+    end
+
+    # Returned by +RactorConnectionProxy#visitor+ on a non-main Ractor.
+    # The real +Arel::Visitors::ToSql+ instance holds +@connection+
+    # for adapter-specific quoting and cannot cross a Ractor boundary.
+    # The surface is intentionally just +compile(node)+, the only
+    # method any current caller of +connection.visitor+ uses on the
+    # request path (see callers in +Calculations+ and +Relation+).
+    #
+    # Each +compile+ call Marshals the Arel node (its +Arel::Visitors+
+    # dispatch hash holds non-shareable Procs, so the AST cannot ride
+    # the boundary as-is), dispatches to the main side, walks the AST
+    # there with the real visitor, and returns the resulting SQL
+    # +String+ as a shareable copy.
+    module RactorVisitorProxy
+      extend self
+
+      def compile(node, collector = nil)
+        node_dump      = Marshal.dump(node).freeze
+        collector_dump = collector.nil? ? nil : Marshal.dump(collector).freeze
+
+        Ractor::Dispatch.main.run do
+          RactorConnectionProxy.dispatched_with_sanitized_errors do
+            node_ = Marshal.load(node_dump)
+            ActiveRecord::Base.with_connection do |c|
+              result = if collector_dump
+                c.visitor.compile(node_, Marshal.load(collector_dump))
+              else
+                c.visitor.compile(node_)
+              end
+              Ractor.make_shareable(result, copy: true)
+            end
+          end
+        end
+      end
+
+      def respond_to_missing?(name, include_private = false)
+        false
+      end
+
+      def method_missing(name, *, **, &)
+        raise NoMethodError,
+          "#{name} is not implemented on #{self} (the non-main-Ractor " \
+          "Arel visitor proxy). The request-path read surface is " \
+          "intentionally limited to +compile+; if you hit this, extend " \
+          "the proxy at #{__FILE__} or route the caller through the " \
+          "real visitor on the main Ractor."
       end
     end
 
@@ -427,6 +490,7 @@ module ActiveRecord
     end
 
     Ractor.make_shareable(RactorConnectionProxy)
+    Ractor.make_shareable(RactorVisitorProxy)
     Ractor.make_shareable(RactorSchemaCacheProxy)
     Ractor.make_shareable(RactorConnectionPool)
   end
