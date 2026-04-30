@@ -1422,6 +1422,7 @@ module Rails
           ar_class.make_finder_needs_type_condition_shareable! if ar_class.respond_to?(:make_finder_needs_type_condition_shareable!)
           ar_class.make_defined_enums_shareable! if ar_class.respond_to?(:make_defined_enums_shareable!)
           ar_class.make_nested_attributes_options_shareable! if ar_class.respond_to?(:make_nested_attributes_options_shareable!)
+          ar_class.make_attributes_for_inspect_shareable! if ar_class.respond_to?(:make_attributes_for_inspect_shareable!)
           ar_class.make_encrypted_attributes_shareable! if ar_class.respond_to?(:make_encrypted_attributes_shareable!)
         end
         # +ActiveRecord::Relation::WhereClause.empty+ memoizes the singleton

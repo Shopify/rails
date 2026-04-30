@@ -277,6 +277,20 @@ module ActiveRecord
         @find_by_statement_cache = { true => Concurrent::Map.new, false => Concurrent::Map.new }
       end
 
+      # Force-resolves +attributes_for_inspect+ and snapshots a shareable copy
+      # so non-main Ractors can read the singleton-class ivar
+      # +@__class_attr_attributes_for_inspect+ that backs this +class_attribute+.
+      # The default is the Symbol +:all+ (already shareable), but production
+      # config commonly overrides with an Array (e.g.
+      # +config.active_record.attributes_for_inspect = [:id]+) which is mutable
+      # and raises +Ractor::IsolationError+ on every +Post#inspect+ from a
+      # request. +copy: true+ avoids entangling caller-held references.
+      def make_attributes_for_inspect_shareable! # :nodoc:
+        current = attributes_for_inspect
+        return if Ractor.shareable?(current)
+        self.attributes_for_inspect = Ractor.make_shareable(current, copy: true)
+      end
+
       def find(*ids) # :nodoc:
         # We don't have cache keys for this stuff yet
         return super unless ids.length == 1
