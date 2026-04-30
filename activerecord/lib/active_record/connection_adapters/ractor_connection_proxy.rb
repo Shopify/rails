@@ -312,6 +312,34 @@ module ActiveRecord
         end
       end
 
+      # Adapter-level +to_sql(arel_or_sql_string, binds = [])+. Reached
+      # from +Relation#to_sql+ which calls
+      # +conn.unprepared_statement { conn.to_sql(arel) }+ inside a
+      # +with_connection+ block. The abstract adapter's +to_sql+
+      # constructs a collector and walks the Arel AST through the
+      # adapter's +visitor+ -- the visitor's dispatch hash holds
+      # non-shareable Procs, so the AST has to be compiled on the main
+      # side. We Marshal the input (typically an +Arel+ manager / node;
+      # may also be a +String+, which +to_sql_and_binds+ short-circuits
+      # to a frozen copy) and rebuild it on the main side, same shape
+      # as +select_all+ / +select_rows+ above. Result is a frozen SQL
+      # +String+, made shareable with +copy: true+ so the request side
+      # can read it.
+      def to_sql(arel_or_sql_string, binds = [])
+        arel_dump  = Marshal.dump(arel_or_sql_string).freeze
+        binds_dump = Ractor.make_shareable(binds, copy: true)
+
+        Ractor::Dispatch.main.run do
+          RactorConnectionProxy.dispatched_with_sanitized_errors do
+            arel_ = Marshal.load(arel_dump)
+            ActiveRecord::Base.with_connection do |c|
+              result = c.to_sql(arel_, binds_dump)
+              Ractor.make_shareable(result, copy: true)
+            end
+          end
+        end
+      end
+
       # Adapter-level bound-value casting. Defaults to identity in the
       # abstract adapter but MySQL etc. override it, so the call must
       # run on a real adapter on the main side. Reached from
