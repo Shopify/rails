@@ -312,6 +312,29 @@ module ActiveRecord
         end
       end
 
+      # Adapter-level identifier quoting for the LHS of an assignment
+      # (UPDATE ... SET col = ...). Defaults to +"table.col"+ in the
+      # abstract adapter; the SQLite3 and PostgreSQL adapters override
+      # it to return only the column name (per their UPDATE syntax).
+      # Reached from +Sanitization#sanitize_sql_hash_for_assignment+
+      # (e.g. +Post.update_all(status: nil)+ on the request path),
+      # which calls +c.quote_table_name_for_assignment(table, attr)+
+      # inside a +with_connection+ block. Inputs are per-call Strings
+      # / Symbols (the table name and the attribute name); result is
+      # a frozen String.
+      def quote_table_name_for_assignment(table, attr)
+        table_dump = table.is_a?(String) && table.frozen? ? table : table.to_s.dup.freeze
+        attr_dump  = attr.is_a?(String) && attr.frozen?  ? attr  : attr.to_s.dup.freeze
+        Ractor::Dispatch.main.run do
+          RactorConnectionProxy.dispatched_with_sanitized_errors do
+            ActiveRecord::Base.with_connection do |c|
+              result = c.quote_table_name_for_assignment(table_dump, attr_dump)
+              Ractor.make_shareable(result, copy: true)
+            end
+          end
+        end
+      end
+
       # Adapter-level +to_sql(arel_or_sql_string, binds = [])+. Reached
       # from +Relation#to_sql+ which calls
       # +conn.unprepared_statement { conn.to_sql(arel) }+ inside a
