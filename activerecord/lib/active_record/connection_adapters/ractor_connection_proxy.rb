@@ -538,6 +538,22 @@ module ActiveRecord
         end
       end
 
+      # +ActiveRecord::Persistence#reload+ flows through here: it calls
+      # +self.class.connection_pool.clear_query_cache+ before refetching
+      # the record so the find sees fresh data. Dispatch clears the
+      # main-side pool's per-thread query cache so subsequent
+      # dispatched selects don't hit a stale cached result. Returns
+      # +nil+ because the request side never reads the return value of
+      # +query_cache.clear+.
+      def clear_query_cache
+        Ractor::Dispatch.main.run do
+          RactorConnectionProxy.dispatched_with_sanitized_errors do
+            ActiveRecord::Base.connection_pool.clear_query_cache
+            nil
+          end
+        end
+      end
+
       # Returns the request-side schema-cache proxy. The real
       # +ConnectionPool#schema_cache+ holds a non-shareable pool
       # reference; the proxy dispatches per-call schema reads to the
