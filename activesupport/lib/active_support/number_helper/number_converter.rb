@@ -18,7 +18,7 @@ module ActiveSupport
 
       attr_reader :number, :opts
 
-      DEFAULTS = {
+      DEFAULTS = Ractor.make_shareable({
         # Used in number_to_delimited
         # These are also the defaults for 'currency', 'percentage', 'precision', and 'human'
         format: {
@@ -115,7 +115,7 @@ module ActiveSupport
             }
           }
         }
-      }
+      })
 
       def self.convert(number, options)
         new(number, options).execute
