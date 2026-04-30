@@ -30,13 +30,22 @@ module ActiveRecord
       }
 
       DEFAULT_PROPERTIES.each do |name, key|
-        define_method name do
-          self[key.to_sym]
-        end
+        # Wrap the +define_method+ bodies in +Ractor.make_shareable(proc { ... })+
+        # so the resulting methods can be called from non-main Ractors. Without
+        # the wrap, every non-main caller (every encrypted attribute decrypt
+        # parses serialized properties via these accessors) hits "defined with
+        # an un-shareable Proc in a different Ractor". Capture +key.to_sym+
+        # into a single-write local; Symbols are inherently shareable, so
+        # Ruby's reassignability analysis on +make_shareable+ accepts the
+        # closure over +sym+ where it would have rejected closing over +key+.
+        sym = key.to_sym
+        define_method(name, &Ractor.make_shareable(proc do
+          self[sym]
+        end))
 
-        define_method "#{name}=" do |value|
-          self[key.to_sym] = value
-        end
+        define_method("#{name}=", &Ractor.make_shareable(proc do |value|
+          self[sym] = value
+        end))
       end
 
       def initialize(initial_properties = {})
