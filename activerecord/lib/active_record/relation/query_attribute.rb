@@ -40,6 +40,18 @@ module ActiveRecord
           # attribute read from non-main).
           value_for_database
         end
+
+        # Pre-resolve +@_unboundable+ for the same boundary-safety reason as
+        # +@value_for_database+. The Arel SQL visitor calls +bind.unboundable?+
+        # on the main side after +Ractor.make_shareable(binds, copy: true)+ has
+        # deep-frozen the bind graph; the lazy +@_unboundable = ...+ ivar write
+        # in +unboundable?+ would otherwise +FrozenError+ on the copy. Eagerly
+        # populate the ivar at construction so the main-side visitor only ever
+        # reads it. Skipped for +StatementCache::Substitute+ binds, whose value
+        # is not yet known and whose +unboundable?+ is never consulted.
+        unless value_before_type_cast.is_a?(StatementCache::Substitute)
+          unboundable?
+        end
       end
 
       def type_cast(value)
