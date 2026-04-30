@@ -349,7 +349,13 @@ module ActiveRecord
         return false if @_nested_records_changed_for_autosave_already_called
         begin
           @_nested_records_changed_for_autosave_already_called = true
-          self.class._reflections.values.any? do |reflection|
+          # +normalized_reflections+ routes to the deep-frozen shadow Hash on
+          # non-main Ractors (set up by +make_reflections_shareable!+), avoiding
+          # the +Ractor::IsolationError+ on the +_reflections+ class_attribute
+          # ivar reach. Equivalent for autosave: through-reflections collapse
+          # to their parent reflection, which carries the same options graph
+          # already used by +reflect_on_all_autosave_associations+ above.
+          self.class.normalized_reflections.values.any? do |reflection|
             if reflection.options[:autosave]
               association = association_instance_get(reflection.name)
               association && Array.wrap(association.target).any?(&:changed_for_autosave?)
