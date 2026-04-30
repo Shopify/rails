@@ -145,12 +145,22 @@ module Rails
       @ractor_logger_actor = logger_actor
       at_exit { logger_actor.shutdown rescue nil }
 
-      # Update component loggers that cached the old BroadcastLogger
-      ::ActiveRecord::Base.logger = ractor_logger if defined?(::ActiveRecord::Base)
+      # Update component loggers that cached the old BroadcastLogger.
+      # Each engine's initializer captures Rails.logger at boot time
+      # — before this swap — so the module-level accessors below
+      # still point at the original (now frozen-IO) logger unless we
+      # rebind them.
+      ::ActiveRecord::Base.logger    = ractor_logger if defined?(::ActiveRecord::Base)
       ::ActionController::Base.logger = ractor_logger if defined?(::ActionController::Base)
-      ::ActionMailer::Base.logger = ractor_logger if defined?(::ActionMailer::Base)
-      ::ActiveJob::Base.logger = ractor_logger if defined?(::ActiveJob::Base)
-      ::ActionView::Base.logger = ractor_logger if defined?(::ActionView::Base)
+      ::ActionMailer::Base.logger    = ractor_logger if defined?(::ActionMailer::Base)
+      ::ActiveJob::Base.logger       = ractor_logger if defined?(::ActiveJob::Base)
+      ::ActionView::Base.logger      = ractor_logger if defined?(::ActionView::Base)
+      ::ActionMailbox.logger          = ractor_logger if defined?(::ActionMailbox) && ::ActionMailbox.respond_to?(:logger=)
+      ::ActiveStorage.logger          = ractor_logger if defined?(::ActiveStorage) && ::ActiveStorage.respond_to?(:logger=)
+      if defined?(::ActionCable) && ::ActionCable.respond_to?(:server) && ::ActionCable.server.respond_to?(:config)
+        ::ActionCable.server.config.logger = ractor_logger
+      end
+      ::Rails.error.logger = ractor_logger if ::Rails.respond_to?(:error) && ::Rails.error.respond_to?(:logger=)
 
       # Save the connection handler (nilled during AR::Base.make_shareable!)
       saved_handler = ::ActiveRecord::Base.default_connection_handler
