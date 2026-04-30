@@ -150,6 +150,48 @@ module ActiveRecord
         end
       end
 
+      # Read-side per-call dispatch for +c.select_all(arel, name)+.
+      #
+      # Reached from +Calculations#execute_simple_calculation+ (e.g.
+      # +Post.count+, +Post.sum+) which calls
+      # +c.select_all(query_builder, "<Model> <Operation>", async: @async)+
+      # inside a +with_connection+ block. Any other caller using
+      # +c.select_all+ directly on the proxy lands here too.
+      #
+      # Same Marshal-the-arel + main-side dispatch shape as +insert+ /
+      # +update+ / +delete+ / +select_rows+. Async paths return a
+      # +FutureResult+ that is bound to the main-side connection and
+      # cannot ride back across the boundary; raise +NotImplementedError+
+      # on +async: true+, matching +select_rows+.
+      #
+      # The return shape from a real adapter's +select_all+ is an
+      # +ActiveRecord::Result+ (rows + columns + column_types). Made
+      # shareable with +copy: true+ so the request side can read it.
+      def select_all(arel, name = nil, binds = [], preparable: nil, async: false, allow_retry: false)
+        if async
+          raise NotImplementedError,
+            "RactorConnectionProxy#select_all does not support async: true. " \
+            "Pass async: false; main-Ractor async support is out of scope for " \
+            "the request-side proxy. See #{__FILE__}."
+        end
+
+        arel_dump   = Marshal.dump(arel).freeze
+        op_name     = name.nil? ? nil : Ractor.make_shareable(name, copy: true)
+        binds_dump  = Ractor.make_shareable(binds, copy: true)
+        preparable_ = Ractor.make_shareable(preparable, copy: true)
+        allow_retry_ = allow_retry ? true : false
+
+        Ractor::Dispatch.main.run do
+          RactorConnectionProxy.dispatched_with_sanitized_errors do
+            arel_ = Marshal.load(arel_dump)
+            ActiveRecord::Base.with_connection do |c|
+              result = c.select_all(arel_, op_name, binds_dump, preparable: preparable_, async: false, allow_retry: allow_retry_)
+              Ractor.make_shareable(result, copy: true)
+            end
+          end
+        end
+      end
+
       # Read-side per-call dispatch for +c.select_rows(arel, name)+.
       #
       # Currently reached from +FinderMethods#exists?+, which calls
