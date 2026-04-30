@@ -61,6 +61,34 @@ module ActiveRecord
           end
         end
 
+        # Force-resolve +encrypted_attributes+ and snapshot a shareable copy
+        # so non-main Ractors can read the singleton-class ivar that backs
+        # this +class_attribute+. The +encrypts+ macro lazy-initializes
+        # +encrypted_attributes+ to a mutable +Set.new+ (see +encrypts+
+        # above) and +has_encrypted_attributes?+ /
+        # +cant_modify_encrypted_attributes_when_frozen+ /
+        # +_create_record+ all read it on every save, which raises
+        # +Ractor::IsolationError+ from non-main Ractors on
+        # +instance_variable_get+ of +@__class_attr_encrypted_attributes+
+        # until the Set is shareable. The Set is finalized at boot via the
+        # +encrypts+ declarations in the class body and never mutated
+        # afterward, so a one-shot deep-freeze is safe. +copy: true+ avoids
+        # entangling caller-held references. The same warmer also pre-
+        # resolves +@deterministic_encrypted_attributes+, which is
+        # lazy-memoized via +||=+ in +deterministic_encrypted_attributes+
+        # above and would otherwise hit the same class-ivar
+        # +Ractor::IsolationError+ on first read from a non-main Ractor.
+        def make_encrypted_attributes_shareable! # :nodoc:
+          current = encrypted_attributes
+          unless Ractor.shareable?(current)
+            self.encrypted_attributes = Ractor.make_shareable(current, copy: true)
+          end
+          deterministic = deterministic_encrypted_attributes
+          unless Ractor.shareable?(deterministic)
+            @deterministic_encrypted_attributes = Ractor.make_shareable(deterministic, copy: true)
+          end
+        end
+
         # Given a attribute name, it returns the name of the source attribute when it's a preserved one.
         def source_attribute_from_preserved_attribute(attribute_name)
           attribute_name.to_s.sub(ORIGINAL_ATTRIBUTE_PREFIX, "") if attribute_name.start_with?(ORIGINAL_ATTRIBUTE_PREFIX)

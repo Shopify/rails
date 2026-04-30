@@ -1366,6 +1366,7 @@ module Rails
           ar_class.make_default_scope_override_shareable! if ar_class.respond_to?(:make_default_scope_override_shareable!)
           ar_class.make_finder_needs_type_condition_shareable! if ar_class.respond_to?(:make_finder_needs_type_condition_shareable!)
           ar_class.make_defined_enums_shareable! if ar_class.respond_to?(:make_defined_enums_shareable!)
+          ar_class.make_encrypted_attributes_shareable! if ar_class.respond_to?(:make_encrypted_attributes_shareable!)
         end
         # +ActiveRecord::Relation::WhereClause.empty+ memoizes the singleton
         # empty +WhereClause+ in the +@empty+ class ivar via +||=+.
