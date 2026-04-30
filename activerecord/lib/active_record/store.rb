@@ -141,55 +141,68 @@ module ActiveRecord
           keys.each do |key|
             accessor_key = "#{accessor_prefix}#{key}#{accessor_suffix}"
 
-            define_method("#{accessor_key}=") do |value|
-              write_store_attribute(store_attribute, key, value)
-            end
+            # Capture loop-locals into fresh single-write bindings so the
+            # generated accessor procs only close over shareable values.
+            sa = store_attribute
+            k = key
 
-            define_method(accessor_key) do
-              read_store_attribute(store_attribute, key)
+            setter = shareable_proc do |value|
+              write_store_attribute(sa, k, value)
             end
+            define_method("#{accessor_key}=", &setter)
 
-            define_method("#{accessor_key}_changed?") do
-              return false unless attribute_changed?(store_attribute)
-              prev_store, new_store = changes[store_attribute]
-              accessor = store_accessor_for(store_attribute)
-              accessor.get(prev_store, key) != accessor.get(new_store, key)
+            getter = shareable_proc do
+              read_store_attribute(sa, k)
             end
+            define_method(accessor_key, &getter)
 
-            define_method("#{accessor_key}_change") do
-              return unless attribute_changed?(store_attribute)
-              prev_store, new_store = changes[store_attribute]
-              accessor = store_accessor_for(store_attribute)
-              [accessor.get(prev_store, key), accessor.get(new_store, key)]
+            changed_p = shareable_proc do
+              return false unless attribute_changed?(sa)
+              prev_store, new_store = changes[sa]
+              accessor = store_accessor_for(sa)
+              accessor.get(prev_store, k) != accessor.get(new_store, k)
             end
+            define_method("#{accessor_key}_changed?", &changed_p)
 
-            define_method("#{accessor_key}_was") do
-              return unless attribute_changed?(store_attribute)
-              prev_store, _new_store = changes[store_attribute]
-              accessor = store_accessor_for(store_attribute)
-              accessor.get(prev_store, key)
+            change_m = shareable_proc do
+              return unless attribute_changed?(sa)
+              prev_store, new_store = changes[sa]
+              accessor = store_accessor_for(sa)
+              [accessor.get(prev_store, k), accessor.get(new_store, k)]
             end
+            define_method("#{accessor_key}_change", &change_m)
 
-            define_method("saved_change_to_#{accessor_key}?") do
-              return false unless saved_change_to_attribute?(store_attribute)
-              prev_store, new_store = saved_changes[store_attribute]
-              accessor = store_accessor_for(store_attribute)
-              accessor.get(prev_store, key) != accessor.get(new_store, key)
+            was_m = shareable_proc do
+              return unless attribute_changed?(sa)
+              prev_store, _new_store = changes[sa]
+              accessor = store_accessor_for(sa)
+              accessor.get(prev_store, k)
             end
+            define_method("#{accessor_key}_was", &was_m)
 
-            define_method("saved_change_to_#{accessor_key}") do
-              return unless saved_change_to_attribute?(store_attribute)
-              prev_store, new_store = saved_changes[store_attribute]
-              accessor = store_accessor_for(store_attribute)
-              [accessor.get(prev_store, key), accessor.get(new_store, key)]
+            saved_changed_p = shareable_proc do
+              return false unless saved_change_to_attribute?(sa)
+              prev_store, new_store = saved_changes[sa]
+              accessor = store_accessor_for(sa)
+              accessor.get(prev_store, k) != accessor.get(new_store, k)
             end
+            define_method("saved_change_to_#{accessor_key}?", &saved_changed_p)
 
-            define_method("#{accessor_key}_before_last_save") do
-              return unless saved_change_to_attribute?(store_attribute)
-              prev_store, _new_store = saved_changes[store_attribute]
-              accessor = store_accessor_for(store_attribute)
-              accessor.get(prev_store, key)
+            saved_change_m = shareable_proc do
+              return unless saved_change_to_attribute?(sa)
+              prev_store, new_store = saved_changes[sa]
+              accessor = store_accessor_for(sa)
+              [accessor.get(prev_store, k), accessor.get(new_store, k)]
             end
+            define_method("saved_change_to_#{accessor_key}", &saved_change_m)
+
+            before_last_save = shareable_proc do
+              return unless saved_change_to_attribute?(sa)
+              prev_store, _new_store = saved_changes[sa]
+              accessor = store_accessor_for(sa)
+              accessor.get(prev_store, k)
+            end
+            define_method("#{accessor_key}_before_last_save", &before_last_save)
           end
         end
 
