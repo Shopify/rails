@@ -141,6 +141,33 @@ module ActionMailer
           end
         end
 
+        # Same as ActionMailer::MessageDelivery#_dispatch_main but threads
+        # @params through so parameterized mailers behave identically when
+        # delivery is dispatched to the main Ractor.
+        def _dispatch_main(verb)
+          mailer_class_name = Ractor.make_shareable(@mailer_class.name.dup)
+          action_sym        = @action.to_sym
+          args              = Ractor.make_shareable(@args,   copy: true)
+          params            = Ractor.make_shareable(@params, copy: true)
+
+          Ractor::Dispatch.main.run do
+            mailer = Object.const_get(mailer_class_name).new
+            mailer.params = params
+            mailer.process(action_sym, *args)
+            case verb
+            when :message
+              mailer.message
+            else
+              mailer.handle_exceptions do
+                mailer.run_callbacks(:deliver) do
+                  verb == :deliver! ? mailer.message.deliver! : mailer.message.deliver
+                end
+              end
+              nil
+            end
+          end
+        end
+
         def enqueue_delivery(delivery_method, options = {})
           if processed?
             super

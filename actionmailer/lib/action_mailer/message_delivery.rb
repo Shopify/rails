@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "delegate"
+require "ractor/dispatch"
 
 module ActionMailer
   class << self
@@ -63,7 +64,15 @@ module ActionMailer
 
     # Method calls are delegated to the Mail::Message that's ready to deliver.
     def __getobj__ # :nodoc:
-      @mail_message ||= processed_mailer.message
+      return @mail_message if @mail_message
+
+      if Ractor.main?
+        @mail_message = processed_mailer.message
+      else
+        @mail_message = _dispatch_main(:message)
+      end
+
+      @mail_message
     end
 
     # Unused except for delegator internals (dup, marshalling).
@@ -143,10 +152,14 @@ module ActionMailer
     #   Notifier.welcome(User.first).deliver_now!
     #
     def deliver_now!
-      processed_mailer.handle_exceptions do
-        processed_mailer.run_callbacks(:deliver) do
-          message.deliver!
+      if Ractor.main?
+        processed_mailer.handle_exceptions do
+          processed_mailer.run_callbacks(:deliver) do
+            message.deliver!
+          end
         end
+      else
+        _dispatch_main(:deliver!)
       end
     end
 
@@ -155,10 +168,14 @@ module ActionMailer
     #   Notifier.welcome(User.first).deliver_now
     #
     def deliver_now
-      processed_mailer.handle_exceptions do
-        processed_mailer.run_callbacks(:deliver) do
-          message.deliver
+      if Ractor.main?
+        processed_mailer.handle_exceptions do
+          processed_mailer.run_callbacks(:deliver) do
+            message.deliver
+          end
         end
+      else
+        _dispatch_main(:deliver)
       end
     end
 
@@ -168,6 +185,34 @@ module ActionMailer
       def processed_mailer
         @processed_mailer ||= @mailer_class.new.tap do |mailer|
           mailer.process @action, *@args
+        end
+      end
+
+      # Run the mailer pipeline (instantiate, process, callbacks, deliver) on
+      # the main Ractor. The mail gem's Mail::Configuration is a Singleton
+      # whose class-level ivars hold non-shareable values, so any non-main
+      # Ractor that calls Mail.new triggers Ractor::IsolationError. Crossing
+      # the boundary here keeps request handlers on non-main while delivery
+      # itself runs on main.
+      def _dispatch_main(verb)
+        mailer_class_name = Ractor.make_shareable(@mailer_class.name.dup)
+        action_sym        = @action.to_sym
+        args              = Ractor.make_shareable(@args, copy: true)
+
+        Ractor::Dispatch.main.run do
+          mailer = Object.const_get(mailer_class_name).new
+          mailer.process(action_sym, *args)
+          case verb
+          when :message
+            mailer.message
+          else
+            mailer.handle_exceptions do
+              mailer.run_callbacks(:deliver) do
+                verb == :deliver! ? mailer.message.deliver! : mailer.message.deliver
+              end
+            end
+            nil
+          end
         end
       end
 
