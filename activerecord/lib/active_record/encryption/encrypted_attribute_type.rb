@@ -26,6 +26,22 @@ module ActiveRecord
         @cast_type = cast_type
         @previous_type = previous_type
         @default = default
+
+        # Eagerly compute the previously-lazy memoized state so this instance
+        # can be safely deep-frozen for Ractor sharing. Order matters:
+        # @clean_text_scheme must exist before previous_schemes_including_clean_text
+        # is called; @previous_types_without_clean_text must exist before
+        # @serialize_with_oldest is computed.
+        #
+        # Deviation from upstream: @previous_types is a single-key Hash keyed
+        # on the *current* return value of support_unencrypted_data?. Upstream
+        # used a multi-key Hash to allow tweaking support_unencrypted_data
+        # during tests; once frozen, that mutation isn't possible anyway, so
+        # we don't preserve the test-only flexibility here.
+        @clean_text_scheme = ActiveRecord::Encryption::Scheme.new(downcase: downcase?, encryptor: ActiveRecord::Encryption::NullEncryptor.new)
+        @previous_types_without_clean_text = build_previous_types_for(previous_schemes)
+        @previous_types = { support_unencrypted_data? => build_previous_types_for(previous_schemes_including_clean_text) }
+        @serialize_with_oldest = fixed? && @previous_types_without_clean_text.present?
       end
 
       def cast(value)
@@ -54,8 +70,7 @@ module ActiveRecord
       end
 
       def previous_types # :nodoc:
-        @previous_types ||= {} # Memoizing on support_unencrypted_data so that we can tweak it during tests
-        @previous_types[support_unencrypted_data?] ||= build_previous_types_for(previous_schemes_including_clean_text)
+        @previous_types[support_unencrypted_data?]
       end
 
       def support_unencrypted_data?
@@ -68,7 +83,7 @@ module ActiveRecord
         end
 
         def previous_types_without_clean_text
-          @previous_types_without_clean_text ||= build_previous_types_for(previous_schemes)
+          @previous_types_without_clean_text
         end
 
         def build_previous_types_for(schemes)
@@ -120,7 +135,7 @@ module ActiveRecord
         end
 
         def serialize_with_oldest?
-          @serialize_with_oldest ||= fixed? && previous_types_without_clean_text.present?
+          @serialize_with_oldest
         end
 
         def serialize_with_oldest(value)
@@ -160,7 +175,7 @@ module ActiveRecord
         end
 
         def clean_text_scheme
-          @clean_text_scheme ||= ActiveRecord::Encryption::Scheme.new(downcase: downcase?, encryptor: ActiveRecord::Encryption::NullEncryptor.new)
+          @clean_text_scheme
         end
 
         def text_to_database_type(value)
