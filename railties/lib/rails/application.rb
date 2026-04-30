@@ -1144,6 +1144,22 @@ module Rails
       # post-+ractorize!+ +TimeZone[name]+ misses still work (compute without
       # caching) but no longer touch any unshareable module state.
       ActiveSupport::TimeZone.make_shareable! if defined?(ActiveSupport::TimeZone)
+      # +ActionView::Helpers::SanitizeHelper+'s sanitize / strip_tags /
+      # strip_links / sanitize_css instance methods route non-main calls
+      # through +SanitizeHelper._dispatch_sanitize+, which runs the
+      # actual call on the main Ractor with a fresh sanitizer instance
+      # (the underlying +rails-html-sanitizer+ / Loofah / Nokogiri stack
+      # is +Ractor::UnsafeError+-marked and per-call mutates a
+      # +Rails::HTML::PermitScrubber+, so a cached shareable sanitizer
+      # would itself FrozenError). +make_default_sanitizers_shareable!+
+      # warms Loofah's lazy +@document_klass+ class ivars on
+      # +Loofah::HTML5::DocumentFragment+ / +Loofah::HTML4::DocumentFragment+
+      # from the main Ractor; without that, the first dispatched sanitize
+      # call would raise +Ractor::IsolationError+ on the lazy +||=+ inside
+      # Loofah (which we cannot patch).
+      if defined?(ActionView::Helpers::SanitizeHelper) && ActionView::Helpers::SanitizeHelper.respond_to?(:make_default_sanitizers_shareable!)
+        ActionView::Helpers::SanitizeHelper.make_default_sanitizers_shareable!
+      end
       # +Time::DATE_FORMATS+ and +Date::DATE_FORMATS+ are the formatter
       # registries +Time#to_fs+ / +Date#to_fs+ look up on every
       # +cache_version+ / +cache_key+ / +to_fs(:db)+ / etc. They contain

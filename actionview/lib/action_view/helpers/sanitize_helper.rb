@@ -115,12 +115,20 @@ module ActionView
       # NOTE: +Rails::HTML5::Sanitizer+ is not supported on JRuby, so on JRuby platforms \Rails will
       # fall back to using +Rails::HTML4::Sanitizer+.
       def sanitize(html, options = {})
-        self.class.safe_list_sanitizer.sanitize(html, options)&.html_safe
+        if Ractor.main?
+          self.class.safe_list_sanitizer.sanitize(html, options)&.html_safe
+        else
+          SanitizeHelper._dispatch_sanitize(:safe_list_sanitizer, :sanitize, html, options)&.html_safe
+        end
       end
 
       # Sanitizes a block of CSS code. Used by #sanitize when it comes across a style attribute.
       def sanitize_css(style)
-        self.class.safe_list_sanitizer.sanitize_css(style)
+        if Ractor.main?
+          self.class.safe_list_sanitizer.sanitize_css(style)
+        else
+          SanitizeHelper._dispatch_sanitize(:safe_list_sanitizer, :sanitize_css, style)
+        end
       end
 
       # Strips all HTML tags from +html+, including comments and special characters.
@@ -137,7 +145,11 @@ module ActionView
       #   strip_tags("> A quote from Smith & Wesson")
       #   # => &gt; A quote from Smith &amp; Wesson
       def strip_tags(html)
-        self.class.full_sanitizer.sanitize(html)&.html_safe
+        if Ractor.main?
+          self.class.full_sanitizer.sanitize(html)&.html_safe
+        else
+          SanitizeHelper._dispatch_sanitize(:full_sanitizer, :sanitize, html)&.html_safe
+        end
       end
 
       # Strips all link tags from +html+ leaving just the link text.
@@ -154,7 +166,72 @@ module ActionView
       #   strip_links('<<a href="https://example.org">malformed & link</a>')
       #   # => &lt;malformed &amp; link
       def strip_links(html)
-        self.class.link_sanitizer.sanitize(html)
+        if Ractor.main?
+          self.class.link_sanitizer.sanitize(html)
+        else
+          SanitizeHelper._dispatch_sanitize(:link_sanitizer, :sanitize, html)
+        end
+      end
+
+      # Dispatch helper for sanitize calls from non-main Ractors. The actual
+      # sanitize work happens inside the +rails-html-sanitizer+ gem, which
+      # calls into Loofah and Nokogiri. Nokogiri's C extension is
+      # +Ractor::UnsafeError+-marked, and Loofah lazily writes
+      # +@document_klass+ on +DocumentFragment+ classes — neither is fixable
+      # without patching gem code.
+      #
+      # The sanitizer instances themselves can't be cached as shareable
+      # because they hold a +Rails::HTML::PermitScrubber+ that mutates per
+      # call (e.g. assigning +@tags+ / +@attributes+ from options). So we
+      # build a fresh sanitizer on the main side and run the sanitize call
+      # there. The +sanitizer_kind+ symbol selects which factory method on
+      # +sanitizer_vendor+ to use (+:full_sanitizer+, +:link_sanitizer+, or
+      # +:safe_list_sanitizer+).
+      def self._dispatch_sanitize(sanitizer_kind, method, *args)
+        # Deep-freeze the entire args array so that capturing it inside the
+        # +shareable_proc+ used by +Ractor::Dispatch::Executor#submit+
+        # passes the shareability check on captured locals.
+        shareable_args = Ractor.make_shareable(args, copy: true)
+        Ractor::Dispatch.main.run do
+          ActionView::Helpers::SanitizeHelper
+            .sanitizer_vendor
+            .public_send(sanitizer_kind)
+            .new
+            .public_send(method, *shareable_args)
+        end
+      end
+
+      # +make_default_sanitizers_shareable!+ runs during
+      # +Rails::Application#ractorize!+. Its job is to make the *first*
+      # sanitize call from a non-main Ractor not crash on lazy state in
+      # the underlying +rails-html-sanitizer+ / Loofah / Nokogiri stack.
+      #
+      # We deliberately do NOT cache shareable sanitizer instances at the
+      # module level: +Rails::HTML::SafeListSanitizer+ holds a
+      # +Rails::HTML::PermitScrubber+ that mutates per call (assigning
+      # +@tags+ / +@attributes+ / +@prune+ from options on every call),
+      # and deep-freezing it would raise +FrozenError+ inside +sanitize+.
+      # Instead, the non-main Ractor path goes through
+      # +_dispatch_sanitize+, which runs the call on the main Ractor with
+      # a fresh sanitizer instance. The warmup here just touches enough
+      # of the gem stack that no lazy class-level ivar writes fire on the
+      # request path.
+      def self.make_default_sanitizers_shareable!
+        # Eagerly populate Loofah's lazy +@document_klass+ ivar on the
+        # +DocumentFragment+ classes that +rails-html-sanitizer+ dispatches
+        # through. Without this, the first sanitize call hits
+        # +Loofah::HtmlFragmentBehavior::ClassMethods#document_klass+,
+        # which does +@document_klass ||= ...+ on the Loofah class and
+        # raises +Ractor::IsolationError+ when called from a non-main
+        # Ractor. We can't patch the Loofah gem, so trigger the lazy
+        # write here from the main Ractor.
+        if defined?(Loofah::HTML5::DocumentFragment) && Loofah.respond_to?(:html5_support?) && Loofah.html5_support?
+          Loofah::HTML5::DocumentFragment.document_klass
+        end
+        if defined?(Loofah::HTML4::DocumentFragment)
+          Loofah::HTML4::DocumentFragment.document_klass
+        end
+        nil
       end
 
       module ClassMethods # :nodoc:
@@ -178,6 +255,12 @@ module ActionView
         #   class Application < Rails::Application
         #     config.action_view.full_sanitizer = MySpecialSanitizer.new
         #   end
+        # Note: these readers are only invoked from the main Ractor.
+        # +SanitizeHelper#sanitize+ / +#strip_tags+ / +#strip_links+ /
+        # +#sanitize_css+ check +Ractor.main?+ and route non-main calls
+        # through +SanitizeHelper._dispatch_sanitize+ (which runs the
+        # actual sanitize on the main Ractor with a fresh sanitizer
+        # instance). So the lazy +||=+ write here is safe.
         def full_sanitizer
           @full_sanitizer ||= sanitizer_vendor.full_sanitizer.new
         end
