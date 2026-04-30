@@ -230,18 +230,34 @@ module ActiveSupport
       # numeric value it is either the hour offset, or the second offset, of the
       # timezone to find. (The first one with that offset will be returned.)
       # Returns +nil+ if no such time zone is known to the system.
+      #
+      # After +make_shareable!+ has run, +@lazy_zones_map+ is a frozen +Hash+
+      # populated with every name in +MAPPING+ (and every TZInfo identifier
+      # value). Unknown names still need to work from non-main Ractors (the
+      # frozen +Hash+ is shareable, so +Hash#[]+ is fine), so on a miss we
+      # compute the +TimeZone+ instance and only attempt to cache it when the
+      # map is still mutable. This preserves the original lazy-cache contract
+      # in development/test while staying Ractor-safe in production.
       def [](arg)
         case arg
         when self
           arg
         when String
+          cached = @lazy_zones_map[arg]
+          return cached if cached
           begin
-            @lazy_zones_map[arg] ||= create(arg)
+            zone = create(arg)
           rescue TZInfo::InvalidTimezoneIdentifier
-            nil
+            return nil
           end
+          @lazy_zones_map[arg] = zone unless @lazy_zones_map.frozen?
+          zone
         when TZInfo::Timezone
-          @lazy_zones_map[arg.name] ||= create(arg.name, nil, arg)
+          cached = @lazy_zones_map[arg.name]
+          return cached if cached
+          zone = create(arg.name, nil, arg)
+          @lazy_zones_map[arg.name] = zone unless @lazy_zones_map.frozen?
+          zone
         when Numeric, ActiveSupport::Duration
           arg *= 3600 if arg.abs <= 13
           all.find { |z| z.utc_offset == arg.to_i }
@@ -258,9 +274,61 @@ module ActiveSupport
 
       # A convenience method for returning a collection of TimeZone objects
       # for time zones in the country specified by its ISO 3166-1 Alpha2 code.
+      #
+      # After +make_shareable!+ has run, +@country_zones+ is a frozen +Hash+.
+      # On a miss we compute the result and only cache it when the map is
+      # still mutable, so callers from non-main Ractors still get a correct
+      # answer for codes that weren't pre-populated.
       def country_zones(country_code)
         code = country_code.to_s.upcase
-        @country_zones[code] ||= load_country_zones(code)
+        cached = @country_zones[code]
+        return cached if cached
+        zones = load_country_zones(code)
+        @country_zones[code] = zones unless @country_zones.frozen?
+        zones
+      end
+
+      # Make +ActiveSupport::TimeZone+'s class-instance state Ractor-shareable.
+      #
+      # +TimeZone.[](name)+ memoizes lookups in +@lazy_zones_map+ (a
+      # +Concurrent::Map+) and +TimeZone.country_zones(code)+ memoizes in
+      # +@country_zones+. Reads from non-main Ractors raise
+      # +Ractor::IsolationError+ because +Concurrent::Map+ is not shareable.
+      # We pre-populate +@lazy_zones_map+ for every name and TZInfo identifier
+      # in +MAPPING+, warm +@zones+ / +@zones_map+ via +all+, then deep-freeze
+      # both maps as plain +Hash+es using +copy: true+ -- each cached
+      # +TimeZone+ instance carries a +@tzinfo+ reference into the TZInfo gem's
+      # internal cache, and +copy: true+ keeps that internal state out of the
+      # deep-freeze (matching the pattern used by +Time.make_zone_default_shareable!+).
+      #
+      # +@country_zones+ is left empty: the harness never reads it from a
+      # non-main Ractor, and +load_country_zones+ depends on per-country
+      # +TZInfo::Country+ data we don't want to eagerly resolve. The
+      # +country_zones+ reader handles a frozen empty +Hash+ by computing on
+      # miss without caching.
+      def make_shareable! # :nodoc:
+        return if @lazy_zones_map.frozen?
+
+        # Force +TimeZone+ instances to exist for every name in +MAPPING+ and
+        # for every TZInfo identifier referenced as a value. Both pathways are
+        # used by callers (e.g. +Time.find_zone!("America/New_York")+ goes
+        # straight to a TZInfo identifier).
+        MAPPING.each_key { |name| self[name] }
+        MAPPING.each_value { |tz_id| self[tz_id] }
+
+        # Warm +@zones+ and +@zones_map+ so +TimeZone.all+ is shareable and
+        # cheap from any Ractor (used by +time_zone_options_for_select+).
+        all
+
+        zones = @lazy_zones_map.each_pair.to_h
+        @lazy_zones_map = Ractor.make_shareable(zones, copy: true)
+
+        @country_zones = {}.freeze
+
+        @zones = Ractor.make_shareable(@zones, copy: true) if @zones
+        @zones_map = Ractor.make_shareable(@zones_map, copy: true) if @zones_map
+
+        nil
       end
 
       def clear # :nodoc:

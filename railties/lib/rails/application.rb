@@ -1133,6 +1133,17 @@ module Rails
       # column reads), which raises +Ractor::IsolationError+ from non-main
       # Ractors until the cached value is shareable. Deep-freeze in place.
       Time.make_zone_default_shareable!
+      # +ActiveSupport::TimeZone+ memoizes per-name lookups in +@lazy_zones_map+
+      # (a +Concurrent::Map+) and per-country lookups in +@country_zones+. Reads
+      # from non-main Ractors raise +Ractor::IsolationError+ on every
+      # +Time.use_zone+ / +Time.find_zone!+ / +TimeZone[name]+ call (e.g. the
+      # +ActiveJob::ExecutionState#perform_now+ +Time.use_zone+ wrapper or
+      # +form_options_helper+'s +time_zone_select+). +TimeZone.make_shareable!+
+      # warms every name in +MAPPING+, builds +@zones+ / +@zones_map+, and
+      # replaces both maps with deep-frozen +Hash+es. After this call,
+      # post-+ractorize!+ +TimeZone[name]+ misses still work (compute without
+      # caching) but no longer touch any unshareable module state.
+      ActiveSupport::TimeZone.make_shareable! if defined?(ActiveSupport::TimeZone)
       # +Time::DATE_FORMATS+ and +Date::DATE_FORMATS+ are the formatter
       # registries +Time#to_fs+ / +Date#to_fs+ look up on every
       # +cache_version+ / +cache_key+ / +to_fs(:db)+ / etc. They contain
