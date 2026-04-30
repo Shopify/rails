@@ -87,11 +87,9 @@ module ActiveRecord
       def empty_insert_statement_value(primary_key = nil)
         pk_dump = primary_key
         Ractor::Dispatch.main.run do
-          RactorConnectionProxy.dispatched_with_sanitized_errors do
-            ActiveRecord::Base.with_connection do |c|
-              value = c.empty_insert_statement_value(pk_dump)
-              Ractor.make_shareable(value, copy: true)
-            end
+          ActiveRecord::Base.with_connection do |c|
+            value = c.empty_insert_statement_value(pk_dump)
+            Ractor.make_shareable(value, copy: true)
           end
         end
       end
@@ -110,12 +108,10 @@ module ActiveRecord
         returning_ = Ractor.make_shareable(returning, copy: true)
 
         Ractor::Dispatch.main.run do
-          RactorConnectionProxy.dispatched_with_sanitized_errors do
-            im = Marshal.load(im_dump)
-            ActiveRecord::Base.with_connection do |c|
-              result = c.insert(im, op_name, pk_, pk_value_, returning: returning_)
-              Ractor.make_shareable(result, copy: true)
-            end
+          im = Marshal.load(im_dump)
+          ActiveRecord::Base.with_connection do |c|
+            result = c.insert(im, op_name, pk_, pk_value_, returning: returning_)
+            Ractor.make_shareable(result, copy: true)
           end
         end
       end
@@ -125,12 +121,10 @@ module ActiveRecord
         op_name = name.nil? ? nil : Ractor.make_shareable(name, copy: true)
 
         Ractor::Dispatch.main.run do
-          RactorConnectionProxy.dispatched_with_sanitized_errors do
-            um = Marshal.load(um_dump)
-            ActiveRecord::Base.with_connection do |c|
-              result = c.update(um, op_name)
-              Ractor.make_shareable(result, copy: true)
-            end
+          um = Marshal.load(um_dump)
+          ActiveRecord::Base.with_connection do |c|
+            result = c.update(um, op_name)
+            Ractor.make_shareable(result, copy: true)
           end
         end
       end
@@ -140,12 +134,10 @@ module ActiveRecord
         op_name = name.nil? ? nil : Ractor.make_shareable(name, copy: true)
 
         Ractor::Dispatch.main.run do
-          RactorConnectionProxy.dispatched_with_sanitized_errors do
-            dm = Marshal.load(dm_dump)
-            ActiveRecord::Base.with_connection do |c|
-              result = c.delete(dm, op_name)
-              Ractor.make_shareable(result, copy: true)
-            end
+          dm = Marshal.load(dm_dump)
+          ActiveRecord::Base.with_connection do |c|
+            result = c.delete(dm, op_name)
+            Ractor.make_shareable(result, copy: true)
           end
         end
       end
@@ -182,12 +174,10 @@ module ActiveRecord
         allow_retry_ = allow_retry ? true : false
 
         Ractor::Dispatch.main.run do
-          RactorConnectionProxy.dispatched_with_sanitized_errors do
-            arel_ = Marshal.load(arel_dump)
-            ActiveRecord::Base.with_connection do |c|
-              result = c.select_all(arel_, op_name, binds_dump, preparable: preparable_, async: false, allow_retry: allow_retry_)
-              Ractor.make_shareable(result, copy: true)
-            end
+          arel_ = Marshal.load(arel_dump)
+          ActiveRecord::Base.with_connection do |c|
+            result = c.select_all(arel_, op_name, binds_dump, preparable: preparable_, async: false, allow_retry: allow_retry_)
+            Ractor.make_shareable(result, copy: true)
           end
         end
       end
@@ -236,12 +226,10 @@ module ActiveRecord
         binds_dump = Ractor.make_shareable(binds, copy: true)
 
         Ractor::Dispatch.main.run do
-          RactorConnectionProxy.dispatched_with_sanitized_errors do
-            arel_ = Marshal.load(arel_dump)
-            ActiveRecord::Base.with_connection do |c|
-              rows = c.select_rows(arel_, op_name, binds_dump, async: false)
-              Ractor.make_shareable(rows, copy: true)
-            end
+          arel_ = Marshal.load(arel_dump)
+          ActiveRecord::Base.with_connection do |c|
+            rows = c.select_rows(arel_, op_name, binds_dump, async: false)
+            Ractor.make_shareable(rows, copy: true)
           end
         end
       end
@@ -269,10 +257,8 @@ module ActiveRecord
       # ever becomes a hotspot.
       def table_alias_length
         Ractor::Dispatch.main.run do
-          RactorConnectionProxy.dispatched_with_sanitized_errors do
-            ActiveRecord::Base.with_connection do |c|
-              c.table_alias_length
-            end
+          ActiveRecord::Base.with_connection do |c|
+            c.table_alias_length
           end
         end
       end
@@ -287,11 +273,9 @@ module ActiveRecord
       def table_alias_for(table_name)
         name_dump = table_name.frozen? ? table_name : table_name.dup.freeze
         Ractor::Dispatch.main.run do
-          RactorConnectionProxy.dispatched_with_sanitized_errors do
-            ActiveRecord::Base.with_connection do |c|
-              result = c.table_alias_for(name_dump)
-              Ractor.make_shareable(result, copy: true)
-            end
+          ActiveRecord::Base.with_connection do |c|
+            result = c.table_alias_for(name_dump)
+            Ractor.make_shareable(result, copy: true)
           end
         end
       end
@@ -303,11 +287,9 @@ module ActiveRecord
       def quote_table_name(name)
         name_dump = name.frozen? ? name : name.dup.freeze
         Ractor::Dispatch.main.run do
-          RactorConnectionProxy.dispatched_with_sanitized_errors do
-            ActiveRecord::Base.with_connection do |c|
-              result = c.quote_table_name(name_dump)
-              Ractor.make_shareable(result, copy: true)
-            end
+          ActiveRecord::Base.with_connection do |c|
+            result = c.quote_table_name(name_dump)
+            Ractor.make_shareable(result, copy: true)
           end
         end
       end
@@ -326,11 +308,9 @@ module ActiveRecord
         table_dump = table.is_a?(String) && table.frozen? ? table : table.to_s.dup.freeze
         attr_dump  = attr.is_a?(String) && attr.frozen?  ? attr  : attr.to_s.dup.freeze
         Ractor::Dispatch.main.run do
-          RactorConnectionProxy.dispatched_with_sanitized_errors do
-            ActiveRecord::Base.with_connection do |c|
-              result = c.quote_table_name_for_assignment(table_dump, attr_dump)
-              Ractor.make_shareable(result, copy: true)
-            end
+          ActiveRecord::Base.with_connection do |c|
+            result = c.quote_table_name_for_assignment(table_dump, attr_dump)
+            Ractor.make_shareable(result, copy: true)
           end
         end
       end
@@ -353,12 +333,10 @@ module ActiveRecord
         binds_dump = Ractor.make_shareable(binds, copy: true)
 
         Ractor::Dispatch.main.run do
-          RactorConnectionProxy.dispatched_with_sanitized_errors do
-            arel_ = Marshal.load(arel_dump)
-            ActiveRecord::Base.with_connection do |c|
-              result = c.to_sql(arel_, binds_dump)
-              Ractor.make_shareable(result, copy: true)
-            end
+          arel_ = Marshal.load(arel_dump)
+          ActiveRecord::Base.with_connection do |c|
+            result = c.to_sql(arel_, binds_dump)
+            Ractor.make_shareable(result, copy: true)
           end
         end
       end
@@ -380,12 +358,10 @@ module ActiveRecord
       def cast_bound_value(value)
         value_dump = Marshal.dump(value).freeze
         Ractor::Dispatch.main.run do
-          RactorConnectionProxy.dispatched_with_sanitized_errors do
-            loaded = Marshal.load(value_dump)
-            ActiveRecord::Base.with_connection do |c|
-              result = c.cast_bound_value(loaded)
-              Ractor.make_shareable(result, copy: true)
-            end
+          loaded = Marshal.load(value_dump)
+          ActiveRecord::Base.with_connection do |c|
+            result = c.cast_bound_value(loaded)
+            Ractor.make_shareable(result, copy: true)
           end
         end
       end
@@ -405,37 +381,12 @@ module ActiveRecord
       def quote(value)
         value_dump = Marshal.dump(value).freeze
         Ractor::Dispatch.main.run do
-          RactorConnectionProxy.dispatched_with_sanitized_errors do
-            loaded = Marshal.load(value_dump)
-            ActiveRecord::Base.with_connection do |c|
-              result = c.quote(loaded)
-              Ractor.make_shareable(result, copy: true)
-            end
+          loaded = Marshal.load(value_dump)
+          ActiveRecord::Base.with_connection do |c|
+            result = c.quote(loaded)
+            Ractor.make_shareable(result, copy: true)
           end
         end
-      end
-
-      # AR exceptions raised by the adapter (e.g. +StatementInvalid+,
-      # +RecordNotUnique+) carry a +@connection_pool+ reference whose
-      # graph includes +MonitorMixin+ state and is not shareable. If we
-      # let such an exception ride back across +Ractor::Dispatch+
-      # untouched the boundary fails with a confusing isolation error
-      # instead of surfacing the original DB error. Strip the pool ref
-      # before re-raising. The exception is re-raised so the caller (and
-      # ultimately the controller / Rails error reporter) sees the real
-      # cause.
-      def dispatched_with_sanitized_errors
-        yield
-      rescue => e
-        if e.respond_to?(:connection_pool) && e.respond_to?(:instance_variable_set)
-          begin
-            e.instance_variable_set(:@connection_pool, nil)
-          rescue FrozenError
-            # The exception is frozen; nothing we can do safely. Let it
-            # propagate as-is and surface whatever isolation error follows.
-          end
-        end
-        raise e
       end
 
       def respond_to_missing?(name, include_private = false)
@@ -472,16 +423,14 @@ module ActiveRecord
         collector_dump = collector.nil? ? nil : Marshal.dump(collector).freeze
 
         Ractor::Dispatch.main.run do
-          RactorConnectionProxy.dispatched_with_sanitized_errors do
-            node_ = Marshal.load(node_dump)
-            ActiveRecord::Base.with_connection do |c|
-              result = if collector_dump
-                c.visitor.compile(node_, Marshal.load(collector_dump))
-              else
-                c.visitor.compile(node_)
-              end
-              Ractor.make_shareable(result, copy: true)
+          node_ = Marshal.load(node_dump)
+          ActiveRecord::Base.with_connection do |c|
+            result = if collector_dump
+              c.visitor.compile(node_, Marshal.load(collector_dump))
+            else
+              c.visitor.compile(node_)
             end
+            Ractor.make_shareable(result, copy: true)
           end
         end
       end
@@ -503,16 +452,14 @@ module ActiveRecord
         collector_dump = collector.nil? ? nil : Marshal.dump(collector).freeze
 
         result_dump = Ractor::Dispatch.main.run do
-          RactorConnectionProxy.dispatched_with_sanitized_errors do
-            node_ = Marshal.load(node_dump)
-            ActiveRecord::Base.with_connection do |c|
-              result = if collector_dump
-                c.visitor.accept(node_, Marshal.load(collector_dump))
-              else
-                c.visitor.accept(node_)
-              end
-              Ractor.make_shareable(Marshal.dump(result), copy: true)
+          node_ = Marshal.load(node_dump)
+          ActiveRecord::Base.with_connection do |c|
+            result = if collector_dump
+              c.visitor.accept(node_, Marshal.load(collector_dump))
+            else
+              c.visitor.accept(node_)
             end
+            Ractor.make_shareable(Marshal.dump(result), copy: true)
           end
         end
 
@@ -558,10 +505,8 @@ module ActiveRecord
       def indexes(table_name)
         name_dump = table_name.frozen? ? table_name : table_name.dup.freeze
         Ractor::Dispatch.main.run do
-          RactorConnectionProxy.dispatched_with_sanitized_errors do
-            result = ActiveRecord::Base.connection_pool.schema_cache.indexes(name_dump)
-            Ractor.make_shareable(result, copy: true)
-          end
+          result = ActiveRecord::Base.connection_pool.schema_cache.indexes(name_dump)
+          Ractor.make_shareable(result, copy: true)
         end
       end
 
@@ -615,10 +560,8 @@ module ActiveRecord
       # reads it (e.g. for adapter-class lookups). Dispatch and freeze.
       def db_config
         Ractor::Dispatch.main.run do
-          RactorConnectionProxy.dispatched_with_sanitized_errors do
-            result = ActiveRecord::Base.connection_pool.db_config
-            Ractor.make_shareable(result, copy: true)
-          end
+          result = ActiveRecord::Base.connection_pool.db_config
+          Ractor.make_shareable(result, copy: true)
         end
       end
 
@@ -631,10 +574,8 @@ module ActiveRecord
       # +query_cache.clear+.
       def clear_query_cache
         Ractor::Dispatch.main.run do
-          RactorConnectionProxy.dispatched_with_sanitized_errors do
-            ActiveRecord::Base.connection_pool.clear_query_cache
-            nil
-          end
+          ActiveRecord::Base.connection_pool.clear_query_cache
+          nil
         end
       end
 
