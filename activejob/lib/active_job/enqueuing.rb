@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "ractor/dispatch"
+
 module ActiveJob
   # Provides behavior for enqueuing jobs.
 
@@ -113,7 +115,11 @@ module ActiveJob
       set(options)
       self.successfully_enqueued = false
 
-      raw_enqueue
+      if Ractor.main?
+        raw_enqueue
+      else
+        _dispatch_enqueue_main
+      end
 
       if successfully_enqueued?
         self
@@ -123,6 +129,34 @@ module ActiveJob
     end
 
     private
+      # Run the enqueue pipeline (callbacks + queue_adapter.enqueue) on the
+      # main Ractor. Reading ActiveJob::Base._queue_adapter from non-main
+      # Ractors raises IsolationError because the adapter (e.g. AsyncAdapter)
+      # holds threads/queues/mutexes that are not shareable.
+      def _dispatch_enqueue_main
+        job_class_name = Ractor.make_shareable(self.class.name.dup)
+        state          = Ractor.make_shareable(serialize, copy: true)
+
+        result = Ractor::Dispatch.main.run do
+          klass = Object.const_get(job_class_name)
+          job = klass.new
+          job.deserialize(state)
+          job.send(:raw_enqueue)
+          payload = {
+            successfully_enqueued: job.successfully_enqueued?,
+            enqueue_error_message: job.enqueue_error&.message,
+            provider_job_id: job.provider_job_id,
+          }
+          Ractor.make_shareable(payload, copy: true)
+        end
+
+        self.successfully_enqueued = result[:successfully_enqueued]
+        if result[:enqueue_error_message]
+          self.enqueue_error = EnqueueError.new(result[:enqueue_error_message])
+        end
+        self.provider_job_id = result[:provider_job_id] if result[:provider_job_id]
+      end
+
       def raw_enqueue
         run_callbacks :enqueue do
           _raw_enqueue
