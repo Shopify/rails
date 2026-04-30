@@ -41,12 +41,32 @@ module ActiveRecord
             /ix
           end
 
+          # +QUOTED_COLUMN_NAMES+ / +QUOTED_TABLE_NAMES+ are
+          # +Concurrent::Map+ instances and aren't shareable, so a
+          # non-main Ractor that touches the constant raises
+          # +Ractor::IsolationError+. Reached e.g. from
+          # +Calculations#execute_grouped_calculation+ at
+          # calculations.rb:552 via
+          # +model.adapter_class.quote_column_name(column_alias)+.
+          # Fall back to recomputing the frozen quoted String on
+          # non-main; the cache is just a per-input-name memo of a
+          # pure function, so skipping it costs an extra +gsub+ per
+          # call on the request side. Hot-path (main) keeps the
+          # cache untouched.
           def quote_column_name(name)
-            QUOTED_COLUMN_NAMES[name] ||= %Q("#{name.to_s.gsub('"', '""')}").freeze
+            if Ractor.main?
+              QUOTED_COLUMN_NAMES[name] ||= %Q("#{name.to_s.gsub('"', '""')}").freeze
+            else
+              %Q("#{name.to_s.gsub('"', '""')}").freeze
+            end
           end
 
           def quote_table_name(name)
-            QUOTED_TABLE_NAMES[name] ||= %Q("#{name.to_s.gsub('"', '""').gsub(".", "\".\"")}").freeze
+            if Ractor.main?
+              QUOTED_TABLE_NAMES[name] ||= %Q("#{name.to_s.gsub('"', '""').gsub(".", "\".\"")}").freeze
+            else
+              %Q("#{name.to_s.gsub('"', '""').gsub(".", "\".\"")}").freeze
+            end
           end
         end
 
