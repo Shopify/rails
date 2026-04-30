@@ -1160,6 +1160,15 @@ module Rails
       if defined?(ActionView::Helpers::SanitizeHelper) && ActionView::Helpers::SanitizeHelper.respond_to?(:make_default_sanitizers_shareable!)
         ActionView::Helpers::SanitizeHelper.make_default_sanitizers_shareable!
       end
+      # +Jbuilder::BLANK+ is a singleton sentinel (an instance of the tiny
+      # +Jbuilder::Blank+ class with no state, only +==+ and +empty?+) used
+      # as the default value of +Jbuilder#set!+ and read by
+      # +Jbuilder#_blank?+ on every +set!+ call. The +jbuilder+ gem doesn't
+      # deep-freeze it, so non-main Ractors raise +Ractor::IsolationError+
+      # on the constant read from inside any +.jbuilder+ template. We
+      # cannot patch the gem; +Ractor.make_shareable+ at boot deep-freezes
+      # the value the constant points at without touching gem source.
+      Ractor.make_shareable(Jbuilder::BLANK) if defined?(Jbuilder) && defined?(Jbuilder::BLANK) && !Ractor.shareable?(Jbuilder::BLANK)
       # +Time::DATE_FORMATS+ and +Date::DATE_FORMATS+ are the formatter
       # registries +Time#to_fs+ / +Date#to_fs+ look up on every
       # +cache_version+ / +cache_key+ / +to_fs(:db)+ / etc. They contain
