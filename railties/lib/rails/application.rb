@@ -1433,6 +1433,13 @@ module Rails
         # which raises +Ractor::IsolationError+ from non-main Ractors until
         # the cached value is shareable.
         ActiveRecord::Relation::WhereClause.make_shareable! if defined?(ActiveRecord::Relation::WhereClause)
+        # +ActiveRecord::Core+ stores resolved database configs in the class
+        # variable +@@configurations+. +QueryCache::ClassMethods#uncached+
+        # reads +configurations.empty?+ on every +Relation#load+ via
+        # +skip_query_cache_if_necessary+; class-variable reads from non-main
+        # Ractors raise +Ractor::IsolationError+ until the +DatabaseConfigurations+
+        # value (an Array of +HashConfig+ entries) is deep-frozen.
+        ActiveRecord::Base.make_configurations_shareable! if ActiveRecord::Base.respond_to?(:make_configurations_shareable!)
         # +ActiveRecord::Type.default_value+ memoizes a +Value.new+ singleton
         # in the module ivar +@default_value+ via +||=+. Reached from
         # +QueryMethods#build_cast_value+ during +order(...)+ relation

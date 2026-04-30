@@ -77,6 +77,22 @@ module ActiveRecord
         @@configurations
       end
 
+      # Snapshot a deep-frozen, Ractor-shareable copy of +@@configurations+ so
+      # non-main Ractors can read it via +ActiveRecord::Base.configurations+
+      # (e.g. +QueryCache#uncached+ -> +configurations.empty?+ on every
+      # +Relation#load+ from a request). Class-variable reads from non-main
+      # raise +Ractor::IsolationError+ until the value is shareable. Boot
+      # writes to +@@configurations+ via +configurations=+, then this freezes
+      # the resulting +ActiveRecord::DatabaseConfigurations+ -- the
+      # +@configurations+ Array of +HashConfig+ entries -- via
+      # +Ractor.make_shareable(copy: true)+ so caller-held references aren't
+      # entangled.
+      def self.make_configurations_shareable! # :nodoc:
+        current = @@configurations
+        return if Ractor.shareable?(current)
+        @@configurations = Ractor.make_shareable(current, copy: true)
+      end
+
       ##
       # :singleton-method:
       # Force enumeration of all columns in SELECT statements.
