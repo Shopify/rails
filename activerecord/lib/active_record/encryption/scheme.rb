@@ -44,6 +44,17 @@ module ActiveRecord
         # values once, here, while the +Scheme+ is still mutable.
         @key_provider_from_key = @key.present? ? DerivedSecretKeyProvider.new(@key) : nil
         @deterministic_key_provider = @deterministic ? DeterministicKeyProvider.new(ActiveRecord::Encryption.config.deterministic_key) : nil
+
+        # +Scheme#fixed?+ used to lazy-write +@fixed+ via +||=+. Once the
+        # +Scheme+ is reachable from a deep-frozen +EncryptedAttributeType+
+        # (the +encrypted_attributes+ Set graph deep-freezes everything
+        # reachable at +ractorize!+ via +make_encrypted_attributes_shareable!+),
+        # the +||=+ raises +FrozenError+ on every non-main decrypt. Same
+        # eagerify-and-replace shape as +@key_provider_from_key+ /
+        # +@deterministic_key_provider+ above. The expression only depends
+        # on +@deterministic+ (set on line 20 above), so it's safe to compute
+        # here before any decrypt path runs.
+        @fixed = @deterministic && (!@deterministic.is_a?(Hash) || @deterministic[:fixed])
       end
 
       def ignore_case?
@@ -63,8 +74,10 @@ module ActiveRecord
       end
 
       def fixed?
-        # by default deterministic encryption is fixed
-        @fixed ||= @deterministic && (!@deterministic.is_a?(Hash) || @deterministic[:fixed])
+        # by default deterministic encryption is fixed. Eagerly populated
+        # in +initialize+ so the +Scheme+ remains immutable post-+ractorize!+
+        # deep-freeze. See the note in +#initialize+ for details.
+        @fixed
       end
 
       def key_provider
