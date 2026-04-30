@@ -262,7 +262,6 @@ module ActiveRecord
 
         # def self.statuses() statuses end
         detect_enum_conflict!(name, name.pluralize, true)
-        singleton_class.define_method(name.pluralize) { enum_values }
         defined_enums[name] = enum_values
 
         detect_enum_conflict!(name, name)
@@ -317,6 +316,16 @@ module ActiveRecord
         end
 
         enum_values.freeze
+
+        # Detach the singleton-class reader's +Proc+ from this method's
+        # binding so callers on a non-main Ractor (e.g. +Post.statuses+
+        # from a request) don't hit the "defined with an un-shareable
+        # Proc in a different Ractor" check. Defined here, after
+        # +enum_values.freeze+, so the captured Hash is shareable at
+        # +shareable_proc+ time.
+        enum_values_for_reader = enum_values
+        statuses_reader = shareable_proc { enum_values_for_reader }
+        singleton_class.define_method(name.pluralize, &statuses_reader)
       end
 
       def inherited(base)
@@ -334,13 +343,29 @@ module ActiveRecord
 
           def define_enum_methods(name, value_method_name, value, scopes, instance_methods)
             if instance_methods
+              # +define_method+ bodies are stored on the class as +Proc+s that
+              # capture their enclosing lexical scope, so on a non-main Ractor
+              # any caller invoking the resulting method raises "defined with
+              # an un-shareable Proc in a different Ractor". Bind the captures
+              # into fresh shareable locals and detach the +Proc+ from this
+              # method's binding via +shareable_proc+ -- same shape as the
+              # store_accessor accessors.
+              for_db_attr = :"#{name}_for_database"
+              shareable_value = case value
+                                when String, Symbol then Ractor.make_shareable(value.to_s.dup)
+                                else value
+                                end
+
               # def active?() status_for_database == 0 end
               klass.send(:detect_enum_conflict!, name, "#{value_method_name}?")
-              define_method("#{value_method_name}?") { public_send(:"#{name}_for_database") == value }
+              predicate_body = shareable_proc { public_send(for_db_attr) == shareable_value }
+              define_method("#{value_method_name}?", &predicate_body)
 
               # def active!() update!(status: 0) end
               klass.send(:detect_enum_conflict!, name, "#{value_method_name}!")
-              define_method("#{value_method_name}!") { update!(name => value) }
+              attr_sym = name.to_sym
+              bang_body = shareable_proc { update!(attr_sym => shareable_value) }
+              define_method("#{value_method_name}!", &bang_body)
             end
 
             if scopes
