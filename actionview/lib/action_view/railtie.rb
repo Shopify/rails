@@ -19,6 +19,17 @@ module ActionView
 
     guard_load_hooks(:action_view, :action_view_test_case)
 
+    config.before_sharing do
+      ActionView::DependencyTracker.make_shareable! if defined?(ActionView::DependencyTracker)
+      ActionView::StructuredEventSubscriber.make_shareable! if defined?(ActionView::StructuredEventSubscriber)
+      ActionView::PathRegistry.make_shareable! if defined?(ActionView::PathRegistry)
+      ActionView::Template::Handlers.make_shareable! if defined?(ActionView::Template::Handlers)
+      ActionView::LookupContext.make_shareable! if defined?(ActionView::LookupContext)
+      if defined?(ActionView::Helpers::SanitizeHelper) && ActionView::Helpers::SanitizeHelper.respond_to?(:make_default_sanitizers_shareable!)
+        ActionView::Helpers::SanitizeHelper.make_default_sanitizers_shareable!
+      end
+    end
+
     config.after_initialize do |app|
       ActionView::Helpers::FormTagHelper.embed_authenticity_token_in_remote_forms =
         app.config.action_view.delete(:embed_authenticity_token_in_remote_forms)

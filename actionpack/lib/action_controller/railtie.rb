@@ -8,6 +8,7 @@ require "action_dispatch/railtie"
 require "abstract_controller/railties/routes_helpers"
 require "action_controller/railties/helpers"
 require "action_view/railtie"
+require "active_support/core_ext/kernel/shareable"
 
 module ActionController
   class Railtie < Rails::Railtie # :nodoc:
@@ -22,6 +23,29 @@ module ActionController
     config.eager_load_namespaces << ActionController
 
     guard_load_hooks(:action_controller, :action_controller_base, :action_controller_api, :action_controller_test_case)
+
+    config.before_sharing do
+      AbstractController::Base.make_shareable! if defined?(AbstractController::Base)
+      ActionController::Base.make_shareable! if defined?(ActionController::Base)
+      ActionController::Base.make_view_cache_dependencies_shareable! if defined?(ActionController::Base)
+      ActionController::Base.make_fragment_cache_keys_shareable! if defined?(ActionController::Base)
+
+      if defined?(ActionController::Metal)
+        [ActionController::Metal, *ActionController::Metal.descendants].each do |controller_class|
+          controller_class.make_controller_name_shareable!
+          controller_class.make_wrapper_options_shareable! if controller_class.respond_to?(:make_wrapper_options_shareable!)
+        end
+      end
+
+      if defined?(::ActionController::Renderers) && defined?(Mime) && Mime::Type.lookup_by_extension(:turbo_stream)
+        turbo_stream_mime = Mime[:turbo_stream]
+        ractor_safe_turbo_stream = shareable_proc do |turbo_streams_html, options|
+          self.content_type = turbo_stream_mime if media_type.nil?
+          turbo_streams_html
+        end
+        ::ActionController::Renderers.send(:define_method, :_render_with_renderer_turbo_stream, &ractor_safe_turbo_stream)
+      end
+    end
 
     initializer "action_controller.deprecator", before: :load_environment_config do |app|
       app.deprecators[:action_controller] = ActionController.deprecator

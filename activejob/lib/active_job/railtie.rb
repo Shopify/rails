@@ -13,6 +13,21 @@ module ActiveJob
 
     guard_load_hooks(:active_job, :active_job_arguments, :active_job_continuable, :active_job_test_case)
 
+    config.before_sharing do
+      [ActiveJob::Base, *ActiveJob::Base.descendants].each do |job_class|
+        job_class.make_callback_chains_shareable!
+      end
+
+      require "active_job/queue_adapter_proxy"
+      ActiveJob::Base.queue_adapter = :async if ActiveJob::Base._queue_adapter.nil?
+      unless ActiveJob::Base._queue_adapter.is_a?(ActiveJob::QueueAdapterProxy)
+        real_adapter = ActiveJob::Base._queue_adapter
+        ActiveJob.real_queue_adapter = real_adapter
+        adapter_name = ActiveJob.adapter_name(real_adapter).underscore
+        ActiveJob::Base._queue_adapter = ActiveJob::QueueAdapterProxy.new(adapter_name)
+      end
+    end
+
     initializer "active_job.deprecator", before: :load_environment_config do |app|
       app.deprecators[:active_job] = ActiveJob.deprecator
     end

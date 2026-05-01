@@ -47,6 +47,30 @@ module ActiveSupport
 
     guard_load_hooks(:message_pack, :active_support_test_case)
 
+    config.before_sharing do
+      ActiveSupport::ExecutionWrapper.make_shareable! if defined?(ActiveSupport::ExecutionWrapper)
+      ActiveSupport.error_reporter.make_shareable!
+      ActiveSupport.event_reporter.make_shareable!
+      ActiveSupport::LogSubscriber.make_shareable! if defined?(ActiveSupport::LogSubscriber)
+      ActiveSupport::JSON::Encoding.make_shareable! if defined?(ActiveSupport::JSON::Encoding)
+      ActiveSupport::Inflector::Inflections.make_shareable! if defined?(ActiveSupport::Inflector::Inflections)
+      Time.make_zone_default_shareable! if Time.respond_to?(:make_zone_default_shareable!)
+      ActiveSupport::TimeZone.make_shareable! if defined?(ActiveSupport::TimeZone)
+      Ractor.make_shareable(Time::DATE_FORMATS) if defined?(Time::DATE_FORMATS) && !Ractor.shareable?(Time::DATE_FORMATS)
+      Ractor.make_shareable(Date::DATE_FORMATS) if defined?(Date::DATE_FORMATS) && !Ractor.shareable?(Date::DATE_FORMATS)
+      ActiveSupport::ExecutionContext.make_shareable! if defined?(ActiveSupport::ExecutionContext)
+      ActiveSupport::CurrentAttributes.make_shareable! if defined?(ActiveSupport::CurrentAttributes)
+    end
+
+    # Register this during +after_initialize+ so the Notifications fanout is
+    # made shareable after other components' +before_sharing+ hooks have had a
+    # chance to prepare subscriber callback objects.
+    config.after_initialize do |app|
+      app.config.before_sharing do
+        ActiveSupport::Notifications.notifier.make_shareable!
+      end
+    end
+
     initializer "active_support.deprecator", before: :load_environment_config do |app|
       app.deprecators[:active_support] = ActiveSupport.deprecator
     end

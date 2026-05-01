@@ -55,6 +55,11 @@ module ActionDispatch
       :action_dispatch_integration_test,
     )
 
+    config.before_sharing do
+      ActionDispatch::Callbacks.make_shareable! if defined?(ActionDispatch::Callbacks)
+      Mime::Type.make_shareable! if defined?(Mime::Type)
+    end
+
     initializer "action_dispatch.deprecator", before: :load_environment_config do |app|
       app.deprecators[:action_dispatch] = ActionDispatch.deprecator
     end

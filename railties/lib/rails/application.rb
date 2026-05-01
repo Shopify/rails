@@ -62,6 +62,8 @@ module Rails
   # 9.  Build the middleware stack and run +to_prepare+ callbacks.
   # 10. Run +config.before_eager_load+ and +eager_load!+ if +eager_load+ is +true+.
   # 11. Run +config.after_initialize+ callbacks.
+  # 12. If +Rails.application.ractorize!+ is called, run +config.before_sharing+
+  #     callbacks immediately before making the application shareable.
   class Application < Engine
     autoload :Bootstrap,              "rails/application/bootstrap"
     autoload :Configuration,          "rails/application/configuration"
@@ -713,6 +715,8 @@ module Rails
     def ractorize!
       return self if shareable?
 
+      ensure_initialized_for_sharing!
+
       eager_load!
 
       env_config
@@ -742,118 +746,6 @@ module Rails
       # gem patch so it survives gem reinstalls.
       Concurrent::NULL.freeze if defined?(Concurrent::NULL) && !Concurrent::NULL.frozen?
 
-      # +ActionView::DependencyTracker+ holds a module-level +@trackers+
-      # +Concurrent::Map+ registry populated by +register_tracker+ at gem
-      # load time (Rails defaults to +:erb+; jbuilder/slim/haml etc. add
-      # their own). Read by +find_dependencies+ during digest dependency
-      # tracking on every render. Snapshot the registry into a shareable
-      # Hash after +eager_load!+ has run all registrations.
-      ActionView::DependencyTracker.make_shareable! if defined?(ActionView::DependencyTracker)
-
-      AbstractController::Base.make_shareable! if defined?(AbstractController::Base)
-      # +ActionController::Base+ subclasses each carry an
-      # +@_parameter_encodings+ Hash (set up via +ParameterEncoding+'s
-      # +inherited+ hook) whose default proc captures self and which
-      # +CustomParamEncoder+ reads on every routed request via
-      # +action_encoding_template+. Layering this call after the
-      # +AbstractController::Base+ pass swaps each class's storage for a
-      # shareable snapshot that preserves the "missing key returns
-      # ASCII-8BIT" semantic for actions registered via
-      # +skip_parameter_encoding+. Internally chains via +super+ to
-      # +AbstractController::Base.make_shareable!+; the +frozen?+ guards
-      # in both methods keep the doubled descendants walk a no-op.
-      ActionController::Base.make_shareable! if defined?(ActionController::Base)
-      # +ActiveSupport::ExecutionWrapper+ owns the +__callbacks+
-      # class_attribute graph (Mutex + lazy compile caches per
-      # +CallbackChain+). One call here covers +ExecutionWrapper+ itself,
-      # +Executor+, +Reloader+, and the anonymous +Class.new(Executor)+ /
-      # +Class.new(Reloader)+ this Application instance creates, since
-      # they are all descendants tracked via +Callbacks+.
-      ActiveSupport::ExecutionWrapper.make_shareable! if defined?(ActiveSupport::ExecutionWrapper)
-      # +ActionDispatch::Callbacks+ is the request-path equivalent: every
-      # +Rails::Engine#call+ invokes +ActionDispatch::Callbacks#call+,
-      # which runs +run_callbacks(:call)+ from inside the request Ractor
-      # and reads +__callbacks+ off the class. Make its callback graph
-      # shareable so that read does not raise +Ractor::IsolationError+
-      # on the +@__class_attr___callbacks+ ivar.
-      ActionDispatch::Callbacks.make_shareable! if defined?(ActionDispatch::Callbacks)
-      # The module-level +ActiveSupport.@error_reporter+ /
-      # +@event_reporter+ singletons are read from non-main Ractors by
-      # the executor +:run+/+:complete+ callbacks. Make them shareable so
-      # those reads do not raise +Ractor::IsolationError+ for the module
-      # ivars themselves. Each reporter overrides +make_shareable!+ to
-      # warm lazy caches and freeze its subscriber/middleware lists
-      # before the deep-freeze.
-      ActiveSupport.error_reporter.make_shareable!
-      ActiveSupport.event_reporter.make_shareable!
-      # +ActionView::StructuredEventSubscriber+ registers +Start+
-      # instances on the +ActiveSupport::Notifications+ fanout for
-      # +render_template.action_view+ / +render_layout.action_view+,
-      # plus the subscriber instance itself for the four
-      # +render_*+ events. Each of those callbacks reaches
-      # +Utils.rails_root+ from inside the request Ractor, which lazily
-      # caches +Rails.root+ via +@rails_root ||= ...+ on +Utils+'s
-      # singleton class. After +Notifications.notifier.make_shareable!+
-      # below deep-freezes the +Start+ instances, the lazy write would
-      # raise +Ractor::IsolationError+ ("can not set instance variables
-      # of classes/modules by non-main Ractors").
-      # +StructuredEventSubscriber.make_shareable!+ warms +Utils.@rails_root+
-      # on the main Ractor, deep-freezes +Utils+, and chains via +super+,
-      # so the runtime path only reads a populated, shareable value.
-      ActionView::StructuredEventSubscriber.make_shareable! if defined?(ActionView::StructuredEventSubscriber)
-      # +ActiveSupport::Notifications.@notifier+ is read from non-main
-      # Ractors by every +Notifications.instrument+ /
-      # +Notifications.instrumenter+ call (e.g. +Rails::Rack::Logger+'s
-      # +start_processing.action_controller+ event). Make the +Fanout+
-      # instance shareable so that read does not raise +Ractor::IsolationError+
-      # for the module ivar itself. +Fanout#make_shareable!+ snapshots its
-      # +Concurrent::Map+ caches into frozen Hashes, drops the boot-only
-      # synchronization mutex, and freezes the subscriber lists.
-      ActiveSupport::Notifications.notifier.make_shareable!
-      # +ActiveSupport::LogSubscriber+ has two singleton-class lazy
-      # ivars (+@logger+, +@supports_flush+) that +flush_all!+ writes on
-      # first use. +Rails::Rack::Logger#finish_request_instrumentation+
-      # calls +flush_all!+ from inside whichever Ractor served the
-      # request, so those writes raise +Ractor::IsolationError+ on the
-      # first request. +LogSubscriber.make_shareable!+ populates both
-      # ivars on the main Ractor at boot so the request-path branches
-      # become no-ops. We don't deep-freeze the class because
-      # +Rails.logger+ (a +BroadcastLogger+ wrapping a real I/O) is not
-      # shareable and we are intentionally out of scope for that here.
-      ActiveSupport::LogSubscriber.make_shareable! if defined?(ActiveSupport::LogSubscriber)
-      # +ActionView::PathRegistry+ holds four module-level ivars
-      # (+@view_paths_by_class+, +@file_system_resolvers+, plus the
-      # boot-only mutex and hooks Array). Both per-request
-      # +ViewPaths#lookup_context+ creation and
-      # +ExceptionWrapper#build_backtrace+ read those ivars from inside
-      # the request Ractor, so their values must be shareable. The
-      # registry's +make_shareable!+ deeply freezes the registered
-      # +FileSystemResolver+s and +PathSet+s, then freezes the hashes
-      # themselves and drops the boot-only mutex.
-      ActionView::PathRegistry.make_shareable! if defined?(ActionView::PathRegistry)
-      # +ActionView::Template::Handlers+ owns the +@@template_handlers+,
-      # +@@default_template_handlers+, and +@@template_extensions+ class
-      # variables. +Handlers.extensions+ is invoked by
-      # +LookupContext::Accessors::DEFAULT_PROCS[:handlers]+ on every
-      # per-request +initialize_details+ call, which reads
-      # +@@template_extensions+ from inside the request Ractor. Per Aaron
-      # Patterson's class-variable rules (+ab32c0e690+), reading a class
-      # variable from a non-main Ractor only succeeds when its value is
-      # shareable. +Handlers.make_shareable!+ deep-freezes each registered
-      # handler instance, the +@@template_handlers+ registry, and the
-      # +@@template_extensions+ Array.
-      ActionView::Template::Handlers.make_shareable! if defined?(ActionView::Template::Handlers)
-      # +ActionView::LookupContext+ holds two class-level ivars
-      # (+@registered_details+, +Accessors::DEFAULT_PROCS+) that are
-      # populated at boot by +register_detail+ (locale, formats,
-      # variants, handlers) and read on every request via
-      # +LookupContext#initialize_details+ (called from
-      # +ViewPaths#lookup_context+ for each new request). Make them
-      # shareable so those reads don't raise +Ractor::IsolationError+.
-      # Cascades into +DetailsKey.make_shareable!+ for the
-      # +@details_keys+ / +@digest_cache+ caches and the
-      # +@view_context_class+ singleton.
-      ActionView::LookupContext.make_shareable! if defined?(ActionView::LookupContext)
       # +I18n.@@fallbacks+ is read by the +LookupContext+
       # +Accessors::DEFAULT_PROCS[:locale]+ proc on every per-request
       # +initialize_details+ call (via +I18n.fallbacks+ in the i18n
@@ -1043,16 +935,6 @@ module Rails
         end
         I18n::Base.prepend(ractor_safe_i18n_keys)
       end
-      # +Mime::SET+, +Mime::LOOKUP+, and +Mime::EXTENSION_LOOKUP+ are
-      # read from non-main Ractors on every request via
-      # +ActionDispatch::Http::MimeNegotiation#formats+ /+#accepts+
-      # (+Mime::Type.lookup+, +Mime::Type.parse+, +Mime[:sym]+). Make
-      # the constants and the registered +Mime::Type+ instances
-      # shareable so those reads do not raise +Ractor::IsolationError+
-      # on the module constants. Post-shareability,
-      # +Mime::Type.register+ / +register_alias+ / +register_callback+ /
-      # +unregister+ raise +FrozenError+ pointing back here.
-      Mime::Type.make_shareable! if defined?(Mime::Type)
       # +Builder::XChar+ (from the +builder+ gem, used by
       # +Hash#to_xml+ via +ActiveSupport+) computes ~10 module-level
       # constants once at load time and never mutates them again:
@@ -1121,557 +1003,10 @@ module Rails
           ::JSON.instance_variable_set(ivar, Ractor.make_shareable(value, copy: true))
         end
       end
-      # +ActiveSupport::JSON::Encoding+ caches two encoder instances on
-      # its singleton (+@encoder_without_options+ / +@encoder_without_escape+)
-      # that +ActiveSupport::JSON.encode+ reads from non-main Ractors on
-      # every options-less or +escape: false+ call (e.g. failsafe-path
-      # JSON responses). Make those cached encoders shareable so the
-      # singleton ivars themselves do not raise +Ractor::IsolationError+.
-      ActiveSupport::JSON::Encoding.make_shareable! if defined?(ActiveSupport::JSON::Encoding)
-      # +ActiveSupport::Inflector::Inflections+ holds the per-locale
-      # inflection registry on its singleton (+@__en_instance__+ /
-      # +@__instance__+). +String#camelize+ →
-      # +Inflector.inflections+ → +Inflections.instance_or_fallback+
-      # reads both ivars from inside the request Ractor (e.g.
-      # +ActionDispatch::Request#controller_class_for+ on every dispatch),
-      # so they must be shareable. +Inflections.make_shareable!+ warms
-      # the +:en+ singleton, snapshots the +Concurrent::Map+ of
-      # non-+:en+ locales to a frozen +Hash+, and deep-freezes each
-      # registered +Inflections+ (cascading into +Uncountables+ to warm
-      # its lazy +@pattern+ Regexp).
-      ActiveSupport::Inflector::Inflections.make_shareable! if defined?(ActiveSupport::Inflector::Inflections)
-      # +Time.zone_default+ is set by +ActiveSupport::Railtie+'s
-      # +active_support.initialize_time_zone+ initializer at boot. +Time.zone+
-      # reads +@zone_default+ from the +Time+ singleton class on every
-      # +ActiveRecord+ +TimeZoneConverter#deserialize+ call (datetime / time
-      # column reads), which raises +Ractor::IsolationError+ from non-main
-      # Ractors until the cached value is shareable. Deep-freeze in place.
-      Time.make_zone_default_shareable!
-      # +ActiveSupport::TimeZone+ memoizes per-name lookups in +@lazy_zones_map+
-      # (a +Concurrent::Map+) and per-country lookups in +@country_zones+. Reads
-      # from non-main Ractors raise +Ractor::IsolationError+ on every
-      # +Time.use_zone+ / +Time.find_zone!+ / +TimeZone[name]+ call (e.g. the
-      # +ActiveJob::ExecutionState#perform_now+ +Time.use_zone+ wrapper or
-      # +form_options_helper+'s +time_zone_select+). +TimeZone.make_shareable!+
-      # warms every name in +MAPPING+, builds +@zones+ / +@zones_map+, and
-      # replaces both maps with deep-frozen +Hash+es. After this call,
-      # post-+ractorize!+ +TimeZone[name]+ misses still work (compute without
-      # caching) but no longer touch any unshareable module state.
-      ActiveSupport::TimeZone.make_shareable! if defined?(ActiveSupport::TimeZone)
-      # +ActionView::Helpers::SanitizeHelper+'s sanitize / strip_tags /
-      # strip_links / sanitize_css instance methods route non-main calls
-      # through +SanitizeHelper._dispatch_sanitize+, which runs the
-      # actual call on the main Ractor with a fresh sanitizer instance
-      # (the underlying +rails-html-sanitizer+ / Loofah / Nokogiri stack
-      # is +Ractor::UnsafeError+-marked and per-call mutates a
-      # +Rails::HTML::PermitScrubber+, so a cached shareable sanitizer
-      # would itself FrozenError). +make_default_sanitizers_shareable!+
-      # warms Loofah's lazy +@document_klass+ class ivars on
-      # +Loofah::HTML5::DocumentFragment+ / +Loofah::HTML4::DocumentFragment+
-      # from the main Ractor; without that, the first dispatched sanitize
-      # call would raise +Ractor::IsolationError+ on the lazy +||=+ inside
-      # Loofah (which we cannot patch).
-      if defined?(ActionView::Helpers::SanitizeHelper) && ActionView::Helpers::SanitizeHelper.respond_to?(:make_default_sanitizers_shareable!)
-        ActionView::Helpers::SanitizeHelper.make_default_sanitizers_shareable!
-      end
-      # +Jbuilder::BLANK+ is a singleton sentinel (an instance of the tiny
-      # +Jbuilder::Blank+ class with no state, only +==+ and +empty?+) used
-      # as the default value of +Jbuilder#set!+ and read by
-      # +Jbuilder#_blank?+ on every +set!+ call. The +jbuilder+ gem doesn't
-      # deep-freeze it, so non-main Ractors raise +Ractor::IsolationError+
-      # on the constant read from inside any +.jbuilder+ template. We
-      # cannot patch the gem; +Ractor.make_shareable+ at boot deep-freezes
-      # the value the constant points at without touching gem source.
+      # +Jbuilder::BLANK+ is gem-owned state, so keep this external-gem
+      # workaround centralized for now rather than moving it to a Rails
+      # component hook.
       Ractor.make_shareable(Jbuilder::BLANK) if defined?(Jbuilder) && defined?(Jbuilder::BLANK) && !Ractor.shareable?(Jbuilder::BLANK)
-      # +Time::DATE_FORMATS+ and +Date::DATE_FORMATS+ are the formatter
-      # registries +Time#to_fs+ / +Date#to_fs+ look up on every
-      # +cache_version+ / +cache_key+ / +to_fs(:db)+ / etc. They contain
-      # frozen String formats and lambdas (e.g. +:long_ordinal+,
-      # +:rfc822+, +:iso8601+) that capture no outer locals and so can be
-      # made shareable. Initializers extending these hashes (the docstring
-      # in conversions.rb shows +Time::DATE_FORMATS[:foo] = "..."+) run
-      # before +ractorize!+, so freezing here is safe; post-+ractorize!+
-      # writes raise +FrozenError+ pointing back to here.
-      Ractor.make_shareable(Time::DATE_FORMATS) if defined?(Time::DATE_FORMATS) && !Ractor.shareable?(Time::DATE_FORMATS)
-      Ractor.make_shareable(Date::DATE_FORMATS) if defined?(Date::DATE_FORMATS) && !Ractor.shareable?(Date::DATE_FORMATS)
-      # +ActiveSupport::ExecutionContext+ owns the +@after_change_callbacks+
-      # module ivar that +ExecutionContext.[]=+ and +ExecutionContext.set+
-      # iterate on every per-request +Instrumentation#process_action+ (via
-      # +ActionController::Instrumentation#process_action+ writing the
-      # +:controller+ key). +ActiveRecord::QueryLogs+ registers a
-      # +clear_cache+ callback into this Array at boot, so non-main Ractors
-      # would otherwise raise +Ractor::IsolationError+ when reading the
-      # module ivar. +ExecutionContext.make_shareable!+ deep-freezes each
-      # registered callback Proc and freezes the Array. After this call
-      # +ExecutionContext.after_change+ raises +FrozenError+ pointing back
-      # to +ractorize!+ if a late registration is attempted.
-      ActiveSupport::ExecutionContext.make_shareable! if defined?(ActiveSupport::ExecutionContext)
-      # +ActiveSupport::CurrentAttributes+ and its app-level subclasses
-      # (typically +Current+) lazily wrote two class ivars on first use:
-      # +@current_instances_key+ via +current_instances_key+ (touched by
-      # +instance+ on every per-request +Current.foo+ access) and
-      # +@generated_attribute_methods+ via the +attribute+ macro. The
-      # +current_instances_key+ cache has been removed at the source and
-      # +CurrentAttributes.make_shareable!+ walks +self+ and every
-      # descendant to force-build +@generated_attribute_methods+ and
-      # freeze each subclass's merged +defaults+ Hash, then delegates
-      # to +Callbacks::ClassMethods#make_shareable!+ via +super+ to
-      # seal the +__callbacks+ graph for +define_callbacks :reset+.
-      ActiveSupport::CurrentAttributes.make_shareable! if defined?(ActiveSupport::CurrentAttributes)
-      # +ActiveRecord::Delegation::DelegateCache+ stores a per-AR-class
-      # +@relation_delegate_cache+ Hash<RelationClass, GeneratedDelegate>
-      # populated at class-definition time by the +inherited+ hook (one
-      # entry per +Delegation.delegated_classes+ entry: +Relation+,
-      # +CollectionProxy+, +AssociationRelation+,
-      # +DisableJoinsAssociationRelation+). +Relation.create+ reads this
-      # cache via +relation_delegate_class+ on every per-request
-      # +Model.relation+ / +default_scoped+ call, which raises
-      # +Ractor::IsolationError+ on the class ivar read until the Hash
-      # and its generated delegate classes are shareable.
-      # +make_relation_delegate_cache_shareable!+ deep-freezes the cache
-      # values and the Hash itself; in production the cache is populated
-      # at boot and never mutated afterwards, so freezing is safe.
-      if defined?(ActiveRecord::Base)
-        [ActiveRecord::Base, *ActiveRecord::Base.descendants].each do |ar_class|
-          ar_class.make_relation_delegate_cache_shareable!
-        end
-        # +ActiveRecord::Core::ClassMethods#arel_table+ lazily writes
-        # +@arel_table+ on first read for each AR descendant. The first
-        # +Model.all+ / +Model.find+ inside a request Ractor reaches this
-        # ivar via +ActiveRecord::Relation#initialize+ ->
-        # +Delegation::ClassMethods#create+ -> +Core::ClassMethods#relation+,
-        # which raises +Ractor::IsolationError+ on the class ivar read until
-        # the +Arel::Table+ has been built and made shareable. Force-resolve
-        # and snapshot a shareable copy on every concrete descendant so that
-        # read path is shareable. The +Arel::Table+ holds a +@klass+
-        # back-reference to the AR class, so we use +copy: true+ to avoid
-        # entangling the AR class's other lazy ivars (addressed in their
-        # own leaves) into the deep-freeze.
-        # +Core::ClassMethods#inspect+ traverses +table_exists?+ ->
-        # +schema_cache+ -> +connection_pool+, which hits the
-        # +RactorConnectionHandler+ stub from non-main Ractors (e.g. from
-        # log subscriber / instrumentation payload formatting during view
-        # rendering). Pre-compute and cache the +inspect+ string at boot;
-        # the schema does not change at runtime so the cached value is
-        # safe for the process lifetime.
-        # +ActiveModel::AttributeRegistration::ClassMethods#_default_attributes+
-        # and +#attribute_types+ lazily memoize +@default_attributes+ and
-        # +@attribute_types+ on first read for each AR descendant. The hot path
-        # is +Relation#instantiate_records+ -> +Querying#_load_from_sql+ ->
-        # +attribute_types+, which raises +Ractor::IsolationError+ on the class
-        # ivar read from non-main Ractors. Force-resolve and snapshot a
-        # shareable copy of both at boot. The +AttributeSet+ and types Hash
-        # may hold back-references to the AR class through type objects, so
-        # we use +copy: true+ (matching the +make_arel_table_shareable!+
-        # precedent) to avoid entangling the AR class itself in the
-        # deep-freeze.
-        # Order is load-bearing here. The schema/attribute warmers
-        # (+make_attribute_registration_shareable!+ and
-        # +make_model_schema_shareable!+) replace +@attribute_types+ and the
-        # schema-derived ivars with deep-copied, shareable graphs. Run those
-        # FIRST so that +make_inspect_shareable!+'s cached +inspect+ string
-        # is built from the same +@attribute_types+ the class will keep
-        # afterwards. If the inspect cache were built before the schema
-        # warmers, it would reference types from a Hash the class no longer
-        # holds — currently harmless (it's just a String) but a latent bug
-        # for any future inspect of schema-derived state.
-        [ActiveRecord::Base, *ActiveRecord::Base.descendants].each do |ar_class|
-          next if ar_class.abstract_class?
-          ar_class.make_arel_table_shareable!
-          ar_class.make_predicate_builder_shareable!
-          # Force-resolving +@default_attributes+ / +@attribute_types+
-          # requires +columns_hash+ -> +load_schema!+, so skip cases where
-          # the schema can't be resolved at boot:
-          #   - +ActiveRecord::Base+ itself has no table.
-          #   - Classes whose backing table doesn't exist on the connection
-          #     in use (e.g. +SolidCache::Entry+ when its dedicated database
-          #     hasn't been migrated into the primary).
-          # Mirrors the +table_exists?+ guard in +make_inspect_shareable!+.
-          if ar_class != ActiveRecord::Base && ar_class.table_exists?
-            ar_class.make_attribute_registration_shareable!
-            # +ModelSchema::ClassMethods+ memoizes +@columns_hash+,
-            # +@columns+, +@attributes_builder+,
-            # +@symbol_column_to_string_name_hash+, and +@content_columns+
-            # lazily on first query. The hot path is +_load_from_sql+ ->
-            # +instantiate_instance_of+ -> +attributes_builder+, which
-            # raises +Ractor::IsolationError+ on the class ivar read from
-            # non-main Ractors. Force-resolve and snapshot a shareable copy
-            # at boot.
-            ar_class.make_model_schema_shareable!
-            # +Integration#can_use_fast_cache_version?+ reads
-            # +self.class.with_connection(&:default_timezone)+ on every cache_version
-            # computation; from non-main Ractors that hits +RactorConnectionHandler#
-            # retrieve_connection_pool+ which is intentionally unimplemented. Cache the
-            # Symbol on the class at boot so the cache-version path is connection-free.
-            ar_class.make_cached_connection_default_timezone_shareable!
-            # +AttributeMethods::ClassMethods#define_attribute_methods+ is called
-            # from +init_internals+ on every model instantiation. The fast path
-            # short-circuits on +@attribute_methods_generated+, but the slow path
-            # acquires +GeneratedAttributeMethods::LOCK+ (a +Monitor+) which is
-            # non-shareable. Pre-generate at boot so non-main Ractors never reach
-            # the LOCK.
-            ar_class.define_attribute_methods
-          end
-          # +PredicateBuilder#expand_from_hash+ calls
-          # +TableMetadata#associated_with(key)+ for every key in a +where+
-          # Hash (column or association). That reads the +_reflections+
-          # class_attribute, which raises +Ractor::IsolationError+ on the
-          # singleton-class ivar read from non-main Ractors until every
-          # Reflection's lazy memos are warmed and the Hash is shareable.
-          # Walk every concrete AR descendant and snapshot a deep-frozen
-          # copy of +_reflections+ / +aggregate_reflections+ at boot.
-          ar_class.make_reflections_shareable!
-          # +FinderMethods#_order_columns+ -> +query_constraints_list+ /
-          # +composite_query_constraints_list+ memoizes a class ivar lazily.
-          # Pre-resolve so the +defined?+-guarded read returns the cached
-          # value on non-main Ractors instead of attempting a class ivar
-          # write.
-          ar_class.make_query_constraints_list_shareable!
-          # +QueryMethods#preprocess_order_args+ calls +model.adapter_class+
-          # on every +order(...)+ relation built during a request. The
-          # default reader walks +connection_pool.db_config.adapter_class+,
-          # which hits +RactorConnectionHandler#retrieve_connection_pool+
-          # from non-main Ractors. Cache the resolved adapter class on the
-          # AR descendant so the non-main read path is connection-free.
-          if ar_class != ActiveRecord::Base && ar_class.table_exists?
-            ar_class.make_adapter_class_shareable!
-            # +ModelSchema::ClassMethods#prefetch_primary_key?+ does a
-            # +with_connection+ checkout to ask the adapter whether
-            # primary keys must be prefetched for this table. From a
-            # non-main Ractor that hits +RactorConnectionProxy#
-            # prefetch_primary_key?+, which is intentionally not
-            # implemented. Cache the bool on the class at boot.
-            ar_class.make_prefetch_primary_key_shareable!
-            # +Timestamp#_create_record+ / +record_update_timestamps+ read
-            # +timestamp_attributes_for_create_in_model+ /
-            # +_update_in_model+ / +all_timestamp_attributes_in_model+ on
-            # every save, which lazily write class ivars and raise
-            # +Ractor::IsolationError+ from non-main Ractors. The values
-            # are pure functions of +column_names+, so warming is safe.
-            ar_class.make_timestamp_attributes_shareable!
-          end
-          # Now that +@attribute_types+ is the deep-copied shareable graph
-          # the class will keep, cache +inspect+ off of it.
-          ar_class.make_inspect_shareable!
-          # +ActiveModel::Naming#model_name+ memoizes +@_model_name+ on
-          # first read. View partial-path resolution (+to_partial_path+ ->
-          # +_to_partial_path+ -> +model_name+) reads it from non-main
-          # Ractors during +<%= render @collection %>+, which raises
-          # +Ractor::IsolationError+ until the cached +ActiveModel::Name+
-          # instance is shareable. +copy: true+ avoids entangling the AR
-          # class via the +ActiveModel::Name+'s +@klass+ back-reference.
-          ar_class.make_model_name_shareable!
-          # +ActiveModel::Conversion::ClassMethods#_to_partial_path+ memoizes
-          # +@_to_partial_path+ on first read for each AR descendant. View
-          # partial-path resolution reads it from non-main Ractors during
-          # +<%= render @collection %>+, which raises +Ractor::IsolationError+
-          # on the lazy class ivar write until the value is pre-resolved and
-          # shareable. The result is a plain String like +"posts/post"+; just
-          # warm and freeze.
-          ar_class.make_to_partial_path_shareable!
-        end
-        # +ActiveSupport::Callbacks+ stores the per-class callback graph in
-        # the +__callbacks+ class_attribute on the singleton-class ivar
-        # +@__class_attr___callbacks+. +run_callbacks(:save)+ /
-        # +:create+ / +:update+ / +:destroy+ / +:commit+ during a write
-        # request reads that ivar on every AR descendant via
-        # +ActiveSupport::ClassAttribute.define_namespaced_reader+, which
-        # raises +Ractor::IsolationError+ from non-main Ractors until each
-        # +CallbackChain+ in the Hash and the Hash itself are shareable.
-        # Walk every AR class (including abstract ones, since abstract
-        # parents still install their own +__callbacks+ ivars from
-        # +included+ Concerns) and warm/freeze the chains. Use the narrow
-        # +make_callback_chains_shareable!+ helper rather than
-        # +Callbacks::ClassMethods#make_shareable!+, because the latter
-        # cascades into +Object#make_shareable!+ -> +Ractor.make_shareable+,
-        # which would deep-freeze the AR class object itself and clobber
-        # the lazy schema/attribute state the existing AR warmers
-        # deliberately leave mutable on each class.
-        #
-        # +ActiveModel::Attributes::Normalization+ exposes
-        # +normalized_attributes+ as a +class_attribute+ with a default
-        # +Set.new+ stored on +ActiveRecord::Base+'s singleton class. The
-        # +before_validation :normalize_changed_in_place_attributes+
-        # callback reads the Set on every save; from non-main Ractors that
-        # raises until the Set is shareable. Snapshot a shareable copy on
-        # every AR class for the same reason +__callbacks+ is walked here.
-        # +ActiveRecord::Scoping::Default+ stores +default_scope_override+
-        # as a +class_attribute+ that is left +nil+ at boot. The first
-        # call to +build_default_scope+ on a request lazily writes the
-        # flag (a +!Base.is_a?(method(:default_scope).owner)+ check) via
-        # the generated class_attribute writer, which goes through
-        # +ActiveSupport::ClassAttribute.redefine+ ->
-        # +instance_variable_set+ on the singleton class and raises
-        # +Ractor::IsolationError+ from non-main Ractors. The value is
-        # pure boot-time metadata so warming it on the main side at
-        # +ractorize!+ time is idempotent with the lazy compute. See
-        # +make_default_scope_override_shareable!+ for the full rationale.
-        # +ActiveRecord::Inheritance#finder_needs_type_condition?+ memoizes
-        # a Symbol +:true+/+:false+ answer in the class ivar
-        # +@finder_needs_type_condition+ via +||=+. Reached during every
-        # relation build that applies a type condition (e.g. +destroy+ ->
-        # +_delete_record+ -> +relation_for_destroy+ -> +default_scoped+),
-        # which raises +Ractor::IsolationError+ on the first ivar write
-        # from non-main Ractors. Pre-warm on the main side so the lazy
-        # +||=+ is a no-op at request time. See
-        # +make_finder_needs_type_condition_shareable!+ for the full
-        # rationale.
-        # +ActiveRecord::Enum+ stores per-class enum metadata in the
-        # +defined_enums+ class_attribute, default +{}+, deep-duped for each
-        # descendant in +Enum#inherited+. +UniquenessValidator#map_enum_attribute+
-        # reads it on every save that runs a uniqueness validation (and other
-        # enum-aware lookups), which from non-main Ractors raises
-        # +Ractor::IsolationError+ on +instance_variable_get+ of the singleton-
-        # class ivar +@__class_attr_defined_enums+. Snapshot a shareable copy
-        # on every AR class for the same reason +__callbacks+ is walked here.
-        # See +make_defined_enums_shareable!+ for the full rationale.
-        # +ActiveRecord::NestedAttributes+ stores per-class options for
-        # +accepts_nested_attributes_for+ in the +nested_attributes_options+
-        # class_attribute, default +{}+, written by +accepts_nested_attributes_for+
-        # at boot as +{ assoc_sym => options_hash }+.
-        # +assign_nested_attributes_for_collection_association+ (and its
-        # one_to_one counterpart) reads it on every nested-attributes write
-        # (e.g. +Post.new(comments_attributes: ...)+ via the generated
-        # +comments_attributes=+ writer), which from non-main Ractors raises
-        # +Ractor::IsolationError+ on +instance_variable_get+ of the singleton-
-        # class ivar +@__class_attr_nested_attributes_options+. The test path
-        # is +GET /posts/nested_attributes_test+ where +Post+ declares
-        # +accepts_nested_attributes_for :comments, allow_destroy: true+.
-        # Snapshot a shareable copy on every AR class for the same reason
-        # +__callbacks+ is walked here. See
-        # +make_nested_attributes_options_shareable!+ for the full rationale.
-        # +ActiveRecord::Validations::UniquenessValidator+ memoizes the list
-        # of validator attributes covered by a unique index in the instance
-        # ivar +@covered+ via +@covered ||=+. Validators are reachable from
-        # +_validate_callbacks+ and therefore deep-frozen by
-        # +make_callback_chains_shareable!+ below; the request-side
-        # +covered_by_unique_index?+ then raises +FrozenError+ on the first
-        # write. Pre-resolve +@covered+ on every UniquenessValidator BEFORE
-        # +make_callback_chains_shareable!+ runs so the +||=+ becomes a no-op
-        # at request time. Must be the first call in the per-class loop body
-        # below for that ordering to hold. See
-        # +make_uniqueness_validators_shareable!+ for the full rationale.
-        [ActiveRecord::Base, *ActiveRecord::Base.descendants].each do |ar_class|
-          ar_class.make_uniqueness_validators_shareable! if ar_class.respond_to?(:make_uniqueness_validators_shareable!)
-          ar_class.make_callback_chains_shareable!
-          ar_class.make_normalized_attributes_shareable! if ar_class.respond_to?(:make_normalized_attributes_shareable!)
-          ar_class.make_counter_cache_shareable! if ar_class.respond_to?(:make_counter_cache_shareable!)
-          ar_class.make_attr_readonly_shareable! if ar_class.respond_to?(:make_attr_readonly_shareable!)
-          ar_class.make_default_scope_override_shareable! if ar_class.respond_to?(:make_default_scope_override_shareable!)
-          ar_class.make_finder_needs_type_condition_shareable! if ar_class.respond_to?(:make_finder_needs_type_condition_shareable!)
-          ar_class.make_defined_enums_shareable! if ar_class.respond_to?(:make_defined_enums_shareable!)
-          ar_class.make_nested_attributes_options_shareable! if ar_class.respond_to?(:make_nested_attributes_options_shareable!)
-          ar_class.make_attributes_for_inspect_shareable! if ar_class.respond_to?(:make_attributes_for_inspect_shareable!)
-          ar_class.make_filter_attributes_shareable! if ar_class.respond_to?(:make_filter_attributes_shareable!)
-          ar_class.make_encrypted_attributes_shareable! if ar_class.respond_to?(:make_encrypted_attributes_shareable!)
-        end
-        # +ActiveRecord::Relation::WhereClause.empty+ memoizes the singleton
-        # empty +WhereClause+ in the +@empty+ class ivar via +||=+.
-        # +QueryMethods#where_clause+ reads it on every relation that has
-        # no where conditions yet (fresh +Model.all+ / +Model.where+),
-        # which raises +Ractor::IsolationError+ from non-main Ractors until
-        # the cached value is shareable.
-        ActiveRecord::Relation::WhereClause.make_shareable! if defined?(ActiveRecord::Relation::WhereClause)
-        # +ActiveRecord::Core+ stores resolved database configs in the class
-        # variable +@@configurations+. +QueryCache::ClassMethods#uncached+
-        # reads +configurations.empty?+ on every +Relation#load+ via
-        # +skip_query_cache_if_necessary+; class-variable reads from non-main
-        # Ractors raise +Ractor::IsolationError+ until the +DatabaseConfigurations+
-        # value (an Array of +HashConfig+ entries) is deep-frozen.
-        ActiveRecord::Base.make_configurations_shareable! if ActiveRecord::Base.respond_to?(:make_configurations_shareable!)
-        # +ActiveRecord::Type.default_value+ memoizes a +Value.new+ singleton
-        # in the module ivar +@default_value+ via +||=+. Reached from
-        # +QueryMethods#build_cast_value+ during +order(...)+ relation
-        # building; a class ivar write from non-main Ractors raises.
-        ActiveRecord::Type.make_default_value_shareable!
-        # +ActiveRecord::Encryption::Contexts+ is mixed into the
-        # +ActiveRecord::Encryption+ module and installs the class variable
-        # +@@default_context+ (a +Context.new+) at load time. Reads of an
-        # encrypted attribute (+EncryptedAttributeType#decrypt_as_text+ ->
-        # +Configurable#encryptor+ -> +Contexts#context+) walk through that
-        # cvar on every per-request decrypt. From non-main Ractors that
-        # raises +Ractor::IsolationError+ ("can not read non-shareable class
-        # variable @@default_context from non-main Ractors") because the
-        # +Context+ instance carries non-shareable lazy ivars
-        # (+@key_provider+, +@key_generator+, +@cipher+, +@encryptor+,
-        # +@message_serializer+, +@frozen_encryption+).
-        #
-        # Force-resolve every lazy ivar on the +Context+ and its sub-objects
-        # at boot, then snapshot a deep-frozen +copy: true+ shareable
-        # +Context+ back into the cvar. Skip when encryption isn't
-        # configured (+config.primary_key.nil?+) — apps without encryption
-        # have no encrypted attributes to decrypt and therefore no non-main
-        # read pressure on +@@default_context+, and warming +key_provider+
-        # in that case would crash inside +DerivedSecretKeyProvider#new(nil)+.
-        #
-        # The companion +current_custom_context+ path
-        # (+with_encryption_context+ -> +default_context.dup+) mutates a
-        # thread-local stack of +Context+ instances and is intentionally not
-        # addressed here: that's the write-side / explicit-context boundary,
-        # a separate domain from the implicit decrypt path this fixes.
-        if defined?(ActiveRecord::Encryption) &&
-            ActiveRecord::Encryption.respond_to?(:default_context) &&
-            !ActiveRecord::Encryption.config.primary_key.nil?
-          ctx = ActiveRecord::Encryption.default_context
-          # +Context#key_provider+ is the only public accessor with a
-          # +||=+-memoized backing ivar (+build_default_key_provider+ ->
-          # +DerivedSecretKeyProvider.new(config.primary_key)+). Force the
-          # write on the main side so the deep-freeze below captures the
-          # built provider and not a bare +nil+.
-          ctx.key_provider
-          # +KeyGenerator+ holds two private +||=+ memos
-          # (+@key_derivation_salt+ from +config.key_derivation_salt+ and
-          # +@key_length+ from +ActiveRecord::Encryption.cipher.key_length+,
-          # which itself opens an +OpenSSL::Cipher+). +KeyGenerator#derive_key_from+
-          # is reached during +DerivedSecretKeyProvider#initialize+ above,
-          # which already warms both — but call them explicitly so the
-          # warming is local to this block and not coupled to provider-init
-          # order.
-          if ctx.key_generator
-            ctx.key_generator.send(:key_derivation_salt)
-            ctx.key_generator.send(:key_length)
-          end
-          ActiveRecord::Encryption.default_context = Ractor.make_shareable(ctx, copy: true)
-        end
-      end
-      # +ActiveJob::Base+ uses the same +__callbacks+ class_attribute graph as
-      # AR, walked separately because it's a different inheritance tree.
-      # Reached via +ActiveJob::Callbacks#run_callbacks(:enqueue)+ during
-      # +SomeJob.perform_later+ from a non-main Ractor (controller action
-      # enqueuing background work), which reads the +@__class_attr___callbacks+
-      # singleton-class ivar via +ActiveSupport::ClassAttribute+'s generated
-      # reader and raises +Ractor::IsolationError+ until the chain is
-      # shareable.
-      if defined?(ActiveJob::Base)
-        [ActiveJob::Base, *ActiveJob::Base.descendants].each do |job_class|
-          job_class.make_callback_chains_shareable!
-        end
-        # +ActiveJob::Base._queue_adapter+ is a +class_attribute+ holding the
-        # real adapter instance (e.g. +ActiveJob::QueueAdapters::AsyncAdapter+).
-        # The reader generated by +ActiveSupport::ClassAttribute+ does
-        # +instance_variable_get(:@__class_attr__queue_adapter)+ on the
-        # +ActiveJob::Base+ singleton class. From a non-main Ractor that
-        # raises +Ractor::IsolationError+ ("can not get unshareable values
-        # from instance variables of classes/modules from non-main Ractors")
-        # because the AsyncAdapter holds a +Concurrent::ThreadPoolExecutor+
-        # and a +Concurrent::ImmediateExecutor+ — neither is shareable.
-        #
-        # That read is on the request hot path:
-        #
-        #   * +ActiveJob::Instrumentation#perform_now+ wraps with
-        #     +instrument(:perform)+, which writes +payload[:adapter] =
-        #     queue_adapter+ on every +SomeJob.perform_now(...)+ call.
-        #     Reached via +GET /job_test+ ->
-        #     +NotificationJob.perform_now(post_id, recipient)+.
-        #   * +ActiveJob::Continuable#monitor+ calls
-        #     +queue_adapter.stopping?+ for continuable jobs.
-        #   * Subscribers (+ActiveJob::StructuredEventSubscriber+) consume
-        #     +payload[:adapter]+ via +ActiveJob.adapter_name(adapter)+,
-        #     which short-circuits on +adapter.queue_adapter_name+.
-        #
-        # Force the lazy +self.queue_adapter = :async if _queue_adapter.nil?+
-        # branch on the main side so the real adapter exists, stash the real
-        # adapter in the main-only +ActiveJob.real_queue_adapter+ registry,
-        # and replace the class_attribute value with a deep-frozen,
-        # Ractor-shareable +QueueAdapterProxy+. The proxy answers
-        # +queue_adapter_name+ from a frozen +String+ snapshot, dispatches
-        # +enqueue+ / +enqueue_at+ / +stopping?+ to the main side when
-        # called from non-main, and raises +NoMethodError+ for anything
-        # else (no silent forwarder — see the proxy file's docstring and
-        # +RactorConnectionProxy+'s docstring on the "broad proxy layer
-        # can drift semantically" anti-pattern).
-        #
-        # The companion +_queue_adapter_name+ class_attribute is already
-        # set to a plain frozen +String+ ("async") by +assign_adapter+, so
-        # it doesn't need a separate fix.
-        #
-        # The +_dispatch_enqueue_main+ path in +ActiveJob::Enqueuing+ also
-        # reads +queue_adapter+ (via +_raw_enqueue+), but only after it has
-        # already crossed onto the main Ractor where the +class_attribute+
-        # read is fine. The proxy's +enqueue+ method then delegates back
-        # to +ActiveJob.real_queue_adapter+, which is the same real adapter
-        # the unproxied path would have used.
-        require "active_job/queue_adapter_proxy"
-        ActiveJob::Base.queue_adapter = :async if ActiveJob::Base._queue_adapter.nil?
-        real_adapter = ActiveJob::Base._queue_adapter
-        ActiveJob.real_queue_adapter = real_adapter
-        adapter_name = ActiveJob.adapter_name(real_adapter).underscore
-        ActiveJob::Base._queue_adapter = ActiveJob::QueueAdapterProxy.new(adapter_name)
-      end
-      # +AbstractController::Caching+ exposes +_view_cache_dependencies+ as a
-      # +class_attribute+; the default +[]+ stored on +ActionController::Base+'s
-      # singleton class is mutable and would raise +Ractor::IsolationError+ when
-      # +partial_path+ -> +view_cache_dependencies+ reads it from a dispatched
-      # render on a non-main Ractor. Snapshot a shareable copy at boot.
-      ActionController::Base.make_view_cache_dependencies_shareable! if defined?(ActionController::Base)
-      # +AbstractController::Caching::Fragments+ exposes +fragment_cache_keys+
-      # as a +class_attribute+; the default +[]+ stored on +ActionController::Base+'s
-      # singleton class is mutable and would raise +Ractor::IsolationError+ when
-      # +combined_fragment_cache_key+ reads it from a dispatched render on a
-      # non-main Ractor. Snapshot a shareable copy at boot.
-      ActionController::Base.make_fragment_cache_keys_shareable! if defined?(ActionController::Base)
-      # +ActionController::Metal.controller_name+ is +||=+-memoized per
-      # class on the singleton-class ivar +@controller_name+, with subclass
-      # +inherited+ resetting it to +nil+. Reached from
-      # +ActionController::Caching#instrument_payload+ during fragment-cache
-      # instrumentation on dispatched renders. Walk every concrete controller
-      # descendant and warm the ivar at boot so the lazy +||=+ never fires
-      # from a non-main Ractor.
-      if defined?(ActionController::Metal)
-        [ActionController::Metal, *ActionController::Metal.descendants].each do |controller_class|
-          controller_class.make_controller_name_shareable!
-          # +ActionController::ParamsWrapper+ (included in +ActionController::Base+
-          # and +ActionController::API+) exposes +_wrapper_options+ as a
-          # +class_attribute+. The default +Options+ instance carries a
-          # +Mutex+ used to gate first-read lazy resolution of +include+
-          # and +name+; +process_action+ -> +_wrapper_enabled?+ ->
-          # +_wrapper_formats+ reads the class_attribute on every request,
-          # which raises +Ractor::IsolationError+ on the singleton-class
-          # ivar read from non-main Ractors until the +Options+ is
-          # shareable. Warm the lazy memos and deep-freeze (clearing the
-          # mutex via +Options#freeze+) for every controller descendant.
-          if controller_class.respond_to?(:make_wrapper_options_shareable!)
-            controller_class.make_wrapper_options_shareable!
-          end
-        end
-      end
-      # The +turbo-rails+ gem registers a +:turbo_stream+ renderer in its
-      # +turbo.renderer+ initializer (gems/turbo-rails/lib/turbo/engine.rb:80):
-      #
-      #     ActionController::Renderers.add :turbo_stream do |turbo_streams_html, options|
-      #       self.content_type = Mime[:turbo_stream] if media_type.nil?
-      #       turbo_streams_html
-      #     end
-      #
-      # The block is defined with +self+ being a +Turbo::Engine+ instance.
-      # +Renderers.add+ tries +Ractor.make_shareable(block)+ but the engine
-      # carries non-shareable ivars (config OrderedOptions, autoload paths
-      # held by mutable Concurrent maps, etc.), so the +rescue+ leaves the
-      # block as-is. The resulting +_render_with_renderer_turbo_stream+
-      # instance method then raises "defined with an un-shareable Proc in
-      # a different Ractor" on every non-main +render turbo_stream: ...+.
-      #
-      # The block body doesn't actually depend on the engine — it only
-      # touches controller methods (+content_type=+, +media_type+) and the
-      # frozen +Mime[:turbo_stream]+ lookup. Reinstall the method with an
-      # explicitly-shareable proc whose +self+ is +main+ at definition time.
-      # +ActionController::Renderers::RENDERERS+ may already be frozen by
-      # the prior +make_shareable!+ pass, but +define_method+ on the
-      # module itself does not touch +RENDERERS+, so the rebind goes
-      # through whether the freeze has happened or not.
-      if defined?(::ActionController::Renderers) && defined?(Mime) && Mime::Type.lookup_by_extension(:turbo_stream)
-        turbo_stream_mime = Mime[:turbo_stream]
-        # +shareable_proc+ detaches the proc from the enclosing
-        # +Application+ +self+ (which is non-shareable), so the resulting
-        # Proc passes Ruby's "defined with un-shareable Proc" check at
-        # call time. The captured +turbo_stream_mime+ is a frozen
-        # +Mime::Type+ — already shareable post chunk-32 walker.
-        ractor_safe_turbo_stream = shareable_proc do |turbo_streams_html, options|
-          self.content_type = turbo_stream_mime if media_type.nil?
-          turbo_streams_html
-        end
-        ::ActionController::Renderers.send(:define_method, :_render_with_renderer_turbo_stream, &ractor_safe_turbo_stream)
-      end
       # Detach Propshaft::Assembly before deep-freeze. Its lazy ivars
       # (@compilers, @load_path, @resolver, @prefix) write at request time,
       # so deep-freezing the Application transitively freezes the Assembly
@@ -1682,6 +1017,16 @@ module Rails
         self.class.instance_variable_set(:@_ractor_detached_assets, @assets)
         @assets = nil
       end
+
+      # Last chance for Rails components, engines, and application code to
+      # prepare their owned state before the app graph is made shareable. This
+      # hook is deliberately fired after initialization (including
+      # +config.after_initialize+) and after the app-level/external-gem warmups
+      # above, but before +env_config+, +routes+, and the application object are
+      # deeply frozen. Future component-specific warmups should move out of this
+      # method and into their owning Railtie/Engine via +config.before_sharing+.
+      run_before_sharing_hooks!
+
       env_config.make_shareable!
       routes.make_shareable!
       make_shareable!
@@ -1699,6 +1044,21 @@ module Rails
       @ordered_railties = nil
       @autoloaders = nil
       super
+    end
+
+  private
+    def ensure_initialized_for_sharing!
+      unless initialized?
+        raise "Rails.application.ractorize! must be called after initialization has completed so config.before_sharing hooks run after config.after_initialize hooks"
+      end
+    end
+
+    def run_before_sharing_hooks!
+      ensure_initialized_for_sharing!
+      return if @ran_before_sharing_hooks
+
+      ActiveSupport.run_load_hooks(:before_sharing, self)
+      @ran_before_sharing_hooks = true
     end
 
   protected

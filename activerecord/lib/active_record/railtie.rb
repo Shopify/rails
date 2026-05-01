@@ -63,6 +63,79 @@ module ActiveRecord
       :active_record_trilogyadapter,
     )
 
+    config.before_sharing do
+      ActiveRecord::Railtie.prepare_for_sharing
+    end
+
+    def self.prepare_for_sharing
+      ar_classes = [ActiveRecord::Base, *ActiveRecord::Base.descendants]
+
+      ar_classes.each do |ar_class|
+        ar_class.make_relation_delegate_cache_shareable!
+      end
+
+      ar_classes.each do |ar_class|
+        next if ar_class.abstract_class?
+
+        ar_class.make_arel_table_shareable!
+        ar_class.make_predicate_builder_shareable!
+
+        if ar_class != ActiveRecord::Base && ar_class.table_exists?
+          ar_class.make_attribute_registration_shareable!
+          ar_class.make_model_schema_shareable!
+          ar_class.make_cached_connection_default_timezone_shareable!
+          ar_class.define_attribute_methods
+        end
+
+        ar_class.make_reflections_shareable!
+        ar_class.make_query_constraints_list_shareable!
+
+        if ar_class != ActiveRecord::Base && ar_class.table_exists?
+          ar_class.make_adapter_class_shareable!
+          ar_class.make_prefetch_primary_key_shareable!
+          ar_class.make_timestamp_attributes_shareable!
+        end
+
+        ar_class.make_inspect_shareable!
+        ar_class.make_model_name_shareable!
+        ar_class.make_to_partial_path_shareable!
+      end
+
+      ar_classes.each do |ar_class|
+        ar_class.make_uniqueness_validators_shareable! if ar_class.respond_to?(:make_uniqueness_validators_shareable!)
+        ar_class.make_callback_chains_shareable!
+        ar_class.make_normalized_attributes_shareable! if ar_class.respond_to?(:make_normalized_attributes_shareable!)
+        ar_class.make_counter_cache_shareable! if ar_class.respond_to?(:make_counter_cache_shareable!)
+        ar_class.make_attr_readonly_shareable! if ar_class.respond_to?(:make_attr_readonly_shareable!)
+        ar_class.make_default_scope_override_shareable! if ar_class.respond_to?(:make_default_scope_override_shareable!)
+        ar_class.make_finder_needs_type_condition_shareable! if ar_class.respond_to?(:make_finder_needs_type_condition_shareable!)
+        ar_class.make_defined_enums_shareable! if ar_class.respond_to?(:make_defined_enums_shareable!)
+        ar_class.make_nested_attributes_options_shareable! if ar_class.respond_to?(:make_nested_attributes_options_shareable!)
+        ar_class.make_attributes_for_inspect_shareable! if ar_class.respond_to?(:make_attributes_for_inspect_shareable!)
+        ar_class.make_filter_attributes_shareable! if ar_class.respond_to?(:make_filter_attributes_shareable!)
+        ar_class.make_encrypted_attributes_shareable! if ar_class.respond_to?(:make_encrypted_attributes_shareable!)
+      end
+
+      ActiveRecord::Relation::WhereClause.make_shareable! if defined?(ActiveRecord::Relation::WhereClause)
+      ActiveRecord::Base.make_configurations_shareable! if ActiveRecord::Base.respond_to?(:make_configurations_shareable!)
+      ActiveRecord::Type.make_default_value_shareable! if defined?(ActiveRecord::Type)
+      prepare_encryption_context_for_sharing
+    end
+
+    def self.prepare_encryption_context_for_sharing
+      return unless defined?(ActiveRecord::Encryption) &&
+        ActiveRecord::Encryption.respond_to?(:default_context) &&
+        !ActiveRecord::Encryption.config.primary_key.nil?
+
+      ctx = ActiveRecord::Encryption.default_context
+      ctx.key_provider
+      if ctx.key_generator
+        ctx.key_generator.send(:key_derivation_salt)
+        ctx.key_generator.send(:key_length)
+      end
+      ActiveRecord::Encryption.default_context = Ractor.make_shareable(ctx, copy: true)
+    end
+
     rake_tasks do
       namespace :db do
         task :load_config do

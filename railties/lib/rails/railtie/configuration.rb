@@ -66,9 +66,18 @@ module Rails
         ActiveSupport.on_load(:before_initialize, yield: true, &block)
       end
 
-      # Last configurable block to run. Called after frameworks initialize.
+      # Last configurable block to run during initialization. Called after frameworks initialize.
       def after_initialize(&block)
         ActiveSupport.on_load(:after_initialize, yield: true, &block)
+      end
+
+      # Called by +Rails.application.ractorize!+ after initialization has
+      # completed and immediately before the application, routes, and
+      # environment configuration are made shareable. Railties and engines can
+      # use this hook to make their owned state Ractor-shareable without adding
+      # component-specific knowledge to +Rails::Application#ractorize!+.
+      def before_sharing(&block)
+        ActiveSupport.on_load(:before_sharing, yield: true, &block)
       end
 
       # Called after application routes have been loaded.
