@@ -208,8 +208,8 @@ module ActiveRecord
 
         scope_chain_items.inject(klass_scope, &:merge!)
 
-        primary_key_column_names = Array(join_primary_key)
-        foreign_key_column_names = Array(join_foreign_key)
+        primary_key_column_names = Array(join_query_constraints_primary_key)
+        foreign_key_column_names = Array(join_query_constraints_foreign_key)
 
         primary_foreign_key_pairs = primary_key_column_names.zip(foreign_key_column_names)
 
@@ -637,10 +637,12 @@ module ActiveRecord
         @active_record_primary_key ||=
           if options[:primary_key]
             ActiveRecord::Key.for(options[:primary_key]).name
-          elsif active_record.has_query_constraints? || (options[:query_constraints] && !options[:foreign_key])
+          elsif (active_record.has_query_constraints? || options[:query_constraints]) && !options[:foreign_key]
+            # query_constraints drive the key only when no foreign_key is given;
+            # an explicit foreign_key handles writes and takes precedence here.
             active_record.query_constraints_list
           else
-            derive_primary_key(active_record) { |model| model.query_constraints_list }
+            active_record.primary_key_definition.inferred_id || primary_key(active_record).freeze
           end
       end
 
@@ -889,8 +891,7 @@ module ActiveRecord
           end
         end
 
-        # Shared by +active_record_primary_key+ and +association_primary_key+ to
-        # resolve the key from +model+ once a custom +primary_key+ is ruled out.
+        # Resolves the key from +model+ once a custom +primary_key+ is ruled out.
         # The block is yielded +model+ to supply its query-constraints list.
         #
         # Note: callers handle the association-level +query_constraints+ option
@@ -1110,7 +1111,8 @@ module ActiveRecord
       # here, primary key overridden below), otherwise query-constraint joins would
       # resolve to the wrong reflection on the chain. Keep the two sets in sync.
       delegate :foreign_key, :foreign_type, :association_foreign_key, :join_id_for, :type,
-               :active_record_primary_key, :join_foreign_key, to: :source_reflection
+               :active_record_primary_key, :join_foreign_key,
+               :join_query_constraints_id_for, :join_query_constraints_foreign_key, to: :source_reflection
 
       def initialize(delegate_reflection)
         super()
