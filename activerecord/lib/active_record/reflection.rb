@@ -208,8 +208,8 @@ module ActiveRecord
 
         scope_chain_items.inject(klass_scope, &:merge!)
 
-        primary_key_column_names = Array(join_primary_key)
-        foreign_key_column_names = Array(join_foreign_key)
+        primary_key_column_names = Array(join_query_constraints_primary_key)
+        foreign_key_column_names = Array(join_query_constraints_foreign_key)
 
         primary_foreign_key_pairs = primary_key_column_names.zip(foreign_key_column_names)
 
@@ -645,7 +645,7 @@ module ActiveRecord
           else
             custom_primary_key.to_s.freeze
           end
-        elsif active_record.has_query_constraints? || (options[:query_constraints] && !options[:foreign_key])
+        elsif (active_record.has_query_constraints? || options[:query_constraints]) && !options[:foreign_key]
           active_record.query_constraints_list
         elsif active_record.composite_primary_key?
           # If active_record has composite primary key of shape [:<tenant_key>, :id], infer primary_key as :id
