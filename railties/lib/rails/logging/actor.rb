@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "ractor_safe"
+
 module Rails
   module Logging
     # = Logger Actor
@@ -10,26 +12,30 @@ module Rails
     #
     # The actor instance is itself made Ractor-shareable so that
     # +Rails::Logging::Proxy+ (held by every Ractor as +Rails.logger+) can reach
-    # it. To stay shareable, the actor only holds the port as state —
-    # the mutable log device lives only in the consumer Thread's
-    # closure, never as an ivar of +self+. This mirrors the pattern in
+    # it. To stay shareable, the actor only holds the port and a
+    # shareable +RactorSafe::AtomicInteger+ as state — the mutable log
+    # device lives only in the consumer Thread's closure, never as an
+    # ivar of +self+. This mirrors the pattern in
     # +Ractor::Dispatch::Executor+.
     #
-    # ==== Backpressure (v1)
+    # ==== Backpressure
     #
-    # The mailbox is unbounded. Writes never block producer Ractors.
-    # If the consumer falls behind, the port queue grows. A future
-    # version may add severity-based throttling (e.g. errors go
-    # through +call+ instead of +cast+) or a side-channel depth
-    # counter. See +plans/logger-actor.md+.
+    # +#inflight+ is a shareable atomic counter exposed for use by
+    # +Rails::Logging::Proxy+. The proxy increments it on each cast;
+    # the consumer thread decrements it after each write. The proxy
+    # reads it before each call to decide between cast (async) and
+    # call (sync). This is the OTP +logger_olp+ +async/sync+ pattern.
     #
     # ==== Crash recovery
     #
     # If the consumer Thread dies, queued messages pile up. v1 does
     # not restart the consumer.
     class Actor
+      attr_reader :inflight
+
       def initialize(real_logger)
-        @port = ::Ractor::Port.new
+        @port     = ::Ractor::Port.new
+        @inflight = ::RactorSafe::AtomicInteger.new(0)
 
         # Build a fresh logger over a freshly-opened IO. This sidesteps
         # the fact that the original Rails.logger's IO (typically
@@ -46,7 +52,7 @@ module Rails
         # consumer thread. Zero means no overhead.
         slow_ms = (ENV["LOGGER_SLOW_MS"] || "0").to_f
 
-        spawn_consumer(consumer_logger, @port, slow_ms)
+        spawn_consumer(consumer_logger, @port, slow_ms, @inflight)
 
         ::Ractor.make_shareable(self)
       end
@@ -109,7 +115,7 @@ module Rails
           ::ActiveSupport::TaggedLogging.new(fresh)
         end
 
-        def spawn_consumer(logger, port, slow_ms)
+        def spawn_consumer(logger, port, slow_ms, inflight)
           delay = slow_ms / 1000.0
           Thread.new do
             begin
@@ -118,8 +124,17 @@ module Rails
                 case msg[0]
                 when :write
                   _, severity, message, tags = msg
-                  write_one(logger, severity, message, tags, delay)
+                  begin
+                    write_one(logger, severity, message, tags, delay)
+                  ensure
+                    # Always decrement, even on write failure, so
+                    # producers don't get stuck above the threshold.
+                    inflight.decrement
+                  end
                 when :call
+                  # Sync calls don't go through the inflight counter
+                  # (the producer is blocked anyway and the queue
+                  # naturally throttles itself).
                   _, reply, op, args = msg
                   handle_call(logger, reply, op, args, delay)
                 when :stop

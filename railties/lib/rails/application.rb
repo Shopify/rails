@@ -139,6 +139,7 @@ module Rails
         logger_actor,
         level: old_logger.level,
         progname: old_logger.progname || "Rails",
+        sync_threshold: (ENV["LOGGER_SYNC_THRESHOLD"] || "0").to_i,
       )
       Rails.logger = ractor_logger
       @app_env_config["action_dispatch.logger"] = ractor_logger

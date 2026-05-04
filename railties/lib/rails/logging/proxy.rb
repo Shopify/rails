@@ -19,12 +19,19 @@ module Rails
     class Proxy
       SEVERITY_METHODS = %i[debug info warn error fatal unknown].freeze
 
-      attr_reader :level, :progname
+      attr_reader :level, :progname, :sync_threshold
 
-      def initialize(actor, level:, progname: "Rails")
-        @actor    = actor
-        @level    = level
-        @progname = progname
+      # +sync_threshold+: when the actor's inflight counter reaches
+      # this value, the proxy switches from cast (async) to call
+      # (sync) for new writes. Producers then block, naturally
+      # throttling to the consumer's drain rate. Zero (default)
+      # disables the check — purely cast-only behaviour.
+      def initialize(actor, level:, progname: "Rails", sync_threshold: 0)
+        @actor          = actor
+        @inflight       = actor.inflight
+        @level          = level
+        @progname       = progname
+        @sync_threshold = sync_threshold.to_i
         # Eager: lazy-init would mutate self after freeze.
         @tag_state_key = "rails_ractor_logger_tags:#{object_id}".freeze
         ::Ractor.make_shareable(self)
@@ -40,7 +47,7 @@ module Rails
           def #{severity}(message = nil, &block)
             return true if @level > #{sev_num}
             payload = block ? block.call : message
-            @actor.cast(#{sev_num}, shareable_message(payload), current_tags)
+            dispatch(#{sev_num}, shareable_message(payload), current_tags)
             true
           end
 
@@ -53,13 +60,13 @@ module Rails
       def add(severity, message = nil, progname = nil, &block)
         return true if severity < @level
         payload = block ? block.call : (message || progname)
-        @actor.cast(severity, shareable_message(payload), current_tags)
+        dispatch(severity, shareable_message(payload), current_tags)
         true
       end
       alias_method :log, :add
 
       def <<(message)
-        @actor.cast(::Logger::UNKNOWN, shareable_message(message), current_tags)
+        dispatch(::Logger::UNKNOWN, shareable_message(message), current_tags)
         message
       end
 
@@ -154,6 +161,19 @@ module Rails
       EMPTY_TAGS = [].freeze
 
       private
+        # Pick cast vs. call based on the actor's in-flight depth.
+        # Above the threshold, the producer blocks until the actor
+        # processes one of its older messages — this is OTP
+        # +logger_olp+'s async/sync escalation in ~5 lines.
+        def dispatch(severity, message, tags)
+          if @sync_threshold > 0 && @inflight.value >= @sync_threshold
+            @actor.call(:write, severity, message, tags)
+          else
+            @inflight.increment
+            @actor.cast(severity, message, tags)
+          end
+        end
+
         def tag_stack
           ActiveSupport::IsolatedExecutionState[@tag_state_key] ||= []
         end
