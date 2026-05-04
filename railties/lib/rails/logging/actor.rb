@@ -1,5 +1,11 @@
 # frozen_string_literal: true
 
+# Third-party dependency. Apps using Rails::Logging must add
+# `gem "ractor_safe"` to their Gemfile. The explicit `gem` call here
+# surfaces a clear "Could not find gem" error when it's missing,
+# rather than the much less helpful "cannot load such file" from
+# `require` alone.
+gem "ractor_safe"
 require "ractor_safe"
 
 module Rails
