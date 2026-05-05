@@ -166,12 +166,12 @@ module Rails
       # Save the connection handler (nilled during AR::Base.make_shareable!)
       saved_handler = ::ActiveRecord::Base.default_connection_handler
 
-      # I18n MUTEX: replace with nil before freeze. The backend is
-      # immutable after freeze — the MUTEX is dead code.
-      if defined?(::I18n::Backend::Simple::Implementation)
-        ::I18n::Backend::Simple::Implementation.send(:remove_const, :MUTEX) if ::I18n::Backend::Simple::Implementation.const_defined?(:MUTEX, false)
-        ::I18n::Backend::Simple::Implementation.const_set(:MUTEX, nil)
-      end
+      # NOTE: I18n MUTEX is nilled AFTER make_shareable! below. In
+      # development, freeze() lazy-loads translations via
+      # I18n.transliterate("test"), which calls into
+      # I18n::Backend::Simple#init_translations and requires MUTEX
+      # to still be a real Mutex. Once freeze has run, the backend
+      # is immutable and the MUTEX is dead code.
 
       # Clear the Executor/Reloader :run callback chain — it contains
       # Procs from finisher.rb whose self is the initializer context
@@ -201,6 +201,85 @@ module Rails
         end
       end
 
+      # Importmap's @cache_sweeper is a dev/test FileUpdateChecker
+      # whose @block closes over self (Importmap::Map) and transitively
+      # reaches a Thread::Monitor in MemoryStore. Workers don't reload.
+      # Replace with a Ractor-shareable no-op that still responds to
+      # execute_if_updated — the importmap engine installs a
+      # before_action that calls .cache_sweeper.execute_if_updated on
+      # every request, so a nil sweeper would NoMethodError.
+      if defined?(::Importmap::Map) && respond_to?(:importmap) && importmap.is_a?(::Importmap::Map)
+        no_op_sweeper = ::Rails::Application.const_defined?(:RactorNoOpSweeper) ?
+          ::Rails::Application::RactorNoOpSweeper :
+          ::Rails::Application.const_set(:RactorNoOpSweeper, Class.new {
+             def execute_if_updated; end
+             def execute; end
+             def updated?; false; end
+           }.new.freeze)
+        importmap.instance_variable_set(:@cache_sweeper, no_op_sweeper)
+      end
+
+      # Rails.cache (typically MemoryStore in dev) holds a
+      # Thread::Monitor (@monitor) that isn't Ractor-shareable, and
+      # its @data hash needs to stay mutable to be useful as a cache.
+      # Until each worker Ractor builds its own cache lazily, swap to
+      # NullStore so the shared frozen Rack app can cross the Ractor
+      # boundary. The LocalCache::Middleware in the chain holds its
+      # own @cache reference, so update both.
+      if defined?(::ActiveSupport::Cache::MemoryStore) && ::Rails.cache.is_a?(::ActiveSupport::Cache::MemoryStore)
+        null_cache = ::ActiveSupport::Cache::NullStore.new
+        # Warm @local_cache_key (memoized on each request via ||=)
+        # so the frozen NullStore doesn't FrozenError when the
+        # LocalCache::Middleware calls unset_local_cache.
+        null_cache.send(:local_cache_key) if null_cache.respond_to?(:local_cache_key, true)
+        if defined?(::ActiveSupport::Cache::Strategy::LocalCache::Middleware)
+          walk = @app
+          seen = {}.compare_by_identity
+          while walk && !seen[walk]
+            seen[walk] = true
+            walk.cache = null_cache if walk.is_a?(::ActiveSupport::Cache::Strategy::LocalCache::Middleware)
+            walk = walk.instance_variable_get(:@app)
+          end
+        end
+        ::Rails.cache = null_cache
+      end
+
+      # Several Rack middlewares wrap request handling in
+      # Mutex.synchronize for thread-safety (CheckPending, ServerTiming,
+      # ...). The Mutex itself isn't Ractor-shareable. Inside a worker
+      # Ractor only one thread services requests, so synchronize is a
+      # no-op anyway. Replace each known Mutex ivar with a Ractor-
+      # shareable stub that just yields.
+      no_op_mutex = ::Rails::Application.const_defined?(:RactorNoOpMutex) ?
+        ::Rails::Application::RactorNoOpMutex :
+        (::Rails::Application.const_set(:RactorNoOpMutex, Class.new {
+           def synchronize; yield; end
+         }.new.freeze))
+      walk = @app
+      seen = {}.compare_by_identity
+      while walk && !seen[walk]
+        seen[walk] = true
+        if defined?(::ActiveRecord::Migration::CheckPending) && walk.is_a?(::ActiveRecord::Migration::CheckPending)
+          walk.instance_variable_set(:@mutex, no_op_mutex)
+        end
+        if defined?(::ActionDispatch::ServerTiming) && walk.is_a?(::ActionDispatch::ServerTiming)
+          subscriber = walk.instance_variable_get(:@subscriber)
+          subscriber.instance_variable_set(:@mutex, no_op_mutex) if subscriber
+        end
+        walk = walk.instance_variable_get(:@app)
+      end
+
+      # CheckPending#call's body builds a FileUpdateChecker that
+      # touches AR::ConnectionHandling::DEFAULT_ENV (unshareable) and
+      # mutates @needs_check / @watcher (forbidden in non-main Ractor).
+      # Worker Ractors don't reload — make the middleware a passthrough.
+      if defined?(::ActiveRecord::Migration::CheckPending)
+        ::ActiveRecord::Migration::CheckPending.class_eval(
+          "def call(env); @app.call(env); end",
+          __FILE__, __LINE__,
+        )
+      end
+
       # Make database configurations shareable. @@configurations is a
       # class variable that must have a shareable value to be readable
       # from non-main Ractors.
@@ -218,7 +297,192 @@ module Rails
         ::ActiveSupport::TimeZone.make_shareable!
       end
 
+      # Propshaft (dev-mode asset server) holds an Assembly with lazy
+      # ivars (@compilers, @load_path, @resolver, @prefix) that get
+      # populated on first request — but the worker Ractor sees them
+      # frozen and any ||= triggers FrozenError. Warm them up here.
+      # Also stub the per-request cache sweeper: workers don't reload,
+      # and the sweeper's Proc closes over a Mutex (unshareable).
+      if defined?(::Propshaft::Assembly)
+        # The Rails::Application#freeze override saves @assets in a
+        # class var, but the Propshaft::Server middleware retains its
+        # own @assembly reference, so warm via that one too.
+        warm = [@assets, defined?(@@_saved_assets) ? @@_saved_assets : nil].compact
+        # Find Propshaft::Server in the middleware chain.
+        walk = @app
+        seen = {}.compare_by_identity
+        while walk && !seen[walk]
+          seen[walk] = true
+          if defined?(::Propshaft::Server) && walk.is_a?(::Propshaft::Server)
+            asm = walk.instance_variable_get(:@assembly)
+            warm << asm if asm
+          end
+          walk = walk.instance_variable_get(:@app)
+        end
+        no_op_sweeper = ::Rails::Application.const_defined?(:RactorNoOpSweeper) ?
+          ::Rails::Application::RactorNoOpSweeper :
+          ::Rails::Application.const_set(:RactorNoOpSweeper, Class.new {
+             def execute_if_updated; end
+             def execute; end
+             def updated?; false; end
+           }.new.freeze)
+        warm.uniq.each do |asm|
+          asm.prefix     rescue nil
+          lp = (asm.load_path  rescue nil)
+          asm.resolver   rescue nil
+          asm.compilers  rescue nil
+          # Same pattern as Importmap: a propshaft.railtie before_action
+          # calls .cache_sweeper.execute_if_updated on each request,
+          # and LoadPath#cache_sweeper builds a FileUpdateChecker (which
+          # captures Gem.path's unshareable state). Pre-set with a
+          # Ractor-shareable stub.
+          lp.instance_variable_set(:@cache_sweeper, no_op_sweeper) if lp
+        end
+      end
+      if defined?(::Propshaft::Server)
+        # class_eval with a string body so the resulting method isn't
+        # bound to a Proc from the main Ractor (which would raise
+        # "defined with an un-shareable Proc in a different Ractor"
+        # when a worker Ractor invoked it).
+        ::Propshaft::Server.class_eval(
+          "def execute_cache_sweeper_if_updated; end",
+          __FILE__, __LINE__,
+        )
+      end
+
+      # WebConsole (dev-only error overlay) stores its allowed-IP list
+      # in a class variable @@permissions on WebConsole::Request. The
+      # Permissions instance isn't shareable by default — when a worker
+      # Ractor reads the cvar (in WebConsole::Middleware#call), Ractor
+      # refuses. make_shareable! the instance so the read succeeds.
+      if defined?(::WebConsole::Request) && ::WebConsole::Request.respond_to?(:permissions)
+        perms = ::WebConsole::Request.permissions
+        perms.make_shareable! if perms && !perms.shareable?
+      end
+
+      # Force the routes file to load. LazyRouteSet defers routes.draw
+      # to the first request via reload_routes_unless_loaded — but that
+      # path mutates the (now-frozen) application, so workers would
+      # see an empty Journey::Routes set and 404 every request. Drain
+      # the lazy load now while the app is still mutable.
+      reload_routes! if respond_to?(:reload_routes!)
+
+      # Journey::Routes (the inner routing structure used by
+      # ActionDispatch::Routing::RouteSet) memoizes @ast and
+      # @simulator lazily on first dispatch. Warm them now so the
+      # frozen routes object doesn't FrozenError on the first request.
+      # Each Journey::Path::Pattern also memoizes @re via to_regexp;
+      # warm those too so the request-time match() works.
+      if respond_to?(:routes) && routes.respond_to?(:set)
+        rs = routes.set
+        rs.ast       rescue nil
+        rs.simulator rescue nil
+        rs.each do |route|
+          route.path.to_regexp                            rescue nil
+          route.path.requirements_for_missing_keys_check  rescue nil
+          route.path.send(:offsets)                       rescue nil
+        end
+      end
+
+      # Journey::Visitors::Visitor and FunctionalVisitor each hold a
+      # DISPATCH_CACHE class-level Hash populated at class-load time
+      # via inherited callbacks. The Hash itself is mutable, so a
+      # worker Ractor reading the constant trips
+      # `Ractor::IsolationError: can not access non-shareable objects
+      # in constant ... DISPATCH_CACHE`. Freeze them.
+      if defined?(::ActionDispatch::Journey::Visitors::Visitor)
+        ::ActionDispatch::Journey::Visitors::Visitor::DISPATCH_CACHE.make_shareable!
+      end
+      if defined?(::ActionDispatch::Journey::Visitors::FunctionalVisitor)
+        ::ActionDispatch::Journey::Visitors::FunctionalVisitor::DISPATCH_CACHE.make_shareable!
+      end
+      # Same story for Journey::Path::Pattern::REGEXP_CACHE — worker
+      # Ractors read it via dedup_regexp on every match. The method
+      # rescues FrozenError when the cache is frozen, returning the
+      # caller's regexp uncached.
+      if defined?(::ActionDispatch::Journey::Path::Pattern)
+        ::ActionDispatch::Journey::Path::Pattern::REGEXP_CACHE.make_shareable!
+      end
+      # The Each / String / Dot visitor singletons assigned to
+      # `INSTANCE = new` at file load time are referenced from the
+      # request-time match path (Pattern#offsets via Each#each).
+      # Make each instance shareable so the constant is readable.
+      [::ActionDispatch::Journey::Visitors::Each,
+       ::ActionDispatch::Journey::Visitors::String,
+       ::ActionDispatch::Journey::Visitors::Dot].each do |k|
+        next unless defined?(k) && k.const_defined?(:INSTANCE)
+        k::INSTANCE.make_shareable! unless k::INSTANCE.shareable?
+      end if defined?(::ActionDispatch::Journey::Visitors)
+
+      # ActiveSupport::Reloader.check! does `@should_reload ||= check.call`,
+      # which writes the class ivar even when the value stays false —
+      # forbidden from non-main Ractors. Workers don't reload, so make
+      # check! a static `false` on each anonymous Reloader subclass.
+      [respond_to?(:reloader) ? reloader : nil,
+       respond_to?(:executor) ? executor : nil].compact.each do |klass|
+        next unless klass.respond_to?(:check!)
+        klass.singleton_class.class_eval(
+          "def check!; false; end",
+          __FILE__, __LINE__,
+        )
+      end
+
+      # AC::Base.config (an InheritableOptions stored in
+      # @__class_attr_config) holds stale references captured at boot:
+      # the original BroadcastLogger and MemoryStore that ractorize!
+      # swapped above, plus several mutable strings (assets_dir et al)
+      # and an unshareable SessionStore class. Patch the bad entries
+      # in-place BEFORE make_shareable! freezes the hash, so worker
+      # Ractors can later read AbstractController::Base.config without
+      # IsolationError.
+      if defined?(::ActionController::Base)
+        cfg = ::ActionController::Base.singleton_class.instance_variable_get(:@__class_attr_config)
+        if cfg.respond_to?(:[]=) && cfg.respond_to?(:key?) && !cfg.frozen?
+          cfg[:logger] = ::Rails.logger if cfg.key?(:logger)
+          cfg[:cache_store] = ::Rails.cache if cfg.key?(:cache_store)
+          [:assets_dir, :javascripts_dir, :stylesheets_dir].each do |k|
+            v = cfg[k]
+            cfg[k] = v.dup.freeze if v.is_a?(::String) && !v.frozen?
+          end
+          if (origins = cfg[:forgery_protection_trusted_origins]).is_a?(::Array)
+            origins.each { |o| o.freeze if o.respond_to?(:freeze) && !o.frozen? }
+            origins.freeze unless origins.frozen?
+          end
+          if (strat = cfg[:csrf_token_storage_strategy]).is_a?(::Class)
+            strat.make_shareable!
+          end
+        end
+      end
+
+      # thread_mattr_accessor stashes a key string in @__thread_mattr_*
+      # on the class (the actual value lives in IsolatedExecutionState).
+      # Worker Ractors read the ivar to look up the key, so the String
+      # value has to be shareable (frozen). Walk known users BEFORE
+      # make_shareable! — Zeitwerk autoloads via `defined?` here, and
+      # some modules (e.g. QueryLogs) register an after_change callback
+      # at module-load time, which would otherwise hit a frozen array.
+      thread_mattr_owners_pre = []
+      thread_mattr_owners_pre << ::ActiveRecord::QueryLogs           if defined?(::ActiveRecord::QueryLogs)
+      thread_mattr_owners_pre << ::ActiveRecord::Encryption::Contexts if defined?(::ActiveRecord::Encryption::Contexts)
+      thread_mattr_owners_pre << ::ActionText::Rendering             if defined?(::ActionText::Rendering)
+      thread_mattr_owners_pre << ::ActionCable::Server::Worker       if defined?(::ActionCable::Server::Worker)
+      thread_mattr_owners_pre.each do |mod|
+        mod.instance_variables.each do |ivar|
+          next unless ivar.to_s.start_with?("@__thread_mattr_")
+          val = mod.instance_variable_get(ivar)
+          val.freeze if val.is_a?(::String) && !val.frozen?
+        end
+      end
+
       make_shareable!
+
+      # I18n MUTEX: replace with nil after freeze. The backend is now
+      # immutable, so the MUTEX is dead code — and a Mutex isn't
+      # Ractor-shareable, so it has to go before workers boot.
+      if defined?(::I18n::Backend::Simple::Implementation)
+        ::I18n::Backend::Simple::Implementation.send(:remove_const, :MUTEX) if ::I18n::Backend::Simple::Implementation.const_defined?(:MUTEX, false)
+        ::I18n::Backend::Simple::Implementation.const_set(:MUTEX, nil)
+      end
 
       # Models LAST -- after all other make_shareable! calls that
       # might reset model state as a side effect.
@@ -230,20 +494,40 @@ module Rails
       # Restore the connection handler
       ::ActiveRecord::Base.default_connection_handler = saved_handler
 
-      # Freeze class_attribute defaults on AR::Base that may have been
-      # reset by sub-model processing. These are empty collections on
-      # the singleton class that just need freezing.
-      ::ActiveRecord::Base.singleton_class.instance_variables.each do |ivar|
-        next unless ivar.to_s.start_with?("@__class_attr_")
-        next if ivar.to_s.include?("connection")
-        begin
-          val = ::ActiveRecord::Base.singleton_class.instance_variable_get(ivar)
-          next if val.nil? || val.shareable?
-          val.make_shareable!
-        rescue Ractor::Error, Ractor::IsolationError, FrozenError => e
-          Rails.logger.warn("[ractorize!] AR::Base singleton #{ivar}: #{e.message[0..100]}") if Rails.logger
+      # Freeze class_attribute defaults on AR::Base / AC::Base /
+      # AbstractController::Base. They get read at request time from
+      # non-main Ractors, which refuses to surface unshareable values
+      # from class ivars.
+      class_attr_owners = [::ActiveRecord::Base]
+      class_attr_owners << ::AbstractController::Base if defined?(::AbstractController::Base)
+      class_attr_owners << ::ActionController::Base if defined?(::ActionController::Base)
+      # Executor and Reloader are anonymous ExecutionWrapper subclasses;
+      # they hold @__class_attr_check (a lambda { false } default)
+      # which Module#make_shareable! skips because Procs are in
+      # SHAREABLE_SKIP_TYPES. Call Ractor.make_shareable on those Procs
+      # explicitly so worker Ractors can read the cvar.
+      class_attr_owners << executor if respond_to?(:executor) && executor
+      class_attr_owners << reloader if respond_to?(:reloader) && reloader
+      class_attr_owners.each do |owner|
+        owner.singleton_class.instance_variables.each do |ivar|
+          next unless ivar.to_s.start_with?("@__class_attr_")
+          next if ivar.to_s.include?("connection")
+          begin
+            val = owner.singleton_class.instance_variable_get(ivar)
+            next if val.nil? || val.shareable?
+            if val.is_a?(::Proc)
+              ::Ractor.make_shareable(val)
+            else
+              val.make_shareable!
+            end
+          rescue Ractor::Error, Ractor::IsolationError, FrozenError => e
+            Rails.logger.warn("[ractorize!] #{owner} singleton #{ivar}: #{e.message[0..100]}") if Rails.logger
+          end
         end
       end
+
+      # (thread_mattr key freezing was moved before make_shareable!
+      # above — see thread_mattr_owners_pre.)
 
       # Clear encryption declaration listeners — boot-time hooks
       # that contain non-shareable Procs. No longer needed.
@@ -350,6 +634,15 @@ module Rails
     end
 
     def freeze
+      # Re-entry guard. Ractor.make_shareable(self) walks the reachable
+      # graph, calling freeze on each object. If any reachable object's
+      # ivar transitively references self, Ractor.make_shareable hits
+      # self again BEFORE super marks it frozen — which would re-run
+      # this entire body recursively until the stack overflows. Bail
+      # out if we're already mid-freeze.
+      return self if frozen? || @_freezing
+      @_freezing = true
+
       # Cache Rails.root before config is nilled
       ::Rails.cache_root!
 
@@ -358,7 +651,11 @@ module Rails
       require "rack/multipart"
 
       ::ActiveSupport.error_reporter.make_shareable!
-      ::ActiveSupport.event_reporter.make_shareable!
+      # event_reporter.make_shareable! is deferred until after the
+      # eager-load steps below — log subscribers (ActionView, etc.)
+      # register at file-load time, and lazy requires triggered from
+      # this method (e.g. view_context_class) need a mutable
+      # @subscribers array to push onto.
       ::ActiveSupport::Inflector::Inflections.make_shareable!
 
       # Warm up the I18n transliterator cache so it's populated before
@@ -366,7 +663,10 @@ module Rails
       I18n.transliterate("test")
       ::ActiveSupport::Messages::Metadata::ENVELOPE_SERIALIZERS.freeze
       ::ActiveSupport::Messages::Metadata::TIMESTAMP_SERIALIZERS.freeze
-      ::ActionView::PathRegistry.make_shareable!
+      # PathRegistry.make_shareable! is deferred until after
+      # ActionController::Base.descendants.each below — autoloading
+      # ActionController::Base triggers ActionView::ViewPaths' Concern
+      # `included do` block, which mutates @view_paths_by_class.
       ::ActionView::LookupContext::DetailsKey.view_context_class
       ::ActionView::LookupContext::Accessors::DEFAULT_PROCS.make_shareable!
       ::ActiveRecord::Relation::WhereClause.empty
@@ -410,20 +710,76 @@ module Rails
       RUBY
 
 
-      if I18n.class_variable_defined?(:@@fallbacks)
-        fallbacks = I18n.class_variable_get(:@@fallbacks)
-        if fallbacks.respond_to?(:[])
-          I18n.available_locales.each { |locale| fallbacks[locale] }
-        end
+      # I18n.fallbacks does `@@fallbacks ||= I18n::Locale::Fallbacks.new`
+      # — if @@fallbacks is nil/false, the first request from a worker
+      # Ractor writes the cvar, which is forbidden in non-main Ractors.
+      # Force a truthy Fallbacks instance now (and pre-populate per-locale
+      # lookups) so the ||= short-circuits at request time.
+      existing_fb = I18n.class_variable_defined?(:@@fallbacks) && I18n.class_variable_get(:@@fallbacks)
+      if existing_fb && existing_fb.respond_to?(:[])
+        I18n.available_locales.each { |locale| existing_fb[locale] }
+      elsif defined?(::I18n::Locale::Fallbacks)
+        fb = ::I18n::Locale::Fallbacks.new
+        I18n.available_locales.each { |locale| fb[locale] }
+        I18n.class_variable_set(:@@fallbacks, fb)
       else
         I18n.class_variable_set(:@@fallbacks, false)
       end
 
-      # Eagerly build controller view context classes
+      # Eagerly build controller view context classes and warm
+      # @action_methods (memoized via ||= on the class — first dispatch
+      # would otherwise mutate the frozen class from a worker Ractor).
       ::ActionController::Base.descendants.each do |klass|
-        klass._prefixes if klass.respond_to?(:_prefixes)
+        klass._prefixes      if klass.respond_to?(:_prefixes)
         klass.view_context_class if klass.respond_to?(:view_context_class)
+        klass.action_methods if klass.respond_to?(:action_methods)
       end
+      # Also warm AC::Base itself (it has internal_methods used as the
+      # diff base for action_methods).
+      ::AbstractController::Base.action_methods if defined?(::AbstractController::Base)
+      ::ActionController::Base.action_methods   if defined?(::ActionController::Base)
+
+      # ActionView::LookupContext.register_detail uses `define_method`
+      # with the registered &block — those become Procs bound to the
+      # main Ractor, so worker Ractors raise "defined with an
+      # un-shareable Proc in a different Ractor" the first time they
+      # invoke `default_locale` / `default_formats` / `default_variants`
+      # / `default_handlers`. Re-define them using module_eval with a
+      # string body so the resulting method isn't Proc-backed.
+      if defined?(::ActionView::LookupContext::Accessors)
+        ::ActionView::LookupContext::Accessors.module_eval(<<~RUBY, __FILE__, __LINE__ + 1)
+          def default_locale
+            locales = [I18n.locale]
+            locales.concat(I18n.fallbacks[I18n.locale]) if I18n.respond_to?(:fallbacks)
+            locales << I18n.default_locale
+            locales.uniq!
+            locales
+          end
+
+          def default_formats
+            ActionView::Base.default_formats || [:html, :text, :js, :css, :xml, :json]
+          end
+
+          def default_variants
+            []
+          end
+
+          def default_handlers
+            ActionView::Template::Handlers.extensions
+          end
+        RUBY
+      end
+
+      # Now ActionController::Base and all descendants are loaded,
+      # so any `included do` blocks that mutate PathRegistry have run.
+      ::ActionView::PathRegistry.make_shareable!
+
+      # Now that all framework log subscribers have registered (most
+      # via file-load-time `ActiveSupport.event_reporter.subscribe`
+      # in their respective log_subscriber.rb files, plus the lazy
+      # ones pulled in by view_context_class above), it's safe to
+      # freeze the event reporter.
+      ::ActiveSupport.event_reporter.make_shareable!
 
       # Make the Executor and Reloader shareable (anonymous subclasses
       # of ExecutionWrapper with their own callback chains).
@@ -496,7 +852,11 @@ module Rails
        ::ActionController::Parameters,
        ::ActiveRecord::Relation::WhereClause, ::Time,
        ::ActiveRecord::Type,
-       ::ActiveRecord::ConnectionAdapters::SQLite3::Quoting,
+       *(if defined?(::ActiveRecord::ConnectionAdapters::SQLite3::Quoting)
+           [::ActiveRecord::ConnectionAdapters::SQLite3::Quoting]
+         else
+           []
+         end),
        ::Arel::SelectManager,
        ::ActiveRecord::QueryMethods,
        ::ActiveRecord::Relation::Merger,
@@ -625,6 +985,10 @@ module Rails
     end
 
     def reload_routes_unless_loaded # :nodoc:
+      # After ractorize!/freeze the @routes_reloader has been nilled
+      # out — routes are already loaded and never reload inside
+      # worker Ractors. Skip the lazy check.
+      return if frozen?
       initialized? && routes_reloader.execute_unless_loaded
     end
 

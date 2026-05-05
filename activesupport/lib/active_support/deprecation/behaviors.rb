@@ -10,7 +10,9 @@ module ActiveSupport
 
   class Deprecation
     # Default warning behaviors per Rails.env.
-    DEFAULT_BEHAVIORS = {
+    # Wrapped in Ractor.make_shareable so the lambdas can travel with a
+    # frozen Rack app into worker Ractors (Cougar et al.).
+    DEFAULT_BEHAVIORS = Ractor.make_shareable({
       raise: ->(message, callstack, deprecator) do
         e = DeprecationException.new(message)
         e.set_backtrace(callstack.map(&:to_s))
@@ -51,7 +53,7 @@ module ActiveSupport
         error.set_backtrace(callstack.map(&:to_s))
         ActiveSupport.error_reporter.report(error)
       end
-    }
+    })
 
     # Behavior module allows to determine how to display deprecation messages.
     # You can create a custom behavior or set any from the +DEFAULT_BEHAVIORS+

@@ -153,6 +153,16 @@ module Rails
         [self]
       end
 
+      # Rails::Server#log_to_stdout calls this to attach a console
+      # logger so dev sees output on STDOUT. The proxy writes
+      # asynchronously through the logger actor (which already owns
+      # the real device); a second sink would need a parallel actor.
+      # No-op for now — the actor's device is whatever was wrapped
+      # at ractorize! time.
+      def broadcast_to(_other)
+        self
+      end
+
       def level=(_)
         # no-op after freeze
       end

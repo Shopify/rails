@@ -9,8 +9,15 @@ module ActionDispatch
         REGEXP_CACHE = {}
 
         class << self
+          # ractorize! freezes REGEXP_CACHE so worker Ractors can read
+          # the constant. Once frozen, fall through and return the
+          # caller's regexp uncached — Regexp is immutable, so the
+          # caller gets a working regex either way; only the dedup
+          # benefit is lost.
           def dedup_regexp(regexp)
             REGEXP_CACHE[regexp.source] ||= regexp
+          rescue ::FrozenError
+            REGEXP_CACHE[regexp.source] || regexp
           end
         end
 
