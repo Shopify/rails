@@ -66,9 +66,14 @@ module Rails
         ActiveSupport.on_load(:before_initialize, yield: true, &block)
       end
 
-      # Last configurable block to run. Called after frameworks initialize.
+      # Called after frameworks initialize.
       def after_initialize(&block)
         ActiveSupport.on_load(:after_initialize, yield: true, &block)
+      end
+
+      # Called before the application is shared with Ractors.
+      def before_sharing(&block)
+        ActiveSupport.on_load(:before_sharing, yield: true, &block)
       end
 
       # Called after application routes have been loaded.

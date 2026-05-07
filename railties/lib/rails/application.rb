@@ -119,6 +119,7 @@ module Rails
       @message_verifiers = nil
       @deprecators       = nil
       @ran_load_hooks    = false
+      @ractorized        = false
       @revision          = nil
       @revision_initialized = false
 
@@ -136,6 +137,27 @@ module Rails
     # Returns true if the application is initialized.
     def initialized?
       @initialized
+    end
+
+    # Returns true if the application has been prepared for sharing with Ractors.
+    def ractorized?
+      @ractorized
+    end
+
+    # Prepares the application to be shared with Ractors.
+    def ractorize!
+      return self if @ractorized
+
+      if !config.eager_load
+        raise "Ractorization requires config.eager_load to be true."
+      elsif Gem.ruby_version <= Gem::Version.new("4.0.0")
+        raise "Ractorization requires Ruby 4.0 or later."
+      end
+
+      Rails.logger.warn "Ractorization is an experimental feature."
+      ActiveSupport.run_load_hooks(:before_sharing, self)
+      @ractorized = true
+      self
     end
 
     # Returns the dasherized application name.
@@ -474,6 +496,7 @@ module Rails
       raise "Application has been already initialized." if @initialized
       run_initializers(group, self)
       @initialized = true
+      ractorize! if group == :default && config.enable_ractorization
       self
     end
 

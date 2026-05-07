@@ -102,6 +102,18 @@ module RailtiesTest
       assert $after_initialize
     end
 
+    test "railtie can add before_sharing callbacks" do
+      $before_sharing = nil
+      class Foo < Rails::Railtie ; config.before_sharing { |app| $before_sharing = app } ; end
+      add_to_config <<-RUBY
+        config.eager_load = true
+        config.enable_ractorization = true
+      RUBY
+      assert_nil $before_sharing
+      require "#{app_path}/config/environment"
+      assert_same Rails.application, $before_sharing
+    end
+
     test "rake_tasks block is executed when MyApp.load_tasks is called" do
       $ran_block = false
 

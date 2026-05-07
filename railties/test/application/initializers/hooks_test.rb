@@ -51,6 +51,69 @@ module ApplicationTests
       assert_equal [1, 2, 3, 4], $initialization_callbacks
     end
 
+    test "before_sharing does not run by default" do
+      $before_sharing = false
+      add_to_config <<-RUBY
+        config.before_sharing { $before_sharing = true }
+      RUBY
+
+      require "#{app_path}/config/environment"
+      assert_equal false, Rails.application.config.enable_ractorization
+      assert_not $before_sharing
+      assert_not_predicate Rails.application, :ractorized?
+    end
+
+    test "ractorization requires eager loading" do
+      $before_sharing = false
+      add_to_config <<-RUBY
+        config.eager_load = false
+        config.enable_ractorization = true
+        config.before_sharing { $before_sharing = true }
+      RUBY
+
+      error = assert_raises(RuntimeError) do
+        require "#{app_path}/config/environment"
+      end
+
+      assert_equal "Ractorization requires config.eager_load to be true.", error.message
+      assert_not $before_sharing
+      assert_not_predicate Rails.application, :ractorized?
+    end
+
+    test "before_sharing runs after after_initialize when ractorization is enabled" do
+      $order = []
+      add_to_config <<-RUBY
+        config.eager_load = true
+        config.enable_ractorization = true
+        config.after_initialize { $order << :after_initialize }
+        config.before_sharing { |app| $order << [:before_sharing, app.equal?(Rails.application), app.initialized?] }
+      RUBY
+
+      require "#{app_path}/config/environment"
+      assert_equal [:after_initialize, [:before_sharing, true, true]], $order
+      assert_predicate Rails.application, :ractorized?
+    end
+
+    test "ractorize runs before_sharing hooks once" do
+      $before_sharing_count = 0
+      $before_sharing_application = nil
+      add_to_config <<-RUBY
+        config.eager_load = true
+        config.before_sharing do |app|
+          $before_sharing_count += 1
+          $before_sharing_application = app
+        end
+      RUBY
+
+      require "#{app_path}/config/environment"
+      Rails.application.ractorize!
+      Rails.application.ractorize!
+
+      assert_equal 1, $before_sharing_count
+      assert_same Rails.application, $before_sharing_application
+      assert_predicate Rails.application, :ractorized?
+    end
+
     test "after_initialize runs after frameworks have been initialized" do
       $activerecord_configuration = nil
       add_to_config <<-RUBY
