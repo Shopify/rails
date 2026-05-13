@@ -680,24 +680,31 @@ module Rails
       cache.make_shareable!
       I18n.config.interpolation_patterns  # forces @@interpolation_patterns
 
-      # Patch I18n.normalize_key to handle frozen caches.
+      # Patch I18n.normalize_key to use a Ractor-local cache. The
+      # upstream @@normalized_key_cache class variable can't be written
+      # from a worker Ractor (cvar mutation is forbidden) and gets
+      # frozen by make_shareable! during ractorize! anyway. Each
+      # Ractor keeps its own two-level cache (separator -> key -> keys);
+      # cold-fill once per Ractor, full-speed reads thereafter.
       ::I18n.instance_eval <<~RUBY
         def normalize_key(key, separator)
-          cache = begin; @@normalized_key_cache[separator]; rescue FrozenError, Ractor::IsolationError, NameError; nil; end
-          if cache
-            cached = begin; cache[key]; rescue FrozenError, Ractor::IsolationError, NameError; nil; end
-            return cached if cached
-          end
+          cache = (::Ractor[:_i18n_normalized_keys] ||= {})
+          sep_cache = (cache[separator] ||= {})
+          cached = sep_cache[key]
+          return cached if cached
 
-          case key
-          when Array
-            key.flat_map { |k| normalize_key(k, separator) }
-          else
-            keys = key.to_s.split(separator)
-            keys.delete("")
-            keys.map! { |k| k =~ /\\A[-+]?([1-9]\\d*|0)\\z/ ? k.to_i : k.to_sym }
-            keys
-          end
+          result =
+            case key
+            when Array
+              key.flat_map { |k| normalize_key(k, separator) }
+            else
+              keys = key.to_s.split(separator)
+              keys.delete("")
+              keys.map! { |k| k =~ /\\A[-+]?([1-9]\\d*|0)\\z/ ? k.to_i : k.to_sym }
+              keys
+            end
+          sep_cache[key] = result
+          result
         end
       RUBY
 
