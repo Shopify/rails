@@ -54,33 +54,27 @@ module ActionView
     class DetailsKey # :nodoc:
       alias :eql? :equal?
 
-      @details_keys = Concurrent::Map.new
-      @digest_cache = Concurrent::Map.new
-      @view_context_mutex = Mutex.new
-
+      # Caches live in Ractor-local storage so each request-serving
+      # Ractor owns its copy. Values (TemplateDetails::Requested,
+      # ViewContext subclasses) are not naturally shareable, so a
+      # shared map is not an option here. Cold-fill is per-Ractor and
+      # amortizes across the requests that Ractor serves.
       def self.digest_cache(details)
         key = details_cache_key(details)
-        if @digest_cache.frozen?
-          @digest_cache.fetch(key) { Concurrent::Map.new }
-        else
-          @digest_cache[key] ||= Concurrent::Map.new
-        end
+        cache = (Ractor[:av_digest_cache] ||= {})
+        cache[key] ||= Concurrent::Map.new
       end
 
       def self.details_cache_key(details)
-        @details_keys.fetch(details) do
+        cache = (Ractor[:av_details_keys] ||= {})
+        cache.fetch(details) do
           if formats = details[:formats]
             unless Template::Types.valid_symbols?(formats)
               details = details.dup
               details[:formats] &= Template::Types.symbols
             end
           end
-          requested = TemplateDetails::Requested.new(**details)
-          if @details_keys.frozen?
-            requested
-          else
-            @details_keys[details] ||= requested
-          end
+          cache[details] = TemplateDetails::Requested.new(**details)
         end
       end
 
@@ -88,23 +82,18 @@ module ActionView
         ActionView::PathRegistry.all_resolvers.each do |resolver|
           resolver.clear_cache
         end
-        @view_context_class = nil
-        @details_keys.clear
-        @digest_cache.clear
+        Ractor[:av_view_context_class] = nil
+        Ractor[:av_details_keys] = {}
+        Ractor[:av_digest_cache] = {}
       end
 
       def self.digest_caches
-        @digest_cache.values
+        (Ractor[:av_digest_cache] || {}).values
       end
 
       def self.view_context_class
-        if @view_context_class
-          @view_context_class
-        else
-          @view_context_mutex.synchronize do
-            @view_context_class ||= ActionView::Base.with_empty_template_cache
-          end
-        end
+        Ractor[:av_view_context_class] ||=
+          ActionView::Base.with_empty_template_cache
       end
     end
 
