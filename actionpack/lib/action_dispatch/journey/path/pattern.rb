@@ -6,18 +6,15 @@ module ActionDispatch
   module Journey # :nodoc:
     module Path # :nodoc:
       class Pattern # :nodoc:
-        REGEXP_CACHE = {}
-
         class << self
-          # ractorize! freezes REGEXP_CACHE so worker Ractors can read
-          # the constant. Once frozen, fall through and return the
-          # caller's regexp uncached — Regexp is immutable, so the
-          # caller gets a working regex either way; only the dedup
-          # benefit is lost.
+          # Per-Ractor regexp dedup cache. Was a class-level constant
+          # frozen by ractorize!; after freeze the ||= silently failed
+          # and every match recomputed instead of deduping. Each
+          # request-serving Ractor now owns its own table; cold-fill
+          # is paid once per Ractor lifetime.
           def dedup_regexp(regexp)
-            REGEXP_CACHE[regexp.source] ||= regexp
-          rescue ::FrozenError
-            REGEXP_CACHE[regexp.source] || regexp
+            cache = (Ractor[:_journey_regexp_cache] ||= {})
+            cache[regexp.source] ||= regexp
           end
         end
 
