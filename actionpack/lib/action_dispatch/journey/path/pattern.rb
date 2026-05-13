@@ -2,19 +2,28 @@
 
 # :markup: markdown
 
+gem "ractor_safe"
+require "ractor_safe"
+
 module ActionDispatch
   module Journey # :nodoc:
     module Path # :nodoc:
       class Pattern # :nodoc:
+        # Shared cross-Ractor regexp dedup cache. Values (regexps) are
+        # intrinsically shareable; keys are the regexp source strings
+        # interned with String#-@ so they are frozen and shareable.
+        # Previous approach used Ractor-local storage which forced each
+        # worker to refill the cache from scratch; using a shared
+        # RactorSafe::HashMap pays the dedup once for the whole process
+        # at the cost of one std::mutex acquire per lookup. Acceptable
+        # here because this cache fills cold during boot/eager-load and
+        # is read-mostly thereafter (writes are rare; values converge).
+        REGEXP_CACHE = ::RactorSafe::HashMap.new
+
         class << self
-          # Per-Ractor regexp dedup cache. Was a class-level constant
-          # frozen by ractorize!; after freeze the ||= silently failed
-          # and every match recomputed instead of deduping. Each
-          # request-serving Ractor now owns its own table; cold-fill
-          # is paid once per Ractor lifetime.
           def dedup_regexp(regexp)
-            cache = (Ractor[:_journey_regexp_cache] ||= {})
-            cache[regexp.source] ||= regexp
+            source = -regexp.source
+            REGEXP_CACHE[source] || (REGEXP_CACHE[source] = regexp)
           end
         end
 
