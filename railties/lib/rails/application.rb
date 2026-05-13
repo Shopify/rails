@@ -397,13 +397,6 @@ module Rails
       if defined?(::ActionDispatch::Journey::Visitors::FunctionalVisitor)
         ::ActionDispatch::Journey::Visitors::FunctionalVisitor::DISPATCH_CACHE.make_shareable!
       end
-      # Same story for Journey::Path::Pattern::REGEXP_CACHE — worker
-      # Ractors read it via dedup_regexp on every match. The method
-      # rescues FrozenError when the cache is frozen, returning the
-      # caller's regexp uncached.
-      if defined?(::ActionDispatch::Journey::Path::Pattern)
-        ::ActionDispatch::Journey::Path::Pattern::REGEXP_CACHE.make_shareable!
-      end
       # The Each / String / Dot visitor singletons assigned to
       # `INSTANCE = new` at file load time are referenced from the
       # request-time match path (Pattern#offsets via Each#each).
