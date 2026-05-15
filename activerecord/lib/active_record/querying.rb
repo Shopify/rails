@@ -74,7 +74,8 @@ module ActiveRecord
       column_types = result_set.column_types
 
       unless column_types.empty?
-        column_types = column_types.reject { |k, _| attribute_types.key?(k) }
+        model_attribute_types = attribute_types
+        column_types = column_types.reject { |k, _| model_attribute_types.key?(k) }
       end
 
       message_bus = ActiveSupport::Notifications.instrumenter
