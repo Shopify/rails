@@ -79,6 +79,15 @@ module ActiveRecord
         end
       end
 
+      def types_for_attributes(*attribute_names)
+        attribute_types = self.attribute_types
+        aliases = model_class.attribute_aliases
+        attribute_names.index_with do |name|
+          name = name.to_s
+          attribute_types[aliases[name] || name]
+        end
+      end
+
       # Returns column defaults hash
       def column_defaults
         model_class.load_schema

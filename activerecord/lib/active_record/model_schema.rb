@@ -468,8 +468,7 @@ module ActiveRecord
       end
 
       def types_for_attributes(*attribute_names) # :nodoc:
-        attribute_types = self.attribute_types
-        attribute_names.index_with { |name| attribute_types[resolve_attribute_name(name)] }
+        model_schema.types_for_attributes(*attribute_names)
       end
 
       def columns_hash # :nodoc:
