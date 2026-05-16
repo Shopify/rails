@@ -1411,6 +1411,7 @@ module ActiveRecord
       end
 
       def _substitute_values(values)
+        types = model.types_for_attributes(*values.keys)
         values.map do |name, value|
           attr = table[name]
           if Arel.arel_node?(value)
@@ -1418,7 +1419,7 @@ module ActiveRecord
               value = Arel::Nodes::Grouping.new(value)
             end
           else
-            type = model.type_for_attribute(attr.name)
+            type = types[name]
             value = predicate_builder.build_bind_attribute(attr.name, type.cast(value))
           end
           [attr, value]

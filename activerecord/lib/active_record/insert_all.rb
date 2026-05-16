@@ -314,7 +314,7 @@ module ActiveRecord
             unknown_column = (keys - columns.keys).first
             raise UnknownAttributeError.new(model.new, unknown_column) if unknown_column
 
-            keys.index_with { |key| model.type_for_attribute(key) }
+            model.types_for_attributes(*keys)
           end
 
           def format_columns(columns)
