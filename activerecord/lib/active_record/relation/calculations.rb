@@ -612,9 +612,11 @@ module ActiveRecord
         model.type_for_attribute(field_name, &block)
       end
 
-      def lookup_cast_type_from_join_dependencies(name, join_dependencies = build_join_dependencies)
+      def lookup_cast_type_from_join_dependencies(name, join_dependencies = build_join_dependencies, types_by_klass: {})
         each_join_dependencies(join_dependencies) do |join|
-          type = join.base_klass.attribute_types.fetch(name, nil)
+          klass = join.base_klass
+          klass_types = types_by_klass[klass] ||= klass.attribute_types
+          type = klass_types.fetch(name, nil)
           return type if type
         end
         nil
@@ -625,12 +627,14 @@ module ActiveRecord
           model.attribute_types
         else
           join_dependencies = nil
+          types_by_klass = nil
           attribute_types = model.attribute_types
           columns.map.with_index do |column, i|
             column.try(:type_caster) ||
               attribute_types.fetch(name = result.columns[i]) do
                 join_dependencies ||= build_join_dependencies
-                lookup_cast_type_from_join_dependencies(name, join_dependencies) ||
+                types_by_klass ||= {}
+                lookup_cast_type_from_join_dependencies(name, join_dependencies, types_by_klass: types_by_klass) ||
                   result.column_types[i] || Type.default_value
               end
           end
