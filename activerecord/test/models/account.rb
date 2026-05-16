@@ -38,8 +38,9 @@ class Account < ActiveRecord::Base
 end
 
 class SubAccount < Account
-  def self.instantiate_instance_of(klass, attributes, column_types = {}, &block)
+  def self.instantiate_instance_of(klass, attributes, column_types = {}, builder = klass.attributes_builder, &block)
     klass = superclass
+    builder = klass.attributes_builder
     super
   end
   private_class_method :instantiate_instance_of

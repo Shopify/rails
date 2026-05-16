@@ -308,8 +308,12 @@ module ActiveRecord
 
         # Given a class, an attributes hash, +instantiate_instance_of+ returns a
         # new instance of the class. Accepts only keys as strings.
-        def instantiate_instance_of(klass, attributes, column_types = {}, &block)
-          attributes = klass.attributes_builder.build_from_database(attributes, column_types)
+        #
+        # +builder+ may be supplied pre-resolved by callers that instantiate
+        # many rows of the same class, so we can avoid the per-row
+        # +klass.attributes_builder+ lookup.
+        def instantiate_instance_of(klass, attributes, column_types = {}, builder = klass.attributes_builder, &block)
+          attributes = builder.build_from_database(attributes, column_types)
           klass.allocate.init_with_attributes(attributes, &block)
         end
 
