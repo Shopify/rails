@@ -23,9 +23,10 @@ module ActionView
     end
 
     def self.register_detail(name, &block)
-      self.default_procs = self.default_procs.merge(name => block).freeze
+      shareable = shareable_proc(&block)
+      self.default_procs = self.default_procs.merge(name => shareable).freeze
 
-      Accessors.define_method(:"default_#{name}", &block)
+      Accessors.define_method(:"default_#{name}", shareable)
       Accessors.module_eval <<-METHOD, __FILE__, __LINE__ + 1
         def #{name}
           @details[:#{name}] || []
