@@ -100,6 +100,29 @@ module ActiveSupport
       end
     end
 
+    # The default_proc captures +self+ via +@parent+, which makes the
+    # Hash unshareable across Ractors. Strip it on freeze and route
+    # missing-key lookups through +@parent+ explicitly (see +[]+ below).
+    # The frozen object is then deeply shareable, matching what
+    # +Ractor.make_shareable+ needs to keep walking.
+    def freeze
+      self.default_proc = nil
+      super
+    end
+
+    # Fall through to +@parent+ when frozen has stripped the default
+    # proc. Mirrors the proc bodies in +initialize+.
+    def [](key)
+      key = key.to_sym
+      if own_key?(key) || !frozen?
+        super(key)
+      elsif @parent.kind_of?(OrderedOptions)
+        @parent._get(key)
+      else
+        @parent[key]
+      end
+    end
+
     def to_h
       @parent.merge(self)
     end
