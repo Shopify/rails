@@ -15,7 +15,7 @@ module AbstractController
       RUBY
     end
 
-    Mime::SET.each do |mime|
+    Mime.set.each do |mime|
       generate_method_for_mime(mime)
     end
 
@@ -33,7 +33,7 @@ module AbstractController
           "format.html { |html| html.tablet { ... } }"
       end
 
-      if Mime::SET.include?(mime_constant)
+      if Mime.set.include?(mime_constant)
         AbstractController::Collector.generate_method_for_mime(mime_constant)
         public_send(symbol, ...)
       else

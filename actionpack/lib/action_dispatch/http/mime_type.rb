@@ -5,47 +5,55 @@
 require "singleton"
 
 module Mime
+  # Immutable, frozen container for registered Mime types.
+  #
+  # Mutating operations return a new, frozen instance instead of mutating in
+  # place. This lets the singleton +Mime.set+ be replaced atomically with a
+  # frozen value on every +register+ / +unregister+ call, keeping it
+  # shareable across Ractors. Existing references to a previous snapshot
+  # keep working unchanged.
   class Mimes
     attr_reader :symbols
 
     include Enumerable
 
-    def initialize
-      @mimes = []
-      @symbols = []
-      @symbols_set = Set.new
+    def initialize(mimes = [], symbols = [], symbols_set = Set.new)
+      @mimes = mimes.freeze
+      @symbols = symbols.freeze
+      @symbols_set = symbols_set.freeze
     end
 
     def each(&block)
       @mimes.each(&block)
     end
 
-    def <<(type)
-      @mimes << type
+    # Returns a new frozen Mimes that includes +type+.
+    def append(type)
       sym_type = type.to_sym
-      @symbols << sym_type
-      @symbols_set << sym_type
+      self.class.new(
+        @mimes + [type],
+        @symbols + [sym_type],
+        @symbols_set | [sym_type],
+      ).freeze
     end
 
-    def delete_if
-      @mimes.delete_if do |x|
-        if yield x
-          sym_type = x.to_sym
-          @symbols.delete(sym_type)
-          @symbols_set.delete(sym_type)
-          true
-        end
-      end
+    # Returns a new frozen Mimes with each entry for which the block
+    # returns truthy removed.
+    def reject_each(&block)
+      kept = @mimes.reject(&block)
+      kept_symbols = kept.map(&:to_sym)
+      self.class.new(kept, kept_symbols, Set.new(kept_symbols)).freeze
     end
 
-    def valid_symbols?(symbols) # :nodoc
+    def valid_symbols?(symbols) # :nodoc:
       symbols.all? { |s| @symbols_set.include?(s) }
     end
   end
 
-  SET              = Mimes.new
-  EXTENSION_LOOKUP = {}
-  LOOKUP           = {}
+  singleton_class.attr_accessor :set, :extension_lookup, :lookup
+  self.set              = Mimes.new.freeze
+  self.extension_lookup = {}.freeze
+  self.lookup           = {}.freeze
 
   class << self
     def [](type)
@@ -54,16 +62,16 @@ module Mime
     end
 
     def symbols
-      SET.symbols
+      Mime.set.symbols
     end
 
     def valid_symbols?(symbols) # :nodoc:
-      SET.valid_symbols?(symbols)
+      Mime.set.valid_symbols?(symbols)
     end
 
     def fetch(type, &block)
       return type if type.is_a?(Type)
-      EXTENSION_LOOKUP.fetch(type.to_s, &block)
+      Mime.extension_lookup.fetch(type.to_s, &block)
     end
   end
 
@@ -165,15 +173,15 @@ module Mime
       end
 
       def lookup(string)
-        return LOOKUP[string] if LOOKUP.key?(string)
+        return Mime.lookup[string] if Mime.lookup.key?(string)
 
         # fallback to the media-type without parameters if it was not found
         string = string.split(";", 2)[0]&.rstrip
-        LOOKUP[string] || Type.new(string)
+        Mime.lookup[string] || Type.new(string)
       end
 
       def lookup_by_extension(extension)
-        EXTENSION_LOOKUP[extension.to_s]
+        Mime.extension_lookup[extension.to_s]
       end
 
       # Registers an alias that's not used on MIME type lookup, but can be referenced
@@ -186,10 +194,10 @@ module Mime
       def register(string, symbol, mime_type_synonyms = [], extension_synonyms = [], skip_lookup = false)
         new_mime = Type.new(string, symbol, mime_type_synonyms)
 
-        SET << new_mime
+        Mime.set = Mime.set.append(new_mime).freeze
 
-        ([string] + mime_type_synonyms).each { |str| LOOKUP[str] = new_mime } unless skip_lookup
-        ([symbol] + extension_synonyms).each { |ext| EXTENSION_LOOKUP[ext.to_s] = new_mime }
+        ([string] + mime_type_synonyms).each { |str| Mime.lookup = Mime.lookup.merge(str => new_mime).freeze } unless skip_lookup
+        ([symbol] + extension_synonyms).each { |ext| Mime.extension_lookup = Mime.extension_lookup.merge({ ext.to_s => new_mime }).freeze }
 
         @register_callbacks.each do |callback|
           callback.call(new_mime)
@@ -234,7 +242,7 @@ module Mime
       # For an input of `'application'`, returns `[Mime[:html], Mime[:js], Mime[:xml],
       # Mime[:yaml], Mime[:atom], Mime[:json], Mime[:rss], Mime[:url_encoded_form]]`.
       def parse_data_with_trailing_star(type)
-        Mime::SET.select { |m| m.match?(type) }
+        Mime.set.select { |m| m.match?(type) }
       end
 
       # This method is opposite of register method.
@@ -245,9 +253,9 @@ module Mime
       def unregister(symbol)
         symbol = symbol.downcase
         if mime = Mime[symbol]
-          SET.delete_if { |v| v.eql?(mime) }
-          LOOKUP.delete_if { |_, v| v.eql?(mime) }
-          EXTENSION_LOOKUP.delete_if { |_, v| v.eql?(mime) }
+          Mime.set = Mime.set.reject_each { |v| v.eql?(mime) }
+          Mime.lookup = Mime.lookup.reject { |_, v| v.eql?(mime) }.freeze
+          Mime.extension_lookup = Mime.extension_lookup.reject { |_, v| v.eql?(mime) }.freeze
         end
       end
     end
