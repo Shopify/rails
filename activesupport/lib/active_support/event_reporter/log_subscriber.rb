@@ -6,10 +6,10 @@ module ActiveSupport
       include ColorizeLogging
 
       LEVEL_CHECKS = {
-        debug: -> (logger) { logger.debug? },
-        info: -> (logger) { logger.info? },
-        error: -> (logger) { logger.error? },
-      }
+        debug: shareable_proc { |logger| logger.debug? },
+        info: shareable_proc { |logger| logger.info? },
+        error: shareable_proc { |logger| logger.error? },
+      }.freeze
 
       class << self
         def event_log_level(method_name, level)
