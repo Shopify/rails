@@ -19,7 +19,7 @@ module ActionDispatch
           @regexp_states   = {}
           @string_states   = {}
           @accepting       = {}
-          @memos           = Hash.new { |h, k| h[k] = [] }
+          @memos           = {}
         end
 
         def add_accepting(state)
@@ -35,6 +35,7 @@ module ActionDispatch
         end
 
         def add_memo(idx, memo)
+          @memos[idx] ||= []
           @memos[idx] << memo
         end
 
