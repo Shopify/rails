@@ -494,6 +494,10 @@ module ActiveRecord
         false
       end
 
+      def permanent_lease? # :nodoc:
+        false
+      end
+
       # unprepared_statement yields to the block. The real adapter
       # temporarily disables prepared statements, but the proxy never
       # uses prepared statements, so just yield.
@@ -670,6 +674,18 @@ module ActiveRecord
     class RactorPoolProxy # :nodoc:
       INSTANCE = new.freeze
       def self.instance = INSTANCE
+
+      def permanent_lease? # :nodoc:
+        false
+      end
+
+      def active_connection
+        RactorConnectionProxy.instance
+      end
+
+      def lease_connection
+        RactorConnectionProxy.instance
+      end
 
       def with_connection(&block)
         yield RactorConnectionProxy.instance
