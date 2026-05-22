@@ -90,7 +90,7 @@ module ActiveRecord
         super
       end
 
-      TYPE_MAP = Type::TypeMap.new.tap { |m| initialize_type_map(m) }
+      TYPE_MAP = Type::TypeMap.new.tap { |m| initialize_type_map(m) }.freeze
 
       def supports_json?
         !mariadb? && database_version >= "5.7.8"

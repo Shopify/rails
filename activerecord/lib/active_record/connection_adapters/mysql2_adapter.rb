@@ -51,7 +51,7 @@ module ActiveRecord
           end
       end
 
-      TYPE_MAP = Type::TypeMap.new.tap { |m| initialize_type_map(m) }
+      TYPE_MAP = Type::TypeMap.new.tap { |m| initialize_type_map(m) }.freeze
 
       def initialize(...)
         super

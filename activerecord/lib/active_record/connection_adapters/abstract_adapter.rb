@@ -944,6 +944,10 @@ module ActiveRecord
 
       class << self
         def register_class_with_precision(mapping, key, klass, **kwargs) # :nodoc:
+          # Freeze the captured keyword args so the block stored in the
+          # TypeMap can be made shareable. kwargs is freshly allocated on
+          # every call, so freezing it doesn't affect the caller.
+          kwargs.freeze
           mapping.register_type(key) do |*args|
             precision = extract_precision(args.last)
             klass.new(precision: precision, **kwargs).freeze
@@ -1019,7 +1023,7 @@ module ActiveRecord
           end
       end
 
-      TYPE_MAP = Type::TypeMap.new.tap { |m| initialize_type_map(m) }
+      TYPE_MAP = Type::TypeMap.new.tap { |m| initialize_type_map(m) }.freeze
       EXTENDED_TYPE_MAPS = Concurrent::Map.new
 
       private
