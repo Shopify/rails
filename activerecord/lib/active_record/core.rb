@@ -131,7 +131,11 @@ module ActiveRecord
 
       def self.connection_handler
         ActiveSupport::IsolatedExecutionState[:active_record_connection_handler] ||
-          (Ractor.main? ? default_connection_handler : NullConnectionHandler)
+          if Ractor.main?
+            default_connection_handler
+          else
+            NullConnectionHandler
+          end
       end
 
       # Null object returned by connection_handler in non-main Ractors

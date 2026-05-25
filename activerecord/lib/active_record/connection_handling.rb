@@ -275,9 +275,6 @@ module ActiveRecord
     # The connection will remain leased for the entire duration of the request
     # or job, or until +#release_connection+ is called.
     def lease_connection
-      if !Ractor.main? && defined?(Ractor::Dispatch)
-        return RactorConnectionProxy.instance
-      end
       connection_pool.lease_connection
     end
 
@@ -318,11 +315,6 @@ module ActiveRecord
     # If #connection is called inside the block, the connection won't be checked back in
     # unless the +prevent_permanent_checkout+ argument is set to +true+.
     def with_connection(prevent_permanent_checkout: false, &block)
-      if !Ractor.main? && defined?(Ractor::Dispatch)
-        # Yield a proxy that dispatches each DB call to the main
-        # Ractor where the real connection pool lives.
-        return yield RactorConnectionProxy.instance
-      end
       connection_pool.with_connection(prevent_permanent_checkout: prevent_permanent_checkout, &block)
     end
 
@@ -687,7 +679,7 @@ module ActiveRecord
         RactorConnectionProxy.instance
       end
 
-      def with_connection(&block)
+      def with_connection(prevent_permanent_checkout: false, &block)
         yield RactorConnectionProxy.instance
       end
 
