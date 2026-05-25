@@ -166,6 +166,10 @@ module Rails
       # Save the connection handler (nilled during AR::Base.make_shareable!)
       saved_handler = ::ActiveRecord::Base.default_connection_handler
 
+      # Snapshot connection pool configs so non-main Ractors can
+      # create their own ConnectionHandler with real DB connections.
+      ::ActiveRecord::Base.snapshot_connection_configs_for_ractors!
+
       # NOTE: I18n MUTEX is nilled AFTER make_shareable! below. In
       # development, freeze() lazy-loads translations via
       # I18n.transliterate("test"), which calls into
@@ -285,6 +289,21 @@ module Rails
       # from non-main Ractors.
       if defined?(::ActiveRecord::Base)
         ::ActiveRecord::Base.configurations.make_shareable!
+      end
+
+      # Make module-level attr_accessors on ActiveRecord shareable
+      # so they can be read from non-main Ractors (e.g. query_transformers
+      # is accessed on every query via QueryIntent#preprocess_query).
+      if defined?(::ActiveRecord) && ::ActiveRecord.respond_to?(:query_transformers)
+        ::ActiveRecord.query_transformers.make_shareable!
+      end
+
+      # Make the adapter registry shareable so ConnectionAdapters.resolve
+      # works from non-main Ractors (called during establish_connection
+      # in build_ractor_local_handler).
+      if defined?(::ActiveRecord::ConnectionAdapters)
+        adapters = ::ActiveRecord::ConnectionAdapters.instance_variable_get(:@adapters)
+        adapters.make_shareable! unless adapters.shareable?
       end
 
       # Eagerly resolve all timezone objects and make them shareable.
