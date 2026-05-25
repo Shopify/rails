@@ -298,6 +298,12 @@ module Rails
         ::ActiveRecord.query_transformers.make_shareable!
       end
 
+      # Make schema_cache_ignored_tables shareable (accessed during
+      # uniqueness validations via SchemaCache#ignored_table?).
+      if defined?(::ActiveRecord) && ::ActiveRecord.respond_to?(:schema_cache_ignored_tables)
+        ::ActiveRecord.schema_cache_ignored_tables.make_shareable!
+      end
+
       # Make the adapter registry shareable so ConnectionAdapters.resolve
       # works from non-main Ractors (called during establish_connection
       # in build_ractor_local_handler).
