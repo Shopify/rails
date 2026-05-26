@@ -238,6 +238,7 @@ module ActiveRecord
         primary_key = options[:primary_key] || "id"
         role_type = options[:foreign_type] || "#{role}_type"
         role_id   = options[:foreign_key] || "#{role}_id"
+        role_type.freeze
 
         define_singleton_method "#{role}_types" do
           types.map(&:to_s)

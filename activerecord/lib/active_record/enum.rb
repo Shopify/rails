@@ -311,6 +311,7 @@ module ActiveRecord
             end
 
             if scopes
+              name.freeze
               # scope :active, -> { where(status: 0) }
               klass.send(:detect_enum_conflict!, name, value_method_name, true)
               klass.scope value_method_name, -> { where(name => value) }

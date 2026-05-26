@@ -170,18 +170,21 @@ module ActiveRecord
 
           extension = Module.new(&block) if block
 
+          Ractor.make_shareable(body)
           if body.respond_to?(:to_proc)
-            singleton_class.define_method(name) do |*args|
+            method_body = Ractor.shareable_proc do |*args|
               scope = all._exec_scope(*args, &body)
               scope = scope.extending(extension) if extension
               scope
             end
+            singleton_class.define_method(name, &method_body)
           else
-            singleton_class.define_method(name) do |*args|
+            method_body = Ractor.shareable_proc do |*args|
               scope = body.call(*args) || all
               scope = scope.extending(extension) if extension
               scope
             end
+            singleton_class.define_method(name, &method_body)
           end
           singleton_class.send(:ruby2_keywords, name)
 
