@@ -159,20 +159,29 @@ module ActiveRecord
         def define_non_cyclic_method(name, &block)
           return if method_defined?(name, false)
 
-          define_method(name) do |*args|
-            result = true; @_already_called ||= {}
-            # Loop prevention for validation of associations
-            unless @_already_called[name]
-              begin
-                @_already_called[name] = true
-                result = instance_eval(&block)
-              ensure
-                @_already_called[name] = false
+          instance_variable_set(:"@_ncm_block_#{name}", block)
+          class_eval <<~RUBY, __FILE__, __LINE__ + 1
+            def #{name}(*args)
+              result = true; @_already_called ||= {}
+              unless @_already_called[:#{name}]
+                begin
+                  @_already_called[:#{name}] = true
+                  # Walk up the class hierarchy to find the block (class
+                  # instance variables don't inherit to subclasses).
+                  klass = self.class
+                  block = nil
+                  while klass && block.nil?
+                    block = klass.instance_variable_get(:@_ncm_block_#{name})
+                    klass = klass.superclass
+                  end
+                  result = instance_eval(&block) if block
+                ensure
+                  @_already_called[:#{name}] = false
+                end
               end
+              result
             end
-
-            result
-          end
+          RUBY
         end
 
         # Adds validation and save callbacks for the association as specified by
