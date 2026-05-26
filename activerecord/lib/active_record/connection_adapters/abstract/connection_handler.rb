@@ -76,6 +76,7 @@ module ActiveRecord
       def initialize
         # These caches are keyed by pool_config.connection_name (PoolConfig#connection_name).
         @connection_name_to_pool_manager = Concurrent::Map.new(initial_capacity: 2)
+        @default_schema_context_cache = Concurrent::Map.new
       end
 
       def prevent_writes # :nodoc:
@@ -126,7 +127,7 @@ module ActiveRecord
         # configuration.
         existing_pool_config = pool_manager.get_pool_config(role, shard)
 
-        if !clobber && existing_pool_config && existing_pool_config.db_config == db_config
+        pool = if !clobber && existing_pool_config && existing_pool_config.db_config == db_config
           # Update the pool_config's connection class if it differs. This is used
           # for ensuring that ActiveRecord::Base and the primary_abstract_class use
           # the same pool. Without this granular swapping will not work correctly.
@@ -150,6 +151,9 @@ module ActiveRecord
             pool_config.pool
           end
         end
+
+        clear_default_schema_context_cache
+        pool
       end
 
       # Returns true if there are any active connections among the connection
@@ -202,7 +206,20 @@ module ActiveRecord
 
       def remove_connection_pool(connection_name, role: ActiveRecord::Base.current_role, shard: ActiveRecord::Base.current_shard)
         if pool_manager = get_pool_manager(connection_name)
-          disconnect_pool_from_pool_manager(pool_manager, role, shard)
+          db_config = disconnect_pool_from_pool_manager(pool_manager, role, shard)
+          clear_default_schema_context_cache if db_config
+          db_config
+        end
+      end
+
+      def default_schema_context_for(connection_class) # :nodoc:
+        @default_schema_context_cache.compute_if_absent(connection_class) do
+          retrieve_connection_pool(
+            connection_class.connection_specification_name,
+            role: connection_class.default_role,
+            shard: connection_class.default_shard,
+            strict: true
+          ).db_config.schema_context
         end
       end
 
@@ -236,6 +253,10 @@ module ActiveRecord
 
       private
         attr_reader :connection_name_to_pool_manager
+
+        def clear_default_schema_context_cache
+          @default_schema_context_cache.clear
+        end
 
         # Returns the pool manager for a connection name / identifier.
         def get_pool_manager(connection_name)

@@ -208,7 +208,7 @@ module ActiveRecord
             connection_class.connection_db_config.schema_context
           end
         else
-          connection_class.connection_db_config.schema_context
+          connection_class.connection_handler.default_schema_context_for(connection_class)
         end
       rescue ConnectionNotDefined
         "default"
