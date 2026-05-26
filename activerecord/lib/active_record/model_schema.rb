@@ -201,7 +201,15 @@ module ActiveRecord
 
     module ClassMethods
       def current_schema_context # :nodoc:
-        connection_db_config.schema_context
+        connection_class = connection_class_for_self
+
+        if frame = ActiveSupport::IsolatedExecutionState[:active_record_connected_to_stack]&.last
+          frame[:schema_context_cache].compute_if_absent(connection_class) do
+            connection_class.connection_db_config.schema_context
+          end
+        else
+          connection_class.connection_db_config.schema_context
+        end
       rescue ConnectionNotDefined
         "default"
       end

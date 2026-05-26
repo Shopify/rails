@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "concurrent/map"
+
 module ActiveRecord
   # = Active Record Connection Handling
   module ConnectionHandling
@@ -417,6 +419,7 @@ module ActiveRecord
           raise ShardSwapProhibitedError, "cannot swap `shard` while shard swapping is prohibited."
         end
 
+        entry[:schema_context_cache] = Concurrent::Map.new
         connected_to_stack << entry
       end
   end
