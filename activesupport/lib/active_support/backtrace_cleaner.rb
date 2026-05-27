@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "active_support/core_ext/kernel/ractor_shareability"
+
 module ActiveSupport
   # = Backtrace Cleaner
   #
@@ -190,21 +192,22 @@ module ActiveSupport
         gems_paths = (Gem.path | [Gem.default_dir]).map { |p| Regexp.escape(p) }
         return if gems_paths.empty?
 
-        gems_regexp = %r{\A(#{gems_paths.join('|')})/(bundler/)?gems/([^/]+)-([\w.]+)/(.*)}
-        gems_result = '\3 (\4) \5'
-        add_filter { |line| line.sub(gems_regexp, gems_result) }
+        gems_regexp = ractor_make_shareable(%r{\A(#{gems_paths.join('|')})/(bundler/)?gems/([^/]+)-([\w.]+)/(.*)})
+        gems_result = ractor_make_shareable('\\3 (\\4) \\5')
+        add_filter(&ractor_shareable_proc { |line| line.sub(gems_regexp, gems_result) })
       end
 
       def add_core_silencer
-        add_silencer { |line| line.include?("<internal:") }
+        add_silencer(&ractor_shareable_proc { |line| line.include?("<internal:") })
       end
 
       def add_gem_silencer
-        add_silencer { |line| FORMATTED_GEMS_PATTERN.match?(line) }
+        add_silencer(&ractor_shareable_proc { |line| FORMATTED_GEMS_PATTERN.match?(line) })
       end
 
       def add_stdlib_silencer
-        add_silencer { |line| line.start_with?(RbConfig::CONFIG["rubylibdir"]) }
+        rubylibdir = ractor_make_shareable(RbConfig::CONFIG["rubylibdir"].dup)
+        add_silencer(&ractor_shareable_proc { |line| line.start_with?(rubylibdir) })
       end
 
       def filter_backtrace(backtrace)

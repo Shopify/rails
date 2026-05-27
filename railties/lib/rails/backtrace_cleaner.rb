@@ -9,23 +9,24 @@ module Rails
 
     def initialize
       super
-      add_filter do |line|
+      root = ractor_make_shareable(Rails.root && "#{Rails.root}/")
+      add_filter(&ractor_shareable_proc do |line|
         # We may be called before Rails.root is assigned.
         # When that happens we fallback to not truncating.
-        @root ||= Rails.root && "#{Rails.root}/"
-        @root && line.start_with?(@root) ? line.from(@root.size) : line
-      end
-      add_filter do |line|
+        current_root = root || (Rails.root && "#{Rails.root}/")
+        current_root && line.start_with?(current_root) ? line.from(current_root.size) : line
+      end)
+      add_filter(&ractor_shareable_proc do |line|
         if RENDER_TEMPLATE_PATTERN.match?(line)
           line.sub(RENDER_TEMPLATE_PATTERN, "")
         else
           line
         end
-      end
+      end)
 
-      add_silencer do |line|
+      add_silencer(&ractor_shareable_proc do |line|
         line.start_with?(File::SEPARATOR, "vendor/", "bin/")
-      end
+      end)
     end
 
     def clean(backtrace, kind = :silent)
