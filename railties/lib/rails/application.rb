@@ -174,6 +174,7 @@ module Rails
         progname: old_logger.progname || "Rails",
         )
       Rails.logger = ractor_logger
+      config.logger = ractor_logger if config.respond_to?(:logger=)
       @app_env_config["action_dispatch.logger"] = ractor_logger
       @ractor_logger_actor = logger_actor
       at_exit { logger_actor.shutdown rescue nil }
