@@ -64,7 +64,30 @@ module ActiveSupport
 
     # Returns a derived key suitable for use.
     def generate_key(*args)
-      @cache_keys[args.join("|")] ||= @key_generator.generate_key(*args)
+      cache_key = args.join("|")
+
+      if frozen?
+        @cache_keys.fetch(cache_key) do
+          ractor_local_cache[cache_key] ||= @key_generator.generate_key(*args)
+        end
+      else
+        @cache_keys[cache_key] ||= @key_generator.generate_key(*args)
+      end
     end
+
+    def freeze
+      @cache_keys = @cache_keys.each_pair.to_h.freeze
+      super
+    end
+
+    private
+      def ractor_local_cache
+        if defined?(Ractor)
+          caches = Ractor.current[:active_support_caching_key_generator_cache] ||= {}
+          caches[object_id] ||= {}
+        else
+          @cache_keys
+        end
+      end
   end
 end
