@@ -66,11 +66,12 @@ module ActionCable
 
     initializer "action_cable.routes" do
       config.after_initialize do |app|
-        config = app.config
-        unless config.action_cable.mount_path.nil?
-          app.routes.prepend do
-            mount ActionCable.server => config.action_cable.mount_path, internal: true, anchor: true
-          end
+        configured_mount_path = app.config.action_cable.mount_path
+        unless configured_mount_path.nil?
+          shareable_mount_path = ractor_make_shareable(configured_mount_path)
+          app.routes.prepend(&ractor_shareable_proc do
+            mount ActionCable.server => shareable_mount_path, internal: true, anchor: true
+          end)
         end
       end
     end
