@@ -56,8 +56,8 @@ module ActionCable
           self.cable = app.config_for(config_path).to_h.with_indifferent_access
         end
 
-        previous_connection_class = connection_class
-        self.connection_class = -> { "ApplicationCable::Connection".safe_constantize || previous_connection_class.call }
+        previous_connection_class = ractor_make_shareable(connection_class)
+        self.connection_class = ractor_shareable_proc { "ApplicationCable::Connection".safe_constantize || previous_connection_class.call }
         self.filter_parameters += app.config.filter_parameters
 
         options.each { |k, v| send("#{k}=", v) }
