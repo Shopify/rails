@@ -3,6 +3,7 @@
 # :markup: markdown
 
 require "monitor"
+require "active_support/concurrency/null_lock"
 
 module ActionCable
   module Server
@@ -32,6 +33,11 @@ module ActionCable
         @config = config
         @mutex = Monitor.new
         @remote_connections = @event_loop = @worker_pool = @pubsub = nil
+      end
+
+      def freeze
+        @mutex = ActiveSupport::Concurrency::NullLock
+        super
       end
 
       # Called by Rack to set up the server.
