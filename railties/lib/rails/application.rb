@@ -108,6 +108,20 @@ module Rails
     INITIAL_VARIABLES = [:config, :railties, :routes_reloader, :reloaders,
                          :routes, :helpers, :app_env_config].freeze # :nodoc:
 
+    class MessageVerifierSecretGenerator # :nodoc:
+      def initialize(application)
+        @application = application
+      end
+
+      def call(salt, secret_key_base: @application.secret_key_base)
+        @application.key_generator(secret_key_base).generate_key(salt)
+      end
+
+      def parameters
+        method(:call).parameters
+      end
+    end
+
     def initialize(initial_variable_values = {}, &block)
       super()
       @initialized       = false
@@ -224,9 +238,7 @@ module Rails
     #
     def message_verifiers
       @message_verifiers ||=
-        ActiveSupport::MessageVerifiers.new do |salt, secret_key_base: self.secret_key_base|
-          key_generator(secret_key_base).generate_key(salt)
-        end.rotate_defaults
+        ActiveSupport::MessageVerifiers.new(MessageVerifierSecretGenerator.new(self)).rotate_defaults
     end
 
     # Returns a message verifier object.
