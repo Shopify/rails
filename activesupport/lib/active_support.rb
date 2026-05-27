@@ -30,7 +30,6 @@ require "active_support/deprecator"
 require "active_support/logger"
 require "active_support/broadcast_logger"
 require "active_support/lazy_load_hooks"
-require "active_support/concurrent_map_freezable"
 
 # :include: ../README.rdoc
 module ActiveSupport
