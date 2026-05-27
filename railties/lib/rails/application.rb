@@ -134,6 +134,15 @@ module Rails
       @block = block
     end
 
+    def ractorize!
+      eager_load!
+
+      env_config
+      routes
+
+      Ractor.make_shareable(self)
+    end
+
     # Returns true if the application is initialized.
     def initialized?
       @initialized
