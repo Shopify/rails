@@ -522,6 +522,12 @@ module Rails
       }
     end
 
+    def freeze
+      app
+      @app_build_lock = nil
+      super
+    end
+
     # Returns the endpoint for this engine. If none is registered,
     # defaults to an ActionDispatch::Routing::RouteSet.
     def endpoint
