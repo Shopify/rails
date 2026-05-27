@@ -178,6 +178,15 @@ module Rails
       @ractor_logger_actor = logger_actor
       at_exit { logger_actor.shutdown rescue nil }
 
+      ::ActiveRecord::Base.logger = ractor_logger if defined?(::ActiveRecord::Base)
+      ::ActionController::Base.logger = ractor_logger if defined?(::ActionController::Base)
+      ::ActionMailer::Base.logger = ractor_logger if defined?(::ActionMailer::Base)
+      ::ActiveJob::Base.logger = ractor_logger if defined?(::ActiveJob::Base)
+      ::ActionView::Base.logger = ractor_logger if defined?(::ActionView::Base)
+      ::ActionMailbox.logger = ractor_logger if defined?(::ActionMailbox) && ::ActionMailbox.respond_to?(:logger=)
+      ::ActiveStorage.logger = ractor_logger if defined?(::ActiveStorage) && ::ActiveStorage.respond_to?(:logger=)
+      ::ActionCable.server.config.logger = ractor_logger if defined?(::ActionCable) && ::ActionCable.respond_to?(:server) && ::ActionCable.server.respond_to?(:config)
+      ::Rails.error.logger = ractor_logger if ::Rails.respond_to?(:error) && ::Rails.error.respond_to?(:logger=)
 
       Ractor.make_shareable(self)
     end
