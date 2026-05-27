@@ -60,6 +60,7 @@ module ActionDispatch
       @compressible_content_types = compressible_content_types
 
       @file_server = ::Rack::Files.new(@root, headers)
+      @file_server.remove_instance_variable(:@head) if @file_server.instance_variable_defined?(:@head)
     end
 
     def call(env)
@@ -81,7 +82,7 @@ module ActionDispatch
         original, request.path_info =
           request.path_info, ::Rack::Utils.escape_path(filepath).b
 
-        @file_server.call(request.env).tap do |status, headers, body|
+        file_server_call(request.env).tap do |status, headers, body|
           # Omit content-encoding/type/etc headers for 304 Not Modified
           if status != 304
             headers.update(content_headers)
@@ -89,6 +90,10 @@ module ActionDispatch
         end
       ensure
         request.path_info = original
+      end
+
+      def file_server_call(env)
+        ::Rack::Head.new(->(head_env) { @file_server.get(head_env) }).call(env)
       end
 
       # Match a URI path to a static file to be served.
