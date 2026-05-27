@@ -468,6 +468,10 @@ module Rails
         end
       end
 
+      # Make serializers aware of Message Pack early to set avilability state
+      ::ActiveSupport::Messages::SerializerWithFallback[:message_pack].send(:available?)
+      ::ActiveSupport::Messages::SerializerWithFallback[:message_pack_allow_marshal].send(:available?)
+
       make_shareable!
 
       # I18n MUTEX: replace with nil after freeze. The backend is now
