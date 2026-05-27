@@ -331,6 +331,91 @@ module ActiveRecord
       connection_pool.with_connection(prevent_permanent_checkout: prevent_permanent_checkout, &block)
     end
 
+    # Proxy for the Arel visitor in non-main Ractors. The real visitor
+    # has a dispatch hash with a default Proc that can't cross Ractor
+    # boundaries. This proxy dispatches compile calls to the main Ractor.
+    class RactorVisitorProxy # :nodoc:
+      INSTANCE = new.freeze
+      def self.instance = INSTANCE
+
+      def compile(node, collector = nil)
+        node_data = Marshal.dump(node).freeze
+        if collector
+          collector_retryable = collector.retryable if collector.respond_to?(:retryable)
+          collector_preparable = collector.preparable if collector.respond_to?(:preparable)
+          result, preparable, retryable = Ractor::Dispatch.main.run do
+            n = Marshal.load(node_data)
+            ActiveRecord::Base.with_connection do |c|
+              col = c.send(:collector)
+              col.retryable = collector_retryable if col.respond_to?(:retryable=) && !collector_retryable.nil?
+              col.preparable = collector_preparable if col.respond_to?(:preparable=) && !collector_preparable.nil?
+              [c.visitor.compile(n, col), (col.preparable if col.respond_to?(:preparable)), (col.retryable if col.respond_to?(:retryable))]
+            end
+          end
+          collector.preparable = preparable if collector.respond_to?(:preparable=) && !preparable.nil?
+          collector.retryable = retryable if collector.respond_to?(:retryable=) && !retryable.nil?
+          result
+        else
+          Ractor::Dispatch.main.run do
+            n = Marshal.load(node_data)
+            ActiveRecord::Base.with_connection { |c| c.visitor.compile(n) }.freeze
+          end
+        end
+      end
+
+      def accept(node, collector = nil)
+        node_data = Marshal.dump(node).freeze
+        # The collector (Arel::Collectors::SQLString) can't cross the
+        # Ractor boundary. Create a fresh one in the main Ractor.
+        Ractor::Dispatch.main.run do
+          n = Marshal.load(node_data)
+          ActiveRecord::Base.with_connection do |c|
+            col = Arel::Collectors::SQLString.new
+            c.visitor.accept(n, col)
+          end
+        end
+      end
+    end
+
+    # Proxy for SchemaCache in non-main Ractors. The real SchemaCache
+    # includes MonitorMixin and can't cross the Ractor boundary.
+    class RactorSchemaCacheProxy # :nodoc:
+      INSTANCE = new.freeze
+      def self.instance = INSTANCE
+
+      def indexes(table_name)
+        tn = table_name.freeze
+        Ractor::Dispatch.main.run {
+          ActiveRecord::Base.connection_pool.schema_cache.indexes(tn)
+        }
+      end
+
+      def columns(table_name)
+        tn = table_name.freeze
+        Ractor::Dispatch.main.run {
+          ActiveRecord::Base.connection_pool.schema_cache.columns(tn)
+        }
+      end
+
+      def columns_hash(table_name)
+        tn = table_name.freeze
+        Ractor::Dispatch.main.run {
+          ActiveRecord::Base.connection_pool.schema_cache.columns_hash(tn)
+        }
+      end
+
+      def method_missing(name, *args, **kwargs)
+        frozen_args = args.map { |a| a.frozen? ? a : (a.dup.freeze rescue a) }.freeze
+        Ractor::Dispatch.main.run {
+          ActiveRecord::Base.connection_pool.schema_cache.send(name, *frozen_args)
+        }
+      end
+
+      def respond_to_missing?(name, include_private = false)
+        true
+      end
+    end
+
     attr_writer :connection_specification_name
 
     # Returns the connection specification name from the current class or its parent.

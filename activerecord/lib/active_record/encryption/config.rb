@@ -33,6 +33,8 @@ module ActiveRecord
       end
 
       %w(key_derivation_salt primary_key deterministic_key).each do |key|
+        ivar = :"@#{key}"
+
         silence_redefinition_of_method "has_#{key}?"
         define_method("has_#{key}?") do
           instance_variable_get(:"@#{key}").presence

@@ -132,7 +132,13 @@ module ActiveRecord
       self.filter_attributes = []
 
       def self.connection_handler
-        ActiveSupport::IsolatedExecutionState[:active_record_connection_handler] || default_connection_handler
+        ActiveSupport::IsolatedExecutionState[:active_record_connection_handler] ||
+          if Ractor.main?
+            default_connection_handler
+          else
+            ActiveSupport::IsolatedExecutionState[:active_record_connection_handler] =
+              ConnectionAdapters::RactorConnectionHandler.instance
+          end
       end
 
       def self.connection_handler=(handler)

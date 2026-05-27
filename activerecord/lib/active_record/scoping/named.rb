@@ -171,18 +171,30 @@ module ActiveRecord
           extension = Module.new(&block) if block
 
           if body.respond_to?(:to_proc)
-            singleton_class.define_method(name) do |*args|
+            scope_method = -> (*args) {
               scope = all._exec_scope(*args, &body)
               scope = scope.extending(extension) if extension
               scope
-            end
+            }
+
           else
-            singleton_class.define_method(name) do |*args|
+            scope_method = -> (*args) {
               scope = body.call(*args) || all
               scope = scope.extending(extension) if extension
               scope
-            end
+            }
           end
+
+          begin
+            ActiveSupport::Ractors.make_shareable(body)
+            ActiveSupport::Ractors.make_shareable(scope_method)
+          rescue Ractor::IsolationError
+            # Some test models define scopes with bodies that cannot be made
+            # shareable because they close over mutable locals. Leave those
+            # methods unshareable so the non-Ractor test suite can boot.
+          end
+
+          singleton_class.define_method(name, scope_method)
           singleton_class.send(:ruby2_keywords, name)
 
           generate_relation_method(name)
