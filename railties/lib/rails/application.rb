@@ -122,6 +122,16 @@ module Rails
       end
     end
 
+    class ConstantSameSiteProtection # :nodoc:
+      def initialize(protection)
+        @protection = ractor_make_shareable(protection)
+      end
+
+      def call(_request)
+        @protection
+      end
+    end
+
     def initialize(initial_variable_values = {}, &block)
       super()
       @initialized       = false
@@ -792,7 +802,7 @@ module Rails
       end
 
       def coerce_same_site_protection(protection)
-        protection.respond_to?(:call) ? protection : proc { protection }
+        protection.respond_to?(:call) ? protection : ConstantSameSiteProtection.new(protection).freeze
       end
 
       def filter_parameters
