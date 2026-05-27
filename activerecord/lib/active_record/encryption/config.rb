@@ -33,7 +33,6 @@ module ActiveRecord
       end
 
       %w(key_derivation_salt primary_key deterministic_key).each do |key|
-        k = key.to_sym
         ivar = :"@#{key}"
 
         silence_redefinition_of_method "has_#{key}?"

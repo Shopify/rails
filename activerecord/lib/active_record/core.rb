@@ -135,83 +135,8 @@ module ActiveRecord
             default_connection_handler
           else
             ActiveSupport::IsolatedExecutionState[:active_record_connection_handler] =
-              build_ractor_local_handler
+              ConnectionAdapters::RactorConnectionHandler.instance
           end
-      end
-
-      # Build a Ractor-local ConnectionHandler with real database
-      # connections. Uses the connection pool configs snapshotted
-      # during ractorize! (stored in @@ractor_connection_configs).
-      # Each non-main Ractor gets its own handler with its own
-      # connection pool — no proxies, no Ractor::Dispatch needed.
-      def self.build_ractor_local_handler # :nodoc:
-        handler = ConnectionAdapters::ConnectionHandler.new
-        configs = defined?(@@ractor_connection_configs) ? @@ractor_connection_configs : []
-        configs.each do |spec|
-          handler.establish_connection(
-            spec[:db_config],
-            owner_name: spec[:owner_name],
-            role: spec[:role],
-            shard: spec[:shard],
-          )
-        end
-        handler
-      end
-
-      # Snapshot connection pool configs for Ractor-local handler
-      # creation. Called during ractorize! while still in the main
-      # Ractor.
-      #
-      # For Ractor-unsafe adapters (e.g. sqlite3), the config is
-      # remapped to a dispatch adapter (e.g. ractor_sqlite3) that
-      # forwards queries to the main Ractor's connection pool.
-      # Ractor-safe adapters get their config passed through as-is
-      # so each Ractor opens its own real connection.
-      def self.snapshot_connection_configs_for_ractors! # :nodoc:
-        specs = []
-        default_connection_handler.each_connection_pool do |pool|
-          pc = pool.pool_config
-          db_config = ractor_db_config_for(pc.db_config)
-          specs << {
-            db_config: db_config,
-            owner_name: pc.connection_descriptor.name.to_s,
-            role: pc.role,
-            shard: pc.shard,
-          }
-        end
-        Ractor.make_shareable(specs)
-        @@ractor_connection_configs = specs
-      end
-
-      # Map a db_config to a Ractor-safe variant. Adapters whose C
-      # extensions are not Ractor-safe (sqlite3) get remapped to a
-      # dispatch adapter that serializes queries to the main Ractor.
-      # Ractor-safe adapters (future pg, mysql2) pass through as-is.
-      RACTOR_ADAPTER_MAP = {
-        "sqlite3" => "ractor_sqlite3",
-      }.freeze
-
-      def self.ractor_db_config_for(original) # :nodoc:
-        adapter = original.adapter
-        ractor_adapter = RACTOR_ADAPTER_MAP[adapter]
-        return original unless ractor_adapter
-
-        # Build a new HashConfig for the dispatch adapter, pointing
-        # back at the original config name as the delegate.
-        ractor_config = {
-          adapter: ractor_adapter,
-          delegate_adapter: original.name,
-        }.freeze
-
-        config = DatabaseConfigurations::HashConfig.new(
-          original.env_name,
-          "ractor_#{original.name}",
-          ractor_config,
-        )
-        # Eagerly resolve adapter_class before freezing so the
-        # memoized @adapter_class ivar is set.
-        config.adapter_class
-        config
       end
 
       def self.connection_handler=(handler)

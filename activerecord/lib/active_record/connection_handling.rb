@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "active_support/core_ext/object/shareable.rb"
+
 module ActiveRecord
   # = Active Record Connection Handling
   module ConnectionHandling
@@ -318,281 +320,6 @@ module ActiveRecord
       connection_pool.with_connection(prevent_permanent_checkout: prevent_permanent_checkout, &block)
     end
 
-    # Lightweight proxy that forwards database operations to the main
-    # Ractor. Used by with_connection in non-main Ractors so the
-    # application code can use the standard AR API unchanged.
-    class RactorConnectionProxy # :nodoc:
-      INSTANCE = new.freeze
-
-      def self.instance
-        INSTANCE
-      end
-
-      private
-
-      # Sanitize an ActiveRecord exception so it can cross Ractor
-      # boundaries. Database exceptions (StatementInvalid and its
-      # subclasses) carry a @connection_pool reference which contains
-      # a Thread::Monitor via MonitorMixin. Thread::Monitor objects
-      # can't be copied across Ractors, causing Ractor::Dispatch to
-      # hang silently when the executor thread dies trying to send
-      # the error back.
-      #
-      # Fix: nil out @connection_pool on the exception before
-      # re-raising. This preserves the original exception class
-      # (InvalidForeignKey, RecordNotUnique, etc.) so downstream
-      # rescue clauses and rescue_responses continue to work.
-      def self.sanitize_db_error!(e)
-        if e.respond_to?(:connection_pool)
-          e.instance_variable_set(:@connection_pool, nil)
-        end
-        raise e
-      end
-
-      public
-
-      def exec_query(sql, name = "SQL", binds = [], prepare: false)
-        frozen_sql = sql.frozen? ? sql : sql.dup.freeze
-        frozen_name = name.frozen? ? name : name.dup.freeze
-        frozen_binds = binds.freeze
-        Ractor::Dispatch.main.run do
-          begin
-            ActiveRecord::Base.with_connection { |c| c.exec_query(frozen_sql, frozen_name, frozen_binds, prepare: prepare) }
-          rescue => e
-            RactorConnectionProxy.sanitize_db_error!(e)
-          end
-        end
-      end
-
-      def execute(sql, name = nil, **kwargs)
-        frozen_sql = sql.frozen? ? sql : sql.dup.freeze
-        frozen_name = (name || "SQL").freeze
-        Ractor::Dispatch.main.run do
-          begin
-            ActiveRecord::Base.with_connection { |c| c.execute(frozen_sql, frozen_name) }
-          rescue => e
-            RactorConnectionProxy.sanitize_db_error!(e)
-          end
-        end
-      end
-
-      def select_all(arel, name = nil, binds = [], preparable: nil, async: false, **)
-        if arel.respond_to?(:to_sql)
-          # Arel objects can't cross the Ractor boundary. Freeze the
-          # AST and dispatch SQL compilation + execution together.
-          frozen_ast = arel.ast.make_shareable!
-          # Find the engine (model class) from the Arel's table
-          arel_table = if arel.respond_to?(:froms)
-            arel.froms&.first
-          end
-          sql_engine = arel_table.respond_to?(:klass) ? arel_table.klass : ActiveRecord::Base
-          query_name = (name || "SQL").freeze
-          frozen_binds = binds.freeze
-          _ractor_select_all_arel(sql_engine, frozen_ast, query_name, frozen_binds)
-        else
-          _ractor_select_all_sql(
-            arel.frozen? ? arel : arel.dup.freeze,
-            (name || "SQL").freeze,
-            binds.freeze
-          )
-        end
-      end
-
-      def _ractor_select_all_arel(sql_engine, frozen_ast, query_name, query_binds)
-        # Use Marshal to serialize the frozen AST since make_shareable
-        # prevents modification during SQL compilation.
-        ast_data = Marshal.dump(frozen_ast).freeze
-        Ractor::Dispatch.main.run do
-          begin
-            ast = Marshal.load(ast_data)
-            conn = sql_engine.lease_connection
-            compiled = conn.to_sql_and_binds(ast, query_binds)
-            conn.select_all(compiled[0], query_name, compiled[1])
-          rescue => e
-            RactorConnectionProxy.sanitize_db_error!(e)
-          end
-        end
-      end
-
-      def _ractor_select_all_sql(sql, query_name, query_binds)
-        Ractor::Dispatch.main.run do
-          begin
-            ActiveRecord::Base.with_connection { |c| c.select_all(sql, query_name, query_binds) }
-          rescue => e
-            RactorConnectionProxy.sanitize_db_error!(e)
-          end
-        end
-      end
-
-      def insert(arel, name = nil, pk = nil, id_value = nil, sequence_name = nil, binds = [], returning: nil)
-        if arel.respond_to?(:to_sql)
-          _ractor_insert_arel(arel, name)
-        else
-          _ractor_insert_sql(arel, name)
-        end
-      end
-
-      def _ractor_insert_arel(arel, name)
-        ast = arel.instance_variable_get(:@ast)
-        table = ast&.relation&.name rescue nil
-        cols = ast&.columns&.map(&:name) || []
-        exprs = ast&.values&.instance_variable_get(:@expr)&.first || []
-
-        placeholders = cols.map { "?" }.join(", ")
-        sql = "INSERT INTO \"#{table}\" (\"#{cols.join('", "')}\") VALUES (#{placeholders})".freeze
-        # Extract raw values -- QueryAttribute objects can't cross the
-        # Ractor boundary. Rebuild them in the main Ractor.
-        raw_vals = exprs.map { |attr|
-          val = attr.respond_to?(:value_for_database) ? attr.value_for_database : attr
-          val.shareable? ? val : (val.make_shareable! rescue val.freeze rescue val)
-        }.make_shareable!
-        insert_name = (name || "SQL").freeze
-        Ractor::Dispatch.main.run do
-          begin
-            binds = raw_vals.map { |v| ActiveRecord::Relation::QueryAttribute.new("", v, ActiveRecord::Type::Value.new) }
-            id = ActiveRecord::Base.with_connection do |c|
-              result = c.exec_insert(sql, insert_name, binds)
-              result.rows.dig(0, 0)
-            end
-            [id.is_a?(Integer) ? id : id.to_i]
-          rescue => e
-            RactorConnectionProxy.sanitize_db_error!(e)
-          end
-        end
-      end
-
-      def _ractor_insert_sql(arel, name)
-        sql = arel.frozen? ? arel : arel.dup.freeze
-        insert_name = (name || "SQL").freeze
-        Ractor::Dispatch.main.run do
-          begin
-            ActiveRecord::Base.with_connection { |c| c.insert(sql, insert_name) }
-          rescue => e
-            RactorConnectionProxy.sanitize_db_error!(e)
-          end
-        end
-      end
-
-      # Return a pool proxy for transaction isolation level calls
-      def pool
-        RactorPoolProxy.instance
-      end
-
-      def transaction_open?
-        false
-      end
-
-      def prepared_statements
-        false
-      end
-
-      def permanent_lease? # :nodoc:
-        false
-      end
-
-      # unprepared_statement yields to the block. The real adapter
-      # temporarily disables prepared statements, but the proxy never
-      # uses prepared statements, so just yield.
-      def unprepared_statement
-        yield
-      end
-
-      def cacheable_query(klass, arel)
-        # Without prepared statements, build a simple query
-        [arel, []]
-      end
-
-      def to_sql(arel, binds = [])
-        # Arel objects contain the visitor dispatch hash which has a
-        # Proc that can't cross Ractor boundaries. Marshal the Arel
-        # AST to a frozen string, then deserialize in the main Ractor.
-        arel_data = Marshal.dump(arel).freeze
-        binds_data = binds.empty? ? nil : Marshal.dump(binds).freeze
-        Ractor::Dispatch.main.run {
-          a = Marshal.load(arel_data)
-          b = binds_data ? Marshal.load(binds_data) : []
-          ActiveRecord::Base.with_connection { |c| c.to_sql(a, b) }.freeze
-        }
-      end
-
-      def update(arel, name = nil, binds = [])
-        sql = arel.respond_to?(:to_sql) ? arel.to_sql.freeze : (arel.frozen? ? arel : arel.dup.freeze)
-        write_name = (name || "SQL").freeze
-        Ractor::Dispatch.main.run do
-          begin
-            ActiveRecord::Base.with_connection { |c| c.update(sql, write_name) }
-          rescue => e
-            RactorConnectionProxy.sanitize_db_error!(e)
-          end
-        end
-      end
-
-      def delete(arel, name = nil, binds = [])
-        sql = arel.respond_to?(:to_sql) ? arel.to_sql.freeze : (arel.frozen? ? arel : arel.dup.freeze)
-        write_name = (name || "SQL").freeze
-        Ractor::Dispatch.main.run do
-          begin
-            ActiveRecord::Base.with_connection { |c| c.delete(sql, write_name) }
-          rescue => e
-            RactorConnectionProxy.sanitize_db_error!(e)
-          end
-        end
-      end
-
-      # Return a lightweight proxy for the visitor that dispatches
-      # compile calls to the main Ractor. The real visitor object
-      # can't cross Ractor boundaries (it has a dispatch hash with
-      # a default Proc).
-      def visitor
-        RactorVisitorProxy.instance
-      end
-
-      def transaction(**options, &block)
-        return unless block
-        yield
-      rescue ActiveRecord::Rollback
-        # Swallow Rollback like a real transaction does.
-      end
-
-      # Transaction record tracking -- no-op in Ractor context
-      def add_transaction_record(*)
-      end
-
-      def current_transaction
-        ActiveRecord::ConnectionAdapters::NullTransaction.new
-      end
-
-      def respond_to_missing?(name, include_private = false)
-        true
-      end
-
-      def method_missing(name, *args, **kwargs, &block)
-        # If the first arg is an Arel node, it can't cross Ractor
-        # boundaries (visitor dispatch Proc). Marshal it.
-        if args.first.respond_to?(:ast)
-          arel_data = Marshal.dump(args.first).freeze
-          rest = args[1..].map { |a| a.frozen? ? a : (a.dup.freeze rescue a) }.freeze
-          Ractor::Dispatch.main.run do
-            begin
-              arel = Marshal.load(arel_data)
-              ActiveRecord::Base.with_connection { |c| c.send(name, arel, *rest) }
-            rescue => e
-              RactorConnectionProxy.sanitize_db_error!(e)
-            end
-          end
-        else
-          frozen_args = args.map { |a| a.frozen? ? a : (a.dup.freeze rescue a) }.freeze
-          Ractor::Dispatch.main.run do
-            begin
-              ActiveRecord::Base.with_connection { |c| c.send(name, *frozen_args) }
-            rescue => e
-              RactorConnectionProxy.sanitize_db_error!(e)
-            end
-          end
-        end
-      end
-    end
-
     # Proxy for the Arel visitor in non-main Ractors. The real visitor
     # has a dispatch hash with a default Proc that can't cross Ractor
     # boundaries. This proxy dispatches compile calls to the main Ractor.
@@ -600,11 +327,28 @@ module ActiveRecord
       INSTANCE = new.freeze
       def self.instance = INSTANCE
 
-      def compile(node)
+      def compile(node, collector = nil)
         node_data = Marshal.dump(node).freeze
-        Ractor::Dispatch.main.run do
-          n = Marshal.load(node_data)
-          ActiveRecord::Base.with_connection { |c| c.visitor.compile(n) }.freeze
+        if collector
+          collector_retryable = collector.retryable if collector.respond_to?(:retryable)
+          collector_preparable = collector.preparable if collector.respond_to?(:preparable)
+          result, preparable, retryable = Ractor::Dispatch.main.run do
+            n = Marshal.load(node_data)
+            ActiveRecord::Base.with_connection do |c|
+              col = c.send(:collector)
+              col.retryable = collector_retryable if col.respond_to?(:retryable=) && !collector_retryable.nil?
+              col.preparable = collector_preparable if col.respond_to?(:preparable=) && !collector_preparable.nil?
+              [c.visitor.compile(n, col), (col.preparable if col.respond_to?(:preparable)), (col.retryable if col.respond_to?(:retryable))]
+            end
+          end
+          collector.preparable = preparable if collector.respond_to?(:preparable=) && !preparable.nil?
+          collector.retryable = retryable if collector.respond_to?(:retryable=) && !retryable.nil?
+          result
+        else
+          Ractor::Dispatch.main.run do
+            n = Marshal.load(node_data)
+            ActiveRecord::Base.with_connection { |c| c.visitor.compile(n) }.freeze
+          end
         end
       end
 
@@ -658,62 +402,6 @@ module ActiveRecord
 
       def respond_to_missing?(name, include_private = false)
         true
-      end
-    end
-
-    # Minimal pool proxy for non-main Ractors. Only implements methods
-    # called on connection.pool during the save/transaction path.
-    class RactorPoolProxy # :nodoc:
-      INSTANCE = new.freeze
-      def self.instance = INSTANCE
-
-      def permanent_lease? # :nodoc:
-        false
-      end
-
-      def active_connection
-        RactorConnectionProxy.instance
-      end
-
-      def lease_connection
-        RactorConnectionProxy.instance
-      end
-
-      def with_connection(prevent_permanent_checkout: false, &block)
-        yield RactorConnectionProxy.instance
-      end
-
-      def with_pool_transaction_isolation_level(level, open, &block)
-        yield  # No-op isolation management in Ractor context
-      end
-
-      def pool_transaction_isolation_level
-        nil
-      end
-
-      def db_config
-        Ractor::Dispatch.main.run { ActiveRecord::Base.connection_pool.db_config }
-      end
-
-      def schema_cache
-        # Return a proxy that dispatches individual schema_cache
-        # method calls. The real SchemaCache can't cross the Ractor
-        # boundary (it includes MonitorMixin).
-        RactorSchemaCacheProxy.instance
-      end
-
-      def clear_query_cache
-        # No-op in Ractor context — query caching is per-connection
-      end
-
-      def disable_query_cache(**)
-        # No-op in Ractor context — query caching is per-connection
-        yield if block_given?
-      end
-
-      def enable_query_cache(**)
-        # No-op in Ractor context — query caching is per-connection
-        yield if block_given?
       end
     end
 

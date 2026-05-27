@@ -166,10 +166,6 @@ module Rails
       # Save the connection handler (nilled during AR::Base.make_shareable!)
       saved_handler = ::ActiveRecord::Base.default_connection_handler
 
-      # Snapshot connection pool configs so non-main Ractors can
-      # create their own ConnectionHandler with real DB connections.
-      ::ActiveRecord::Base.snapshot_connection_configs_for_ractors!
-
       # NOTE: I18n MUTEX is nilled AFTER make_shareable! below. In
       # development, freeze() lazy-loads translations via
       # I18n.transliterate("test"), which calls into

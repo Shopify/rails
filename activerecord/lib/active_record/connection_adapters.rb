@@ -65,7 +65,6 @@ module ActiveRecord
     end
 
     register "sqlite3", "ActiveRecord::ConnectionAdapters::SQLite3Adapter", "active_record/connection_adapters/sqlite3_adapter"
-    register "ractor_sqlite3", "ActiveRecord::ConnectionAdapters::RactorSQLite3Adapter", "active_record/connection_adapters/ractor_sqlite3_adapter"
     register "mysql2", "ActiveRecord::ConnectionAdapters::Mysql2Adapter", "active_record/connection_adapters/mysql2_adapter"
     register "trilogy", "ActiveRecord::ConnectionAdapters::TrilogyAdapter", "active_record/connection_adapters/trilogy_adapter"
     register "postgresql", "ActiveRecord::ConnectionAdapters::PostgreSQLAdapter", "active_record/connection_adapters/postgresql_adapter"
@@ -78,6 +77,9 @@ module ActiveRecord
     autoload :PoolConfig
     autoload :PoolManager
     autoload :QueryIntent
+    autoload :RactorConnectionHandler, "active_record/connection_adapters/ractor_connection_handler"
+    autoload :RactorConnectionPool, "active_record/connection_adapters/ractor_connection_pool"
+    autoload :RactorConnectionProxy, "active_record/connection_adapters/ractor_connection_proxy"
     autoload :SchemaCache
     autoload :BoundSchemaReflection, "active_record/connection_adapters/schema_cache"
     autoload :SchemaReflection, "active_record/connection_adapters/schema_cache"
