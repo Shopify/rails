@@ -192,6 +192,11 @@ module Rails
       Ractor.make_shareable(self)
     end
 
+    def freeze
+      @autoloaders = nil
+      super
+    end
+
     # Returns true if the application is initialized.
     def initialized?
       @initialized
