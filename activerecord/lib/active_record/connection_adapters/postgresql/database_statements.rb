@@ -173,11 +173,16 @@ module ActiveRecord
             # Don't pipeline batch queries
             return false if intent.batch
 
+            sql = intent.processed_sql
+            return false unless sql.is_a?(String)
+
+            sql_for_match = sql.valid_encoding? ? sql : sql.b
+
             # Don't pipeline multi-statement SQL without binds
             # send_query_params uses prepared statements which don't support multiple commands
             # With binds, it's safe because the query likely doesn't have semicolons
             # Note: has_binds? triggers compile_arel! which determines intent.prepare
-            if !intent.has_binds? && intent.processed_sql.include?(";")
+            if !intent.has_binds? && sql_for_match.include?(";")
               return false
             end
 
