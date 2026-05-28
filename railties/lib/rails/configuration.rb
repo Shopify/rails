@@ -116,6 +116,12 @@ module Rails
         @after_generate_callbacks = []
       end
 
+      def freeze
+        @aliases = @aliases.transform_values(&:freeze).freeze
+        @options = @options.transform_values(&:freeze).freeze
+        super
+      end
+
       def initialize_copy(source)
         @aliases = @aliases.deep_dup
         @options = @options.deep_dup

@@ -47,6 +47,12 @@ module Rails
         concat(initializers) if initializers
       end
 
+      def freeze
+        @order = @order.transform_values(&:freeze).freeze
+        @resolve = @resolve.transform_values(&:freeze).freeze
+        super
+      end
+
       def to_a
         @collection
       end

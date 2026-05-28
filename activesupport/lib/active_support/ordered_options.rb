@@ -100,6 +100,11 @@ module ActiveSupport
       end
     end
 
+    def freeze
+      self.default_proc = nil
+      super
+    end
+
     def to_h
       @parent.merge(self)
     end
