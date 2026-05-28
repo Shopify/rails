@@ -22,6 +22,11 @@ module ActionDispatch
           @memos           = Hash.new { |h, k| h[k] = [] }
         end
 
+        def freeze
+          @memos = @memos.transform_values(&:freeze).freeze
+          super
+        end
+
         def add_accepting(state)
           @accepting[state] = true
         end
