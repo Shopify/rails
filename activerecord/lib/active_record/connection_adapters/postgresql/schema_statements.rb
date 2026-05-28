@@ -311,7 +311,7 @@ module ActiveRecord
             # Check parameter_status to skip redundant SET when the server
             # already has the desired search_path (e.g. on initial connection).
             current = with_raw_connection(materialize_transactions: false) { |conn| conn.parameter_status("search_path") }
-            unless current == schema_csv
+            unless current == schema_csv && !pipeline_active?
               query_command("SET search_path TO #{schema_csv}", "SCHEMA")
             end
             @schema_search_path = schema_csv
