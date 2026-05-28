@@ -7,6 +7,7 @@ require "active_support/core_ext/object/to_query"
 require "active_support/core_ext/module/redefine_method"
 require "active_support/core_ext/module/remove_method"
 require "active_support/core_ext/array/extract_options"
+require "active_support/core_ext/kernel/ractor_shareability"
 require "action_controller/metal/exceptions"
 require "action_dispatch/routing/endpoint"
 
@@ -403,6 +404,17 @@ module ActionDispatch
         @polymorphic_mappings = {}
       end
 
+      # Drops the deferred-DSL block buffers (`@prepend` and `@append`) before
+      # freezing. These blocks are replayed by `clear!` to rebuild the route
+      # table; on a shareable (production-frozen) route set `clear!` is not
+      # called, so retaining them would only block shareability without
+      # serving a purpose.
+      def freeze
+        @prepend = [].freeze
+        @append = [].freeze
+        super
+      end
+
       def eager_load!
         router.eager_load!
         routes.each(&:eager_load!)
@@ -685,7 +697,7 @@ module ActionDispatch
         def initialize(name, defaults, &block)
           @name = name
           @defaults = defaults
-          @block = block
+          @block = ractor_shareable_proc(&block)
         end
 
         def call(t, args, only_path = false)
