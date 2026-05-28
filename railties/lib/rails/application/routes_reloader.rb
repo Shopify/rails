@@ -20,6 +20,16 @@ module Rails
         @file_watcher = file_watcher
       end
 
+      # Drop the file watcher and its memoized updater before freezing.
+      # The updater block captures `self` to call `reload!`, which makes it
+      # non-shareable. A frozen application doesn't reload routes, so the
+      # watcher isn't needed after boot.
+      def freeze
+        @updater = nil
+        @file_watcher = nil
+        super
+      end
+
       def reload!
         clear!
         load_paths
