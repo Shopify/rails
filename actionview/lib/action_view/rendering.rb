@@ -61,16 +61,18 @@ module ActionView
           return superclass.view_context_class
         end
 
-        Class.new(klass) do
-          if routes
-            include routes.url_helpers(supports_path)
-            include routes.mounted_helpers
-          end
+        view_context_class = Class.new(klass)
 
-          if helpers
-            include helpers
-          end
+        if routes
+          view_context_class.include routes.url_helpers(supports_path)
+          view_context_class.include routes.mounted_helpers
         end
+
+        if helpers
+          view_context_class.include helpers
+        end
+
+        view_context_class
       end
 
       def eager_load!
@@ -80,15 +82,7 @@ module ActionView
       end
 
       def view_context_class
-        klass = ActionView::LookupContext::DetailsKey.view_context_class
-
-        @view_context_class ||= build_view_context_class(klass, supports_path?, _routes, _helpers)
-
-        if klass.changed?(@view_context_class)
-          @view_context_class = build_view_context_class(klass, supports_path?, _routes, _helpers)
-        end
-
-        @view_context_class
+        @view_context_class ||= build_view_context_class(ActionView::LookupContext::DetailsKey.view_context_class, supports_path?, _routes, _helpers)
       end
     end
 

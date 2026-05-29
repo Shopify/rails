@@ -198,6 +198,38 @@ module Rails
         ([::ActionController::Metal] + ::ActionController::Metal.descendants).each do |controller|
           controller.instance_variable_set(:@controller_path, ractor_make_shareable(controller.controller_path)) unless controller.anonymous?
           controller.middleware_stack = ractor_make_shareable(controller.middleware_stack)
+          if controller.respond_to?(:config)
+            config = controller.config
+            if config[:cache_store] && !ractor_shareable?(config[:cache_store])
+              config = ActiveSupport::InheritableOptions.new.update(config.to_h.to_h.merge(cache_store: nil))
+            end
+            controller.config = ractor_make_shareable(config)
+          end
+          controller.__callbacks = ractor_make_shareable(controller.__callbacks.dup) if controller.respond_to?(:__callbacks)
+          controller.rescue_handlers = ractor_make_shareable(controller.rescue_handlers.dup) if controller.respond_to?(:rescue_handlers)
+          controller._renderers = ractor_make_shareable(controller._renderers.dup) if controller.respond_to?(:_renderers)
+          ractor_make_shareable(controller.view_context_class) if controller.respond_to?(:view_context_class)
+        end
+      end
+      if defined?(::ActiveRecord::Base)
+        ([::ActiveRecord::Base] + ::ActiveRecord::Base.descendants).each do |model|
+          if model.respond_to?(:default_scopes)
+            model.default_scopes = ractor_make_shareable(model.default_scopes.dup)
+          end
+          if model != ::ActiveRecord::Base && !(model.respond_to?(:abstract_class?) && model.abstract_class?) && model.respond_to?(:_default_attributes)
+            begin
+              if !model.respond_to?(:table_exists?) || model.table_exists?
+                model.instance_variable_set(:@default_attributes, ractor_make_shareable(model.send(:_default_attributes)))
+                model.instance_variable_set(:@arel_table, ractor_make_shareable(model.arel_table)) if model.respond_to?(:arel_table)
+                model.instance_variable_set(:@predicate_builder, ractor_make_shareable(model.predicate_builder)) if model.respond_to?(:predicate_builder)
+              end
+            rescue ::ActiveRecord::StatementInvalid, ::ActiveRecord::TableNotSpecified
+              # Some framework models are loaded even when their optional tables are not installed.
+            end
+          end
+          if (relation_delegate_cache = model.instance_variable_get(:@relation_delegate_cache))
+            model.instance_variable_set(:@relation_delegate_cache, ractor_make_shareable(relation_delegate_cache.dup))
+          end
         end
       end
       ::ActiveSupport::Notifications.notifier.make_shareable! if defined?(::ActiveSupport::Notifications)

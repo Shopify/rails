@@ -58,24 +58,22 @@ module ActionView
     class DetailsKey # :nodoc:
       alias :eql? :equal?
 
-      @details_keys = Concurrent::Map.new
-      @digest_cache = Concurrent::Map.new
-      @view_context_mutex = Mutex.new
+      @details_keys = {}.freeze
+      @digest_cache = {}.freeze
+      @view_context_mutex = nil
 
       def self.digest_cache(details)
-        @digest_cache[details_cache_key(details)] ||= Concurrent::Map.new
+        {}
       end
 
       def self.details_cache_key(details)
-        @details_keys.fetch(details) do
-          if formats = details[:formats]
-            unless Template::Types.valid_symbols?(formats)
-              details = details.dup
-              details[:formats] &= Template::Types.symbols
-            end
+        if formats = details[:formats]
+          unless Template::Types.valid_symbols?(formats)
+            details = details.dup
+            details[:formats] &= Template::Types.symbols
           end
-          @details_keys[details] ||= TemplateDetails::Requested.new(**details)
         end
+        TemplateDetails::Requested.new(**details)
       end
 
       def self.clear
@@ -83,8 +81,8 @@ module ActionView
           resolver.clear_cache
         end
         @view_context_class = nil
-        @details_keys.clear
-        @digest_cache.clear
+        @details_keys = {}.freeze
+        @digest_cache = {}.freeze
       end
 
       def self.digest_caches
@@ -92,9 +90,7 @@ module ActionView
       end
 
       def self.view_context_class
-        @view_context_mutex.synchronize do
-          @view_context_class ||= ActionView::Base.with_empty_template_cache
-        end
+        ActionView::Base.with_empty_template_cache
       end
     end
 

@@ -202,17 +202,19 @@ module ActionView # :nodoc:
       end
 
       def with_empty_template_cache # :nodoc:
-        subclass = Class.new(self) {
-          # We can't implement these as self.class because subclasses will
-          # share the same template cache as superclasses, so "changed?" won't work
-          # correctly.
-          define_method(:compiled_method_container)           { subclass }
-          define_singleton_method(:compiled_method_container) { subclass }
+        Class.new(self) do
+          def compiled_method_container
+            self.class
+          end
+
+          def self.compiled_method_container
+            self
+          end
 
           def inspect
             "#<ActionView::Base:#{'%#016x' % (object_id << 1)}>"
           end
-        }
+        end
       end
 
       def changed?(other) # :nodoc:
