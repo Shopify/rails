@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "active_support/core_ext/kernel/ractor_shareability"
+
 module ActionDispatch
   class ParamBuilder
     # --
@@ -17,7 +19,7 @@ module ActionDispatch
     end
 
     cattr_accessor :default
-    self.default = make_default(100)
+    self.default = ractor_make_shareable(make_default(100))
 
     class << self
       delegate :from_query_string, :from_pairs, :from_hash, to: :default

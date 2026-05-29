@@ -2,6 +2,8 @@
 
 # :markup: markdown
 
+require "active_support/core_ext/kernel/ractor_shareability"
+
 module ActionDispatch
   module Http
     module Parameters
@@ -10,7 +12,7 @@ module ActionDispatch
       PARAMETERS_KEY = "action_dispatch.request.path_parameters"
 
       DEFAULT_PARSERS = {
-        Mime[:json].symbol => -> (raw_post) {
+        Mime[:json].symbol => ractor_shareable_proc { |raw_post|
           data = ActiveSupport::JSON.decode(raw_post)
           data.is_a?(Hash) ? data : { _json: data }
         }
@@ -44,7 +46,7 @@ module ActionDispatch
         #     new_parsers = original_parsers.merge(xml: xml_parser)
         #     ActionDispatch::Request.parameter_parsers = new_parsers
         def parameter_parsers=(parsers)
-          @parameter_parsers = parsers.transform_keys { |key| key.respond_to?(:symbol) ? key.symbol : key }
+          @parameter_parsers = ractor_make_shareable(parsers.transform_keys { |key| key.respond_to?(:symbol) ? key.symbol : key })
         end
       end
 
