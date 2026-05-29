@@ -2,12 +2,25 @@
 
 require "active_support"
 require "active_support/i18n_railtie"
+require "active_support/core_ext/kernel/ractor_shareability"
 
 module ActiveSupport
   class Railtie < Rails::Railtie # :nodoc:
     config.active_support = ActiveSupport::OrderedOptions.new
 
     config.eager_load_namespaces << ActiveSupport
+
+    EXECUTOR_TO_RUN_PUSH_HOOK = ractor_shareable_proc do
+      ActiveSupport::ExecutionContext.push
+    end
+    private_constant :EXECUTOR_TO_RUN_PUSH_HOOK
+
+    EXECUTOR_TO_COMPLETE_HOOK = ractor_shareable_proc do
+      ActiveSupport::CurrentAttributes.clear_all
+      ActiveSupport::ExecutionContext.pop
+      ActiveSupport.event_reporter.clear_context
+    end
+    private_constant :EXECUTOR_TO_COMPLETE_HOOK
 
     guard_load_hooks(:message_pack, :active_support_test_case)
 
@@ -55,15 +68,8 @@ module ActiveSupport
         ActiveSupport.event_reporter.clear_context
       end
 
-      app.executor.to_run do
-        ActiveSupport::ExecutionContext.push
-      end
-
-      app.executor.to_complete do
-        ActiveSupport::CurrentAttributes.clear_all
-        ActiveSupport::ExecutionContext.pop
-        ActiveSupport.event_reporter.clear_context
-      end
+      app.executor.to_run(&EXECUTOR_TO_RUN_PUSH_HOOK)
+      app.executor.to_complete(&EXECUTOR_TO_COMPLETE_HOOK)
 
       ActiveSupport.on_load(:active_support_test_case) do
         if app.config.active_support.executor_around_test_case
@@ -85,6 +91,7 @@ module ActiveSupport
       config.after_initialize do
         ActiveSupport.filter_parameters += Rails.application.config.filter_parameters
         ActiveSupport.event_reporter.reload_payload_filter
+        ActiveSupport.event_reporter = ractor_make_shareable(ActiveSupport.event_reporter)
       end
     end
 

@@ -7,6 +7,7 @@ require "active_support/core_ext/class/attribute"
 require "active_support/core_ext/module/redefine_method"
 require "active_support/core_ext/string/filters"
 require "active_support/core_ext/object/blank"
+require "active_support/core_ext/kernel/ractor_shareability"
 
 module ActiveSupport
   # = Active Support \Callbacks
@@ -358,14 +359,16 @@ module ActiveSupport
           end
 
           def make_lambda
-            lambda do |target, value, &block|
-              target.send(@method_name, &block)
+            method_name = @method_name
+            ractor_shareable_proc do |target, value, &block|
+              target.send(method_name, &block)
             end
           end
 
           def inverted_lambda
-            lambda do |target, value, &block|
-              !target.send(@method_name, &block)
+            method_name = @method_name
+            ractor_shareable_proc do |target, value, &block|
+              !target.send(method_name, &block)
             end
           end
         end
@@ -380,16 +383,28 @@ module ActiveSupport
             [@override_target || target, block, @method_name, target]
           end
 
-          def make_lambda
-            lambda do |target, value, &block|
-              (@override_target || target).send(@method_name, target, &block)
+          class Invoke
+            def initialize(override_target, method_name, invert: false)
+              @override_target = override_target
+              @method_name = method_name
+              @invert = invert
             end
+
+            def call(target, value, &block)
+              result = (@override_target || target).send(@method_name, target, &block)
+              @invert ? !result : result
+            end
+
+            def arity; 2; end
+            def lambda?; true; end
+          end
+
+          def make_lambda
+            Invoke.new(@override_target, @method_name)
           end
 
           def inverted_lambda
-            lambda do |target, value, &block|
-              !(@override_target || target).send(@method_name, target, &block)
-            end
+            Invoke.new(@override_target, @method_name, invert: true)
           end
         end
 
@@ -403,14 +418,28 @@ module ActiveSupport
           end
 
           def make_lambda
-            lambda do |target, value, &block|
-              target.instance_exec(&@override_block)
+            override_block = @override_block
+            if ractor_shareable?(override_block)
+              ractor_shareable_proc do |target, value, &block|
+                target.instance_exec(&override_block)
+              end
+            else
+              lambda do |target, value, &block|
+                target.instance_exec(&override_block)
+              end
             end
           end
 
           def inverted_lambda
-            lambda do |target, value, &block|
-              !target.instance_exec(&@override_block)
+            override_block = @override_block
+            if ractor_shareable?(override_block)
+              ractor_shareable_proc do |target, value, &block|
+                !target.instance_exec(&override_block)
+              end
+            else
+              lambda do |target, value, &block|
+                !target.instance_exec(&override_block)
+              end
             end
           end
         end
@@ -425,14 +454,28 @@ module ActiveSupport
           end
 
           def make_lambda
-            lambda do |target, value, &block|
-              target.instance_exec(target, &@override_block)
+            override_block = @override_block
+            if ractor_shareable?(override_block)
+              ractor_shareable_proc do |target, value, &block|
+                target.instance_exec(target, &override_block)
+              end
+            else
+              lambda do |target, value, &block|
+                target.instance_exec(target, &@override_block)
+              end
             end
           end
 
           def inverted_lambda
-            lambda do |target, value, &block|
-              !target.instance_exec(target, &@override_block)
+            override_block = @override_block
+            if ractor_shareable?(override_block)
+              ractor_shareable_proc do |target, value, &block|
+                !target.instance_exec(target, &override_block)
+              end
+            else
+              lambda do |target, value, &block|
+                !target.instance_exec(target, &@override_block)
+              end
             end
           end
         end
@@ -448,16 +491,32 @@ module ActiveSupport
           end
 
           def make_lambda
-            lambda do |target, value, &block|
-              raise ArgumentError unless block
-              target.instance_exec(target, block, &@override_block)
+            override_block = @override_block
+            if ractor_shareable?(override_block)
+              ractor_shareable_proc do |target, value, &block|
+                raise ArgumentError unless block
+                target.instance_exec(target, block, &override_block)
+              end
+            else
+              lambda do |target, value, &block|
+                raise ArgumentError unless block
+                target.instance_exec(target, block, &@override_block)
+              end
             end
           end
 
           def inverted_lambda
-            lambda do |target, value, &block|
-              raise ArgumentError unless block
-              !target.instance_exec(target, block, &@override_block)
+            override_block = @override_block
+            if ractor_shareable?(override_block)
+              ractor_shareable_proc do |target, value, &block|
+                raise ArgumentError unless block
+                !target.instance_exec(target, block, &override_block)
+              end
+            else
+              lambda do |target, value, &block|
+                raise ArgumentError unless block
+                !target.instance_exec(target, block, &@override_block)
+              end
             end
           end
         end
@@ -472,14 +531,28 @@ module ActiveSupport
           end
 
           def make_lambda
-            lambda do |target, value, &block|
-              (@override_target || target).call(target, value, &block)
+            override_target = @override_target
+            if override_target.nil? || ractor_shareable?(override_target)
+              ractor_shareable_proc do |target, value, &block|
+                (override_target || target).call(target, value, &block)
+              end
+            else
+              lambda do |target, value, &block|
+                (@override_target || target).call(target, value, &block)
+              end
             end
           end
 
           def inverted_lambda
-            lambda do |target, value, &block|
-              !(@override_target || target).call(target, value, &block)
+            override_target = @override_target
+            if override_target.nil? || ractor_shareable?(override_target)
+              ractor_shareable_proc do |target, value, &block|
+                !(override_target || target).call(target, value, &block)
+              end
+            else
+              lambda do |target, value, &block|
+                !(@override_target || target).call(target, value, &block)
+              end
             end
           end
         end
@@ -580,6 +653,13 @@ module ActiveSupport
           @all_callbacks = nil
           @single_callbacks = {}
           @mutex = Mutex.new
+        end
+
+        def freeze
+          compile(nil)
+          @chain.each { |callback| compile(callback.kind) }
+          @mutex = nil
+          super
         end
 
         def each(&block); @chain.each(&block); end
@@ -944,7 +1024,7 @@ module ActiveSupport
             # HACK: We're making assumption on how `class_attribute` is implemented
             # to save constantly duping the callback hash. If this desync with class_attribute
             # we'll lose the optimization, but won't cause an actual behavior bug.
-            unless singleton_class.private_method_defined?(:__class_attr__callbacks_owner, false)
+            if !singleton_class.private_method_defined?(:__class_attr__callbacks_owner, false) || self.__callbacks.frozen?
               self.__callbacks = __callbacks.dup
             end
             name = name.to_sym
@@ -953,7 +1033,12 @@ module ActiveSupport
               alias_method("_run_#{name}_callbacks", "_run_#{name}_callbacks!")
             end
             self.__callbacks[name.to_sym] = callbacks
-            self.__callbacks
+
+            if defined?(ActiveSupport::ExecutionWrapper) && self <= ActiveSupport::ExecutionWrapper && self.name.nil? && !(defined?(ActiveSupport::Reloader) && self < ActiveSupport::Reloader)
+              self.__callbacks = ractor_make_shareable(self.__callbacks.dup)
+            else
+              self.__callbacks
+            end
           end
       end
   end

@@ -2,6 +2,7 @@
 
 require "active_support/error_reporter"
 require "active_support/callbacks"
+require "active_support/core_ext/kernel/ractor_shareability"
 
 module ActiveSupport
   class ExecutionWrapper
@@ -55,6 +56,8 @@ module ActiveSupport
         to_run RunHook.new(hook)
         to_complete CompleteHook.new(hook)
       end
+
+      self.__callbacks = ractor_make_shareable(__callbacks.dup) if name.nil? && !(defined?(ActiveSupport::Reloader) && self < ActiveSupport::Reloader)
     end
 
     # Run this execution.
@@ -112,7 +115,7 @@ module ActiveSupport
     end
 
     def self.active_key # :nodoc:
-      @active_key ||= :"active_execution_wrapper_#{object_id}"
+      :"active_execution_wrapper_#{object_id}"
     end
 
     def self.active? # :nodoc:
