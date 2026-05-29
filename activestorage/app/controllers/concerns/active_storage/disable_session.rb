@@ -5,8 +5,11 @@ module ActiveStorage::DisableSession
   extend ActiveSupport::Concern
 
   included do
-    before_action do
+    before_action :disable_active_storage_session
+  end
+
+  private
+    def disable_active_storage_session
       request.session_options[:skip] = true
     end
-  end
 end

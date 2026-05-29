@@ -9,8 +9,17 @@ require "active_storage/engine"
 
 require "action_text"
 require "action_text/trix"
+require "active_support/core_ext/kernel/ractor_shareability"
 
 module ActionText
+  class RendererCallback # :nodoc:
+    def around(controller, &action)
+      ActionText::Content.with_renderer(controller, &action)
+    end
+  end
+
+  RENDERER_CALLBACK = ractor_make_shareable(RendererCallback.new)
+
   class Engine < Rails::Engine
     isolate_namespace ActionText
     config.eager_load_namespaces << ActionText
@@ -106,9 +115,7 @@ module ActionText
     initializer "action_text.renderer" do
       %i[action_controller_base action_mailer].each do |base|
         ActiveSupport.on_load(base) do
-          around_action do |controller, action|
-            ActionText::Content.with_renderer(controller, &action)
-          end
+          around_action ActionText::RENDERER_CALLBACK
         end
       end
     end

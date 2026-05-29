@@ -2,6 +2,8 @@
 
 # :markup: markdown
 
+require "active_support/core_ext/kernel/ractor_shareability"
+
 module ActionController # :nodoc:
   module AllowBrowser
     extend ActiveSupport::Concern
@@ -54,8 +56,8 @@ module ActionController # :nodoc:
       #       # In addition to the browsers blocked by ApplicationController, also block Opera below 104 and Chrome below 119 for the show action.
       #       allow_browser versions: { opera: 104, chrome: 119 }, only: :show
       #     end
-      def allow_browser(versions:, block: -> { render file: Rails.root.join("public/406-unsupported-browser.html"), layout: false, status: :not_acceptable }, **options)
-        before_action -> { allow_browser(versions: versions, block: block) }, **options
+      def allow_browser(versions:, block: nil, **options)
+        before_action AllowBrowserCallback.new(versions, block), **options
       end
     end
 
@@ -65,8 +67,25 @@ module ActionController # :nodoc:
 
         if BrowserBlocker.new(request, versions: versions).blocked?
           ActiveSupport::Notifications.instrument("browser_block.action_controller", request: request, versions: versions) do
-            block.is_a?(Symbol) ? send(block) : instance_exec(&block)
+            if block.nil?
+              render file: Rails.root.join("public/406-unsupported-browser.html"), layout: false, status: :not_acceptable
+            elsif block.is_a?(Symbol)
+              send(block)
+            else
+              instance_exec(&block)
+            end
           end
+        end
+      end
+
+      class AllowBrowserCallback # :nodoc:
+        def initialize(versions, block)
+          @versions = ractor_make_shareable(versions)
+          @block = block.is_a?(Proc) ? ractor_make_shareable(block) : block
+        end
+
+        def before(controller)
+          controller.send(:allow_browser, versions: @versions, block: @block)
         end
       end
 

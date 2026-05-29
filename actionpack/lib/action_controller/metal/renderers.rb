@@ -2,6 +2,8 @@
 
 # :markup: markdown
 
+require "active_support/core_ext/kernel/ractor_shareability"
+
 module ActionController
   # See Renderers.add
   def self.add_renderer(key, &block)
@@ -25,7 +27,7 @@ module ActionController
 
     # A Set containing renderer names that correspond to available renderer procs.
     # Default values are `:json`, `:js`, `:xml`.
-    RENDERERS = Set.new
+    RENDERERS = Set.new.freeze
 
     module DeprecatedEscapeJsonResponses # :nodoc:
       def escape_json_responses=(value)
@@ -87,7 +89,10 @@ module ActionController
     #     end
     def self.add(key, &block)
       define_method(_render_with_renderer_method_name(key), &block)
-      RENDERERS << key.to_sym
+      renderers = RENDERERS.dup
+      renderers << key.to_sym
+      ActionController::Renderers.module_eval { remove_const(:RENDERERS) }
+      ActionController::Renderers.const_set(:RENDERERS, ractor_make_shareable(renderers))
     end
 
     # This method is the opposite of add method.
@@ -96,7 +101,10 @@ module ActionController
     #
     #     ActionController::Renderers.remove(:csv)
     def self.remove(key)
-      RENDERERS.delete(key.to_sym)
+      renderers = RENDERERS.dup
+      renderers.delete(key.to_sym)
+      ActionController::Renderers.module_eval { remove_const(:RENDERERS) }
+      ActionController::Renderers.const_set(:RENDERERS, ractor_make_shareable(renderers))
       method_name = _render_with_renderer_method_name(key)
       remove_possible_method(method_name)
     end
@@ -141,7 +149,7 @@ module ActionController
       # `controller._renderers` will be `nil`, and the action will fail.
       def use_renderers(*args)
         renderers = _renderers + args
-        self._renderers = renderers.freeze
+        self._renderers = ractor_make_shareable(renderers)
       end
       alias use_renderer use_renderers
     end

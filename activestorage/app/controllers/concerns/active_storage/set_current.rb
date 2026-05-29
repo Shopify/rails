@@ -8,8 +8,11 @@ module ActiveStorage::SetCurrent
   extend ActiveSupport::Concern
 
   included do
-    before_action do
+    before_action :set_active_storage_current_url_options
+  end
+
+  private
+    def set_active_storage_current_url_options
       ActiveStorage::Current.url_options = { protocol: request.protocol, host: request.host, port: request.port }
     end
-  end
 end
