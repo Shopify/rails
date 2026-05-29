@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "active_support/core_ext/kernel/ractor_shareability"
+
 module ActionView # :nodoc:
   class Template # :nodoc:
     # = Action View Template Handlers
@@ -14,14 +16,15 @@ module ActionView # :nodoc:
         base.register_template_handler :erb, ERB.new
         base.register_template_handler :html, Html.new
         base.register_template_handler :builder, Builder.new
-        base.register_template_handler :ruby, lambda { |_, source| source }
+        base.register_template_handler :ruby, ractor_shareable_proc { |_, source| source }
       end
 
-      @@template_handlers = {}
+      @@template_handlers = {}.freeze
       @@default_template_handlers = nil
+      @@template_extensions = [].freeze
 
       def self.extensions
-        @@template_extensions ||= @@template_handlers.keys
+        @@template_extensions
       end
 
       # Register an object that knows how to handle template files with the given
@@ -30,23 +33,27 @@ module ActionView # :nodoc:
       # and should return the rendered template as a String.
       def register_template_handler(*extensions, handler)
         raise(ArgumentError, "Extension is required") if extensions.empty?
+        handlers = @@template_handlers.dup
         extensions.each do |extension|
-          @@template_handlers[extension.to_sym] = handler
+          handlers[extension.to_sym] = ractor_make_shareable(handler)
         end
-        @@template_extensions = nil
+        @@template_handlers = ractor_make_shareable(handlers)
+        @@template_extensions = ractor_make_shareable(@@template_handlers.keys)
       end
 
       # Opposite to register_template_handler.
       def unregister_template_handler(*extensions)
+        handlers = @@template_handlers.dup
         extensions.each do |extension|
-          handler = @@template_handlers.delete extension.to_sym
+          handler = handlers.delete extension.to_sym
           @@default_template_handlers = nil if @@default_template_handlers == handler
         end
-        @@template_extensions = nil
+        @@template_handlers = ractor_make_shareable(handlers)
+        @@template_extensions = ractor_make_shareable(@@template_handlers.keys)
       end
 
       def template_handler_extensions
-        @@template_handlers.keys.map(&:to_s).sort
+        @@template_extensions.map(&:to_s).sort
       end
 
       def registered_template_handler(extension)
@@ -55,7 +62,7 @@ module ActionView # :nodoc:
 
       def register_default_template_handler(extension, klass)
         register_template_handler(extension, klass)
-        @@default_template_handlers = klass
+        @@default_template_handlers = ractor_make_shareable(klass)
       end
 
       def handler_for_extension(extension)

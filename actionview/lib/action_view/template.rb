@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "delegate"
+require "active_support/core_ext/kernel/ractor_shareability"
 
 module ActionView
   # = Action View \Template
@@ -407,6 +408,18 @@ module ActionView
       end
     end
 
+    def make_shareable! # :nodoc:
+      return self if frozen?
+
+      strict_locals!
+      encode!
+      method_name
+      type
+      @compile_mutex = nil
+
+      ractor_make_shareable(self)
+    end
+
     private
       def find_node_by_id(node, node_id)
         return node if node.node_id == node_id
@@ -423,6 +436,20 @@ module ActionView
       # just once and removes the source after it is compiled.
       def compile!(view)
         return if @compiled
+
+        if frozen?
+          mod = view.compiled_method_container
+          compiled_templates = (Ractor.current[:_action_view_compiled_templates] ||= {})
+          key = [mod, method_name]
+          return if compiled_templates[key]
+
+          instrument("!compile_template") do
+            compile(mod)
+          end
+
+          compiled_templates[key] = true
+          return
+        end
 
         # Templates can be used concurrently in threaded environments
         # so compilation and any instance variable modification must
@@ -540,7 +567,7 @@ module ActionView
         unless parameters.any? { |type, _| type == :keyrest }
           parameters.map!(&:last)
           parameters.sort!
-          @strict_local_keys = parameters.freeze
+          @strict_local_keys = parameters.freeze unless frozen?
         end
       end
 

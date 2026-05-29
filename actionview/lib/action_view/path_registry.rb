@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "active_support/core_ext/kernel/ractor_shareability"
+
 module ActionView # :nodoc:
   module PathRegistry # :nodoc:
     @view_paths_by_class = {}
@@ -16,11 +18,15 @@ module ActionView # :nodoc:
     end
 
     def self.set_view_paths(klass, paths)
+      raise FrozenError, "ActionView::PathRegistry is shareable; configure view paths before ractorize!" unless @file_system_resolver_mutex
+
       @view_paths_by_class[klass] = paths
     end
 
     def self.cast_file_system_resolvers(paths)
       paths = Array(paths)
+
+      raise FrozenError, "ActionView::PathRegistry is shareable; configure resolvers before ractorize!" unless @file_system_resolver_mutex
 
       @file_system_resolver_mutex.synchronize do
         built_resolver = false
@@ -52,6 +58,20 @@ module ActionView # :nodoc:
 
     def self.all_file_system_resolvers
       @file_system_resolvers.values
+    end
+
+    def self.make_shareable! # :nodoc:
+      return self unless @file_system_resolver_mutex
+
+      @file_system_resolvers.each_value(&:make_shareable!)
+      @view_paths_by_class.each_value { |paths| ractor_make_shareable(paths) }
+
+      @file_system_resolvers = ractor_make_shareable(@file_system_resolvers)
+      @view_paths_by_class = ractor_make_shareable(@view_paths_by_class)
+      @file_system_resolver_hooks = ractor_make_shareable(@file_system_resolver_hooks)
+      @file_system_resolver_mutex = nil
+
+      self
     end
   end
 end

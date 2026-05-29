@@ -21,11 +21,9 @@ module ActionView
       end
 
       def _prefixes # :nodoc:
-        @_prefixes ||= begin
-          return local_prefixes if superclass.abstract?
+        return local_prefixes if superclass.abstract?
 
-          local_prefixes + superclass._prefixes
-        end
+        local_prefixes + superclass._prefixes
       end
 
       def _build_view_paths(paths) # :nodoc:

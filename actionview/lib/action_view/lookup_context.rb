@@ -2,6 +2,7 @@
 
 require "concurrent/map"
 require "active_support/core_ext/module/attribute_accessors"
+require "active_support/core_ext/kernel/ractor_shareability"
 require "action_view/template/resolver"
 
 module ActionView
@@ -23,7 +24,8 @@ module ActionView
     end
 
     def self.register_detail(name, &block)
-      self.default_procs = self.default_procs.merge(name => block).freeze
+      block = ractor_make_shareable(block)
+      self.default_procs = ractor_make_shareable(self.default_procs.merge(name => block))
 
       Accessors.define_method(:"default_#{name}", &block)
       Accessors.module_eval <<-METHOD, __FILE__, __LINE__ + 1

@@ -5,6 +5,7 @@ require "active_support/core_ext/class"
 require "active_support/core_ext/module/attribute_accessors"
 require "action_view/template"
 require "concurrent/map"
+require "active_support/core_ext/kernel/ractor_shareability"
 
 module ActionView
   # = Action View Resolver
@@ -44,6 +45,11 @@ module ActionView
           match[:variant]&.to_sym
         )
         ParsedPath.new(path, details)
+      end
+
+      def make_shareable! # :nodoc:
+        @regex ||= build_path_regex
+        ractor_make_shareable(self)
       end
     end
 
@@ -127,15 +133,33 @@ module ActionView
       @unbound_templates.values.flatten.flat_map(&:built_templates)
     end
 
+    def make_shareable! # :nodoc:
+      return self if frozen?
+
+      @path_parser.make_shareable!
+      snapshot = @unbound_templates.each_pair.to_h
+      snapshot.each_value { |templates| Array(templates).each(&:make_shareable!) }
+      @unbound_templates = ractor_make_shareable(snapshot)
+      ractor_make_shareable(self)
+    end
+
     private
       def _find_all(name, prefix, partial, details, key, locals)
         requested_details = key || TemplateDetails::Requested.new(**details)
-        cache = key ? @unbound_templates : Concurrent::Map.new
+        virtual_path = TemplatePath.virtual(name, prefix, partial)
 
         unbound_templates =
-          cache.compute_if_absent(TemplatePath.virtual(name, prefix, partial)) do
-            path = TemplatePath.build(name, prefix, partial)
-            unbound_templates_from_path(path)
+          if @unbound_templates.frozen?
+            @unbound_templates[virtual_path] || begin
+              path = TemplatePath.build(name, prefix, partial)
+              unbound_templates_from_path(path)
+            end
+          else
+            cache = key ? @unbound_templates : Concurrent::Map.new
+            cache.compute_if_absent(virtual_path) do
+              path = TemplatePath.build(name, prefix, partial)
+              unbound_templates_from_path(path)
+            end
           end
 
         filter_and_sort_by_details(unbound_templates, requested_details).map do |unbound_template|
