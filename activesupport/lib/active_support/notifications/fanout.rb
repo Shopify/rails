@@ -2,6 +2,7 @@
 
 require "concurrent/map"
 require "active_support/core_ext/object/try"
+require "active_support/core_ext/kernel/ractor_shareability"
 
 module ActiveSupport
   module Notifications
@@ -66,7 +67,30 @@ module ActiveSupport
         "#<#{self.class} (#{total_patterns} patterns)>"
       end
 
+      def make_shareable! # :nodoc:
+        return self if frozen?
+
+        @mutex = nil
+
+        string_subscribers = Hash.new([].freeze)
+        @string_subscribers.each_pair { |key, value| string_subscribers[key] = value.freeze }
+        @string_subscribers = string_subscribers.freeze
+        @other_subscribers.freeze
+
+        all_listeners_for = {}
+        @all_listeners_for.each_pair { |key, value| all_listeners_for[key] = value.freeze }
+        @all_listeners_for = all_listeners_for.freeze
+
+        groups_for = {}
+        @groups_for.each_pair { |key, value| groups_for[key] = value.freeze }
+        @groups_for = groups_for.freeze
+
+        ractor_make_shareable(self)
+      end
+
       def subscribe(pattern = nil, callable = nil, monotonic: false, prepend: false, &block)
+        raise FrozenError, "ActiveSupport::Notifications::Fanout is shareable; subscribe before ractorize!" unless @mutex
+
         subscriber = Subscribers.new(pattern, callable || block, monotonic)
         @mutex.synchronize do
           case pattern
@@ -91,6 +115,8 @@ module ActiveSupport
       end
 
       def unsubscribe(subscriber_or_name)
+        raise FrozenError, "ActiveSupport::Notifications::Fanout is shareable; unsubscribe before ractorize!" unless @mutex
+
         @mutex.synchronize do
           case subscriber_or_name
           when String
@@ -111,6 +137,8 @@ module ActiveSupport
       end
 
       def clear_cache(key = nil) # :nodoc:
+        return unless @mutex
+
         if key
           @all_listeners_for.delete(key)
           @groups_for.delete(key)
@@ -201,9 +229,17 @@ module ActiveSupport
       end
 
       def groups_for(name) # :nodoc:
-        silenceable_groups, groups = @groups_for.compute_if_absent(name) do
+        cached = @groups_for[name]
+        silenceable_groups, groups = if cached
+          cached
+        else
           listeners = all_listeners_for(name)
-          listeners.partition(&:silenceable).map { |l| group_listeners(l) }
+          computed = listeners.partition(&:silenceable).map { |l| group_listeners(l) }
+          if @mutex
+            @mutex.synchronize { @groups_for[name] ||= computed }
+          else
+            computed
+          end
         end
 
         unless silenceable_groups.empty?
@@ -325,10 +361,14 @@ module ActiveSupport
 
       def all_listeners_for(name)
         # this is correctly done double-checked locking (Concurrent::Map's lookups have volatile semantics)
-        @all_listeners_for[name] || @mutex.synchronize do
-          # use synchronisation when accessing @subscribers
-          @all_listeners_for[name] ||=
-            @string_subscribers[name] + @other_subscribers.select { |s| s.subscribed_to?(name) }
+        cached = @all_listeners_for[name]
+        return cached if cached
+
+        listeners = @string_subscribers[name] + @other_subscribers.select { |s| s.subscribed_to?(name) }
+        if @mutex
+          @mutex.synchronize { @all_listeners_for[name] ||= listeners }
+        else
+          listeners
         end
       end
 

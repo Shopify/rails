@@ -79,7 +79,7 @@ module Rails
         end
 
         def finish_request_instrumentation(handle, logger_tag_pop_count)
-          handle.finish
+          handle&.finish
           logger.pop_tags(logger_tag_pop_count) if logger.respond_to?(:pop_tags) && logger_tag_pop_count > 0
           ActiveSupport::LogSubscriber.flush_all!
         end

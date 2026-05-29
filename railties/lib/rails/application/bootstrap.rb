@@ -10,6 +10,22 @@ module Rails
     module Bootstrap
       include Initializable
 
+      class ErrorReporterContextMiddleware # :nodoc:
+        def initialize(app_revision, environment)
+          @version = Rails::VERSION::STRING.dup.freeze
+          @app_revision = app_revision
+          @environment = environment
+        end
+
+        def call(error, handled:, severity:, context:, source:)
+          context.reverse_merge(rails: {
+            version: @version,
+            app_revision: @app_revision,
+            environment: @environment,
+          })
+        end
+      end
+
       initializer :load_environment_hook, group: :all do end
 
       initializer :load_active_support, group: :all do
@@ -70,13 +86,7 @@ module Rails
           Rails.error.logger = Rails.logger
         end
 
-        Rails.error.add_middleware(->(error, handled:, severity:, context:, source:) {
-          context.reverse_merge(rails: {
-            version: Rails::VERSION::STRING,
-            app_revision: app.revision,
-            environment: Rails.env.to_s,
-          })
-        })
+        Rails.error.add_middleware(ErrorReporterContextMiddleware.new(app.revision, Rails.env.to_s))
       end
 
       initializer :initialize_event_reporter, group: :all do

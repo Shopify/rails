@@ -2,6 +2,7 @@
 
 require "concurrent/map"
 require "active_support/core_ext/module/delegation"
+require "active_support/core_ext/kernel/ractor_shareability"
 require "active_support/i18n"
 
 module ActiveSupport
@@ -72,6 +73,12 @@ module ActiveSupport
           end
           @pattern.match?(str)
         end
+
+        def make_shareable! # :nodoc:
+          uncountable?("")
+          @members.freeze
+          ractor_make_shareable(self)
+        end
       end
 
       def self.instance(locale = :en)
@@ -88,6 +95,20 @@ module ActiveSupport
           return @__instance__[k] if @__instance__.key?(k)
         end
         instance(locale)
+      end
+
+      def self.make_shareable! # :nodoc:
+        instance(:en)
+        @__en_instance__.make_shareable!
+
+        instances = {}
+        @__instance__.each_pair do |locale, inflections|
+          inflections.make_shareable!
+          instances[locale] = inflections
+        end
+        @__instance__ = ractor_make_shareable(instances)
+
+        self
       end
 
       attr_reader :plurals, :singulars, :uncountables, :humans, :acronyms
@@ -261,6 +282,15 @@ module ActiveSupport
         when :plurals, :singulars, :humans
           instance_variable_set "@#{scope}", []
         end
+      end
+
+      def make_shareable! # :nodoc:
+        @uncountables.make_shareable!
+        @plurals.freeze
+        @singulars.freeze
+        @humans.freeze
+        @acronyms.freeze
+        ractor_make_shareable(self)
       end
 
       private

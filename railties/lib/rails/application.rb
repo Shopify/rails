@@ -180,6 +180,31 @@ module Rails
       at_exit { logger_actor.shutdown rescue nil }
 
 
+      if defined?(::ActionDispatch::Callbacks)
+        ::ActionDispatch::Callbacks.__callbacks = ractor_make_shareable(::ActionDispatch::Callbacks.__callbacks.dup)
+      end
+      ::ActiveSupport::Inflector::Inflections.make_shareable! if defined?(::ActiveSupport::Inflector::Inflections)
+      if defined?(::I18n) && ::I18n.respond_to?(:fallbacks)
+        ::I18n.fallbacks[::I18n.locale]
+        ::I18n.fallbacks[::I18n.default_locale]
+        ractor_make_shareable(::I18n.fallbacks)
+      end
+      if defined?(::Mime)
+        ractor_make_shareable(::Mime::SET)
+        ractor_make_shareable(::Mime::LOOKUP)
+        ractor_make_shareable(::Mime::EXTENSION_LOOKUP)
+      end
+      if defined?(::ActionController::Metal)
+        ([::ActionController::Metal] + ::ActionController::Metal.descendants).each do |controller|
+          controller.instance_variable_set(:@controller_path, ractor_make_shareable(controller.controller_path)) unless controller.anonymous?
+          controller.middleware_stack = ractor_make_shareable(controller.middleware_stack)
+        end
+      end
+      ::ActiveSupport::Notifications.notifier.make_shareable! if defined?(::ActiveSupport::Notifications)
+      ractor_make_shareable(::ActiveSupport.error_reporter) if defined?(::ActiveSupport.error_reporter)
+      ractor_make_shareable(::ActiveSupport.event_reporter) if defined?(::ActiveSupport.event_reporter)
+      ::ActionView::PathRegistry.make_shareable! if defined?(::ActionView::PathRegistry)
+
       Ractor.make_shareable(self)
     end
 

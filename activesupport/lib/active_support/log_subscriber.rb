@@ -74,7 +74,7 @@ module ActiveSupport
 
     class << self
       def logger
-        @logger ||= if defined?(Rails) && Rails.respond_to?(:logger)
+        @logger || if defined?(Rails) && Rails.respond_to?(:logger)
           Rails.logger
         end
       end
@@ -96,8 +96,8 @@ module ActiveSupport
 
       # Flush all log_subscribers' logger.
       def flush_all!
-        @supports_flush = logger.respond_to?(:flush) if @supports_flush.nil?
-        logger.flush if @supports_flush
+        current_logger = logger
+        current_logger.flush if current_logger.respond_to?(:flush)
       end
 
       private

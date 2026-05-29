@@ -2,7 +2,6 @@
 
 require "active_support"
 require "active_support/i18n_railtie"
-require "active_support/core_ext/kernel/ractor_shareability"
 
 module ActiveSupport
   class Railtie < Rails::Railtie # :nodoc:
@@ -91,7 +90,6 @@ module ActiveSupport
       config.after_initialize do
         ActiveSupport.filter_parameters += Rails.application.config.filter_parameters
         ActiveSupport.event_reporter.reload_payload_filter
-        ActiveSupport.event_reporter = ractor_make_shareable(ActiveSupport.event_reporter)
       end
     end
 
