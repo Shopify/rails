@@ -3,6 +3,7 @@
 # :markup: markdown
 
 require "active_support/core_ext/array/extract_options"
+require "active_support/core_ext/kernel/ractor_shareability"
 require "action_dispatch/middleware/stack"
 
 module ActionController
@@ -145,7 +146,7 @@ module ActionController
       private
         def inherited(subclass)
           super
-          subclass.middleware_stack = middleware_stack.dup
+          subclass.middleware_stack = ractor_make_shareable(middleware_stack.dup)
           subclass.class_eval do
             @controller_name = nil
           end
@@ -285,13 +286,15 @@ module ActionController
       @_request.reset_session
     end
 
-    class_attribute :middleware_stack, default: ActionController::MiddlewareStack.new
+    class_attribute :middleware_stack, default: ractor_make_shareable(ActionController::MiddlewareStack.new)
 
     class << self
       # Pushes the given Rack middleware and its arguments to the bottom of the
       # middleware stack.
       def use(...)
-        middleware_stack.use(...)
+        stack = middleware_stack.dup
+        stack.use(...)
+        self.middleware_stack = ractor_make_shareable(stack)
       end
     end
 

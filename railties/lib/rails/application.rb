@@ -222,7 +222,6 @@ module Rails
       if defined?(::ActionController::Metal)
         ([::ActionController::Metal] + ::ActionController::Metal.descendants).each do |controller|
           controller.instance_variable_set(:@controller_path, ractor_make_shareable(controller.controller_path)) unless controller.anonymous?
-          controller.middleware_stack = ractor_make_shareable(controller.middleware_stack)
           controller.default_url_options = ractor_make_shareable(controller.default_url_options.dup) if controller.respond_to?(:default_url_options)
           if controller.respond_to?(:config)
             config = controller.config
@@ -233,7 +232,6 @@ module Rails
           end
           controller.__callbacks = ractor_make_shareable(controller.__callbacks.dup) if controller.respond_to?(:__callbacks)
           controller.rescue_handlers = ractor_make_shareable(controller.rescue_handlers.dup) if controller.respond_to?(:rescue_handlers)
-          controller._renderers = ractor_make_shareable(controller._renderers.dup) if controller.respond_to?(:_renderers)
           ractor_make_shareable(controller.view_context_class) if controller.respond_to?(:view_context_class)
         end
       end

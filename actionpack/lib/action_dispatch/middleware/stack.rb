@@ -74,7 +74,7 @@ module ActionDispatch
     attr_accessor :middlewares
 
     def initialize(*args)
-      @middlewares = []
+      @middlewares = [].freeze
       yield(self) if block_given?
     end
 
@@ -95,17 +95,17 @@ module ActionDispatch
     end
 
     def unshift(klass, *args, &block)
-      middlewares.unshift(build_middleware(klass, args, block))
+      self.middlewares = middlewares.dup.tap { |stack| stack.unshift(build_middleware(klass, args, block)) }.freeze
     end
     ruby2_keywords(:unshift)
 
     def initialize_copy(other)
-      self.middlewares = other.middlewares.dup
+      self.middlewares = other.middlewares.dup.freeze
     end
 
     def insert(index, klass, *args, &block)
       index = assert_index(index, :before)
-      middlewares.insert(index, build_middleware(klass, args, block))
+      self.middlewares = middlewares.dup.tap { |stack| stack.insert(index, build_middleware(klass, args, block)) }.freeze
     end
     ruby2_keywords(:insert)
 
@@ -119,8 +119,10 @@ module ActionDispatch
 
     def swap(target, *args, &block)
       index = assert_index(target, :before)
-      insert(index, *args, &block)
-      middlewares.delete_at(index + 1)
+      stack = middlewares.dup
+      stack.insert(index, build_middleware(args.shift, args, block))
+      stack.delete_at(index + 1)
+      self.middlewares = stack.freeze
     end
     ruby2_keywords(:swap)
 
@@ -129,7 +131,10 @@ module ActionDispatch
     # Returns the array of middlewares not including the deleted item, or returns
     # nil if the target is not found.
     def delete(target)
-      middlewares.reject! { |m| m.name == target.name }
+      stack = middlewares.reject { |m| m.name == target.name }
+      return if stack.size == middlewares.size
+
+      self.middlewares = stack.freeze
     end
 
     # Deletes a middleware from the middleware stack.
@@ -142,24 +147,28 @@ module ActionDispatch
 
     def move(target, source)
       source_index = assert_index(source, :before)
-      source_middleware = middlewares.delete_at(source_index)
+      stack = middlewares.dup
+      source_middleware = stack.delete_at(source_index)
 
       target_index = assert_index(target, :before)
-      middlewares.insert(target_index, source_middleware)
+      stack.insert(target_index, source_middleware)
+      self.middlewares = stack.freeze
     end
 
     alias_method :move_before, :move
 
     def move_after(target, source)
       source_index = assert_index(source, :after)
-      source_middleware = middlewares.delete_at(source_index)
+      stack = middlewares.dup
+      source_middleware = stack.delete_at(source_index)
 
       target_index = assert_index(target, :after)
-      middlewares.insert(target_index + 1, source_middleware)
+      stack.insert(target_index + 1, source_middleware)
+      self.middlewares = stack.freeze
     end
 
     def use(klass, *args, &block)
-      middlewares.push(build_middleware(klass, args, block))
+      self.middlewares = middlewares.dup.tap { |stack| stack.push(build_middleware(klass, args, block)) }.freeze
     end
     ruby2_keywords(:use)
 
