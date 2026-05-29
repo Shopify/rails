@@ -2,6 +2,7 @@
 
 require "active_support/concern"
 require "active_support/core_ext/class/attribute"
+require "active_support/core_ext/kernel/ractor_shareability"
 require "active_support/core_ext/string/inflections"
 
 module ActiveSupport
@@ -12,7 +13,7 @@ module ActiveSupport
     extend Concern
 
     included do
-      class_attribute :rescue_handlers, default: []
+      class_attribute :rescue_handlers, default: [].freeze
     end
 
     module ClassMethods

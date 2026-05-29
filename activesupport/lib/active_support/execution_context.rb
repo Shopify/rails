@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "active_support/core_ext/kernel/ractor_shareability"
+
 module ActiveSupport
   module ExecutionContext # :nodoc:
     class Record
@@ -32,7 +34,7 @@ module ActiveSupport
       end
     end
 
-    @after_change_callbacks = []
+    @after_change_callbacks = [].freeze
 
     # Execution context nesting should only legitimately happen during test
     # because the test case itself is wrapped in an executor, and it might call
@@ -45,7 +47,9 @@ module ActiveSupport
       attr_accessor :nestable
 
       def after_change(&block)
-        @after_change_callbacks << block
+        callbacks = @after_change_callbacks.dup
+        callbacks << ractor_make_shareable(block)
+        @after_change_callbacks = ractor_make_shareable(callbacks)
       end
 
       # Updates the execution context. If a block is given, it resets the provided keys to their
