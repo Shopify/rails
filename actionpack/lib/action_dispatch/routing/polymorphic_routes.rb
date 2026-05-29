@@ -2,6 +2,8 @@
 
 # :markup: markdown
 
+require "active_support/core_ext/kernel/ractor_shareability"
+
 module ActionDispatch
   module Routing
     # # Action Dispatch Routing PolymorphicRoutes
@@ -204,11 +206,11 @@ module ActionDispatch
           end
 
           def self.singular(prefix, suffix)
-            new(->(name) { name.singular_route_key }, prefix, suffix)
+            ractor_make_shareable(new(ractor_shareable_proc { |name| name.singular_route_key }, prefix, suffix))
           end
 
           def self.plural(prefix, suffix)
-            new(->(name) { name.route_key }, prefix, suffix)
+            ractor_make_shareable(new(ractor_shareable_proc { |name| name.route_key }, prefix, suffix))
           end
 
           def self.polymorphic_method(recipient, record_or_hash_or_array, action, type, options)
@@ -357,6 +359,7 @@ module ActionDispatch
               CACHE[:url][action]  = build action, "url"
               CACHE[:path][action] = build action, "path"
             end
+            ractor_make_shareable(CACHE)
         end
     end
   end

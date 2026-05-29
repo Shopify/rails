@@ -163,6 +163,24 @@ module Rails
 
       env_config
       routes
+      routes.routes.each do |route|
+        route.path.ast if route.respond_to?(:path) && route.path.respond_to?(:ast)
+        route.required_parts if route.respond_to?(:required_parts)
+        route.parts if route.respond_to?(:parts)
+      end
+      if respond_to?(:assets) && (assets = self.assets)
+        assets.compilers if assets.respond_to?(:compilers)
+        assets.load_path if assets.respond_to?(:load_path)
+        assets.resolver if assets.respond_to?(:resolver)
+        assets.prefix if assets.respond_to?(:prefix)
+        if assets.respond_to?(:load_path)
+          assets.load_path.assets if assets.load_path.respond_to?(:assets)
+          if assets.load_path.respond_to?(:find)
+            assets.load_path.find("app.css")
+            assets.load_path.find("application.css")
+          end
+        end
+      end
 
       require "rails/logging/actor"
       require "rails/logging/proxy"
@@ -180,6 +198,9 @@ module Rails
       at_exit { logger_actor.shutdown rescue nil }
 
 
+      if defined?(::Time) && ::Time.respond_to?(:zone_default) && ::Time.zone_default
+        ::Time.zone_default = ractor_make_shareable(::Time.zone_default)
+      end
       if defined?(::ActionDispatch::Callbacks)
         ::ActionDispatch::Callbacks.__callbacks = ractor_make_shareable(::ActionDispatch::Callbacks.__callbacks.dup)
       end
@@ -188,16 +209,21 @@ module Rails
         ::I18n.fallbacks[::I18n.locale]
         ::I18n.fallbacks[::I18n.default_locale]
         ractor_make_shareable(::I18n.fallbacks)
+        if ::I18n.config.respond_to?(:available_locales_set)
+          ::I18n.config.class.class_variable_set(:@@available_locales_set, ractor_make_shareable(::I18n.config.available_locales_set))
+        end
       end
       if defined?(::Mime)
         ractor_make_shareable(::Mime::SET)
         ractor_make_shareable(::Mime::LOOKUP)
         ractor_make_shareable(::Mime::EXTENSION_LOOKUP)
+        ractor_make_shareable(::Mime::ALL) if defined?(::Mime::ALL)
       end
       if defined?(::ActionController::Metal)
         ([::ActionController::Metal] + ::ActionController::Metal.descendants).each do |controller|
           controller.instance_variable_set(:@controller_path, ractor_make_shareable(controller.controller_path)) unless controller.anonymous?
           controller.middleware_stack = ractor_make_shareable(controller.middleware_stack)
+          controller.default_url_options = ractor_make_shareable(controller.default_url_options.dup) if controller.respond_to?(:default_url_options)
           if controller.respond_to?(:config)
             config = controller.config
             if config[:cache_store] && !ractor_shareable?(config[:cache_store])
@@ -213,19 +239,79 @@ module Rails
       end
       if defined?(::ActiveRecord::Base)
         ([::ActiveRecord::Base] + ::ActiveRecord::Base.descendants).each do |model|
+          if model.respond_to?(:model_name)
+            model.model_name.human
+            model.instance_variable_set(:@_model_name, ractor_make_shareable(model.model_name))
+          end
+          model.instance_variable_set(:@_to_partial_path, ractor_make_shareable(model._to_partial_path)) if model.respond_to?(:_to_partial_path)
+          model.make_adapter_class_shareable! if model.respond_to?(:make_adapter_class_shareable!)
+          if model.respond_to?(:attribute_aliases)
+            model.attribute_aliases = ractor_make_shareable(model.attribute_aliases.dup)
+          end
+          if model.respond_to?(:attribute_method_patterns)
+            model.attribute_method_patterns = ractor_make_shareable(model.attribute_method_patterns.dup)
+          end
+          if model.instance_variable_defined?(:@aliases_by_attribute_name)
+            model.instance_variable_set(:@aliases_by_attribute_name, ractor_make_shareable(model.instance_variable_get(:@aliases_by_attribute_name).dup))
+          end
+          if model.respond_to?(:_reflections) && model._reflections.empty?
+            model._reflections = ractor_make_shareable(model._reflections.dup)
+          end
+          if model.respond_to?(:aggregate_reflections) && model.aggregate_reflections.empty?
+            model.aggregate_reflections = ractor_make_shareable(model.aggregate_reflections.dup)
+          end
+          if model.respond_to?(:normalized_reflections) && model.normalized_reflections.empty?
+            model.instance_variable_set(:@__reflections, ractor_make_shareable(model.normalized_reflections.dup))
+          end
+          if model.respond_to?(:counter_cached_association_names)
+            counter_cached_association_names = ractor_make_shareable(model.counter_cached_association_names.dup.freeze)
+            model.counter_cached_association_names = counter_cached_association_names
+            model.instance_variable_set(:@__class_attr_counter_cached_association_names, counter_cached_association_names)
+          end
+          if model.respond_to?(:_counter_cache_columns)
+            counter_cache_columns = ractor_make_shareable(model._counter_cache_columns.dup)
+            model._counter_cache_columns = counter_cache_columns
+            model.instance_variable_set(:@__class_attr__counter_cache_columns, counter_cache_columns)
+          end
           if model.respond_to?(:default_scopes)
             model.default_scopes = ractor_make_shareable(model.default_scopes.dup)
           end
           if model != ::ActiveRecord::Base && !(model.respond_to?(:abstract_class?) && model.abstract_class?) && model.respond_to?(:_default_attributes)
             begin
               if !model.respond_to?(:table_exists?) || model.table_exists?
+                model.define_attribute_methods if model.respond_to?(:define_attribute_methods)
+                model.attribute_aliases = ractor_make_shareable(model.attribute_aliases.dup) if model.respond_to?(:attribute_aliases)
                 model.instance_variable_set(:@default_attributes, ractor_make_shareable(model.send(:_default_attributes)))
+                model.instance_variable_set(:@attribute_types, ractor_make_shareable(model.attribute_types)) if model.respond_to?(:attribute_types)
+                model.instance_variable_set(:@columns, ractor_make_shareable(model.columns)) if model.respond_to?(:columns)
+                model.instance_variable_set(:@column_names, ractor_make_shareable(model.column_names)) if model.respond_to?(:column_names)
+                model.instance_variable_set(:@symbol_column_to_string_name_hash, ractor_make_shareable(model.column_names.index_by(&:to_sym))) if model.respond_to?(:column_names)
+                model.instance_variable_set(:@attributes_builder, ractor_make_shareable(model.send(:attributes_builder))) if model.respond_to?(:attributes_builder, true)
+                if model.respond_to?(:timestamp_attributes_for_create_in_model)
+                  model.instance_variable_set(:@timestamp_attributes_for_create_in_model, ractor_make_shareable(model.timestamp_attributes_for_create_in_model))
+                  model.instance_variable_set(:@timestamp_attributes_for_update_in_model, ractor_make_shareable(model.timestamp_attributes_for_update_in_model))
+                  model.instance_variable_set(:@all_timestamp_attributes_in_model, ractor_make_shareable(model.all_timestamp_attributes_in_model))
+                end
+                if model.respond_to?(:query_constraints_list)
+                  model.instance_variable_set(:@query_constraints_list, ractor_make_shareable(model.query_constraints_list))
+                  model.instance_variable_set(:@composite_query_constraints_list, ractor_make_shareable(model.composite_query_constraints_list)) if model.respond_to?(:composite_query_constraints_list)
+                end
+                if model.respond_to?(:with_connection)
+                  model.with_connection do |connection|
+                    model.instance_variable_set(:@_returning_columns_for_insert, ractor_make_shareable(model._returning_columns_for_insert(connection))) if model.respond_to?(:_returning_columns_for_insert)
+                    model.instance_variable_set(:@_returning_columns_for_update, ractor_make_shareable(model._returning_columns_for_update(connection))) if model.respond_to?(:_returning_columns_for_update)
+                  end
+                end
                 model.instance_variable_set(:@arel_table, ractor_make_shareable(model.arel_table)) if model.respond_to?(:arel_table)
                 model.instance_variable_set(:@predicate_builder, ractor_make_shareable(model.predicate_builder)) if model.respond_to?(:predicate_builder)
               end
             rescue ::ActiveRecord::StatementInvalid, ::ActiveRecord::TableNotSpecified
               # Some framework models are loaded even when their optional tables are not installed.
             end
+          end
+          if model.respond_to?(:counter_cached_association_names)
+            counter_cached_association_names = ractor_make_shareable(model.counter_cached_association_names.dup.freeze)
+            model.instance_variable_set(:@__class_attr_counter_cached_association_names, counter_cached_association_names)
           end
           if (relation_delegate_cache = model.instance_variable_get(:@relation_delegate_cache))
             model.instance_variable_set(:@relation_delegate_cache, ractor_make_shareable(relation_delegate_cache.dup))

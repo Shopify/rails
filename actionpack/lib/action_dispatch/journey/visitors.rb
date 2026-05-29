@@ -2,12 +2,14 @@
 
 # :markup: markdown
 
+require "active_support/core_ext/kernel/ractor_shareability"
+
 module ActionDispatch
   # :stopdoc:
   module Journey
     class Format
-      ESCAPE_PATH    = ->(value) { Router::Utils.escape_path(value) }
-      ESCAPE_SEGMENT = ->(value) { Router::Utils.escape_segment(value) }
+      ESCAPE_PATH    = ractor_shareable_proc { |value| Router::Utils.escape_path(value) }
+      ESCAPE_SEGMENT = ractor_shareable_proc { |value| Router::Utils.escape_segment(value) }
 
       Parameter = Struct.new(:name, :escaper) do
         def escape(value); escaper.call value; end

@@ -207,8 +207,8 @@ module ActionView
 
       @variable = if @virtual_path
         base = @virtual_path.end_with?("/") ? "" : ::File.basename(@virtual_path)
-        base =~ /\A_?(.*?)(?:\.\w+)*\z/
-        $1.to_sym
+        match = base.match(/\A_?(.*?)(?:\.\w+)*\z/)
+        match[1].to_sym
       end
 
       @format            = format
@@ -327,8 +327,9 @@ module ActionView
       # Look for # encoding: *. If we find one, we'll encode the
       # String in that encoding, otherwise, we'll use the
       # default external encoding.
-      if source.sub!(LEADING_ENCODING_REGEXP, "")
-        encoding = magic_encoding = $1
+      if match = source.match(LEADING_ENCODING_REGEXP)
+        source.sub!(LEADING_ENCODING_REGEXP, "")
+        encoding = magic_encoding = match[1]
       else
         encoding = Encoding.default_external
       end
@@ -366,8 +367,9 @@ module ActionView
     # specifying defaults.
     def strict_locals!
       if @strict_locals == NONE
+        match = self.source.match(STRICT_LOCALS_REGEX)
         self.source.sub!(STRICT_LOCALS_REGEX, "")
-        @strict_locals = $1&.rstrip
+        @strict_locals = match&.[](1)&.rstrip
 
         return if @strict_locals.nil? # Magic comment not found
 

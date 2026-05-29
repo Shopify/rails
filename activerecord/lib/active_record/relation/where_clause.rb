@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "active_support/core_ext/array/extract"
+require "active_support/core_ext/kernel/ractor_shareability"
 
 module ActiveRecord
   class Relation
@@ -10,6 +11,8 @@ module ActiveRecord
       def initialize(predicates)
         @predicates = predicates
       end
+
+      EMPTY = ractor_make_shareable(new([]))
 
       def +(other)
         WhereClause.new(predicates + other.predicates)
@@ -93,7 +96,7 @@ module ActiveRecord
       end
 
       def self.empty
-        @empty ||= new([]).freeze
+        EMPTY
       end
 
       def contradiction?

@@ -130,7 +130,13 @@ module ActiveRecord
       self.filter_attributes = []
 
       def self.connection_handler
-        ActiveSupport::IsolatedExecutionState[:active_record_connection_handler] || default_connection_handler
+        if handler = ActiveSupport::IsolatedExecutionState[:active_record_connection_handler]
+          handler
+        elsif Ractor.main?
+          default_connection_handler
+        else
+          ConnectionAdapters::RactorConnectionHandler
+        end
       end
 
       def self.connection_handler=(handler)
@@ -267,6 +273,8 @@ module ActiveRecord
       end
 
       def find(*ids) # :nodoc:
+        return super unless Ractor.main?
+
         # We don't have cache keys for this stuff yet
         return super unless ids.length == 1
         return super if block_given? || primary_key.nil? || scope_attributes?
@@ -412,6 +420,10 @@ module ActiveRecord
       end
 
       def cached_find_by_statement(connection, key, &block) # :nodoc:
+        unless Ractor.main?
+          return StatementCache.create(connection, &block)
+        end
+
         cache = @find_by_statement_cache[connection.prepared_statements]
         cache.compute_if_absent(key) { StatementCache.create(connection, &block) }
       end

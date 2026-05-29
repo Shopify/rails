@@ -96,7 +96,16 @@ module ActiveSupport
     # smoothly through and into the supplied block, we want as little evidence
     # as possible that we were here.
     def run_callbacks(kind, type = nil)
-      callbacks = __callbacks[kind.to_sym]
+      begin
+        callbacks = __callbacks[kind.to_sym]
+      rescue Ractor::IsolationError
+        if !Ractor.main?
+          return yield if block_given?
+          return true
+        end
+
+        raise
+      end
 
       if callbacks.empty?
         yield if block_given?

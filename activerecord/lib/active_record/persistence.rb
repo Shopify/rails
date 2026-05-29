@@ -221,6 +221,12 @@ module ActiveRecord
       end
 
       def query_constraints_list # :nodoc:
+        if !Ractor.main?
+          return if base_class? || primary_key != base_class.primary_key
+
+          return base_class.query_constraints_list
+        end
+
         @query_constraints_list ||= if base_class? || primary_key != base_class.primary_key
           primary_key if primary_key.is_a?(Array)
         else

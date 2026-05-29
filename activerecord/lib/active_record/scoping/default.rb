@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "active_support/core_ext/kernel/ractor_shareability"
+
 module ActiveRecord
   module Scoping
     class DefaultScope # :nodoc:
@@ -16,7 +18,7 @@ module ActiveRecord
 
       included do
         # Stores the default scope for the class.
-        class_attribute :default_scopes, instance_writer: false, instance_predicate: false, default: []
+        class_attribute :default_scopes, instance_writer: false, instance_predicate: false, default: [].freeze
         class_attribute :default_scope_override, instance_writer: false, instance_predicate: false, default: nil
       end
 
@@ -139,15 +141,13 @@ module ActiveRecord
 
             default_scope = DefaultScope.new(scope, all_queries)
 
-            self.default_scopes += [default_scope]
+            self.default_scopes = ractor_make_shareable(default_scopes + [default_scope])
           end
 
           def build_default_scope(relation = relation(), all_queries: nil)
             return if abstract_class?
 
-            if default_scope_override.nil?
-              self.default_scope_override = !Base.is_a?(method(:default_scope).owner)
-            end
+            default_scope_override = !Base.is_a?(method(:default_scope).owner)
 
             if default_scope_override
               # The user has defined their own default scope method, so call that

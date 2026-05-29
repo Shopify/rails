@@ -69,8 +69,11 @@ module ActionView
           # expression
           template_source = source.b
 
-          erb = template_source.gsub(ENCODING_TAG, "")
-          encoding = $2
+          encoding = nil
+          erb = template_source.gsub(ENCODING_TAG) do
+            encoding = Regexp.last_match(2)
+            ""
+          end
 
           erb.force_encoding valid_encoding(source.dup, encoding)
 

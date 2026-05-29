@@ -120,3 +120,7 @@ module ActiveRecord
     end
   end
 end
+
+require "active_record/connection_adapters/ractor_connection_handler"
+require "active_record/connection_adapters/ractor_query_dispatch"
+require "active_record/connection_adapters/ractor_connection_proxy"

@@ -2,6 +2,7 @@
 
 require "active_support/core_ext/object/json"
 require "active_support/core_ext/module/delegation"
+require "active_support/core_ext/kernel/ractor_shareability"
 
 module ActiveSupport
   class << self
@@ -60,13 +61,13 @@ module ActiveSupport
       U2028 = -"\u2028".b
       U2029 = -"\u2029".b
 
-      ESCAPED_CHARS = {
+      ESCAPED_CHARS = ractor_make_shareable({
         U2028 => '\u2028'.b,
         U2029 => '\u2029'.b,
         ">".b => '\u003e'.b,
         "<".b => '\u003c'.b,
         "&".b => '\u0026'.b,
-      }.freeze
+      })
 
       HTML_ENTITIES_REGEX = Regexp.union(*(ESCAPED_CHARS.keys - [U2028, U2029]))
       FULL_ESCAPE_REGEX = Regexp.union(*ESCAPED_CHARS.keys)
@@ -149,7 +150,7 @@ module ActiveSupport
       if defined?(::JSON::Coder) && Gem::Version.new(::JSON::VERSION) >= Gem::Version.new("2.15.2")
         class JSONGemCoderEncoder # :nodoc:
           JSON_NATIVE_TYPES = [Hash, Array, Float, String, Symbol, Integer, NilClass, TrueClass, FalseClass, ::JSON::Fragment].freeze
-          CODER = ::JSON::Coder.new do |value, is_key|
+          CODER = ractor_make_shareable(::JSON::Coder.new do |value, is_key|
             json_value = value.as_json
 
             # Keep compatibility by calling to_s on non-String keys
@@ -167,7 +168,7 @@ module ActiveSupport
               count -= 1
             end
             json_value
-          end
+          end)
 
 
           def initialize(options = nil)
@@ -230,8 +231,8 @@ module ActiveSupport
 
         def json_encoder=(encoder)
           @json_encoder = encoder
-          @encoder_without_options = encoder.new
-          @encoder_without_escape = encoder.new(escape: false)
+          @encoder_without_options = ractor_make_shareable(encoder.new)
+          @encoder_without_escape = ractor_make_shareable(encoder.new(escape: false))
         end
 
         def encode_without_options(value) # :nodoc:

@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "active_support/core_ext/kernel/ractor_shareability"
+
 module ActiveRecord
   class Relation
     class FromClause # :nodoc:
@@ -9,6 +11,8 @@ module ActiveRecord
         @value = value
         @name = name
       end
+
+      EMPTY = ractor_make_shareable(new(nil, nil))
 
       def merge(other)
         self
@@ -23,7 +27,7 @@ module ActiveRecord
       end
 
       def self.empty
-        @empty ||= new(nil, nil).freeze
+        EMPTY
       end
     end
   end

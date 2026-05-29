@@ -2,6 +2,8 @@
 
 # :markup: markdown
 
+require "active_support/core_ext/kernel/ractor_shareability"
+
 module ActionDispatch
   module Journey # :nodoc:
     class Router # :nodoc:
@@ -80,7 +82,7 @@ module ActionDispatch
             end
         end
 
-        ENCODER = UriEncoder.new
+        ENCODER = ractor_make_shareable(UriEncoder.new)
 
         def self.escape_path(path)
           ENCODER.escape_path(path.to_s)

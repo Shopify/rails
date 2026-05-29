@@ -159,7 +159,9 @@ module ActionDispatch
       end
 
       def glob?
-        path.ast.glob?
+        return false unless Ractor.main?
+
+        path.ast ? path.ast.glob? : path.spec.find_all(&:star?).any?
       end
 
       def dispatcher?

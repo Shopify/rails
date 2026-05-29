@@ -40,8 +40,12 @@ module ActiveModel
 
     def value(&)
       # `defined?` is cheaper than `||=` when we get back falsy values
-      @value = type_cast(value_before_type_cast) unless defined?(@value)
-      @value
+      if frozen?
+        defined?(@value) ? @value : type_cast(value_before_type_cast)
+      else
+        @value = type_cast(value_before_type_cast) unless defined?(@value)
+        @value
+      end
     end
 
     def original_value

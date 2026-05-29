@@ -288,6 +288,10 @@ module ActiveRecord
     # The connection will remain leased for the entire duration of the request
     # or job, or until +#release_connection+ is called.
     def lease_connection
+      if !Ractor.main?
+        return ConnectionAdapters::RactorConnectionProxy
+      end
+
       connection_pool.lease_connection
     end
 
@@ -328,6 +332,10 @@ module ActiveRecord
     # If #connection is called inside the block, the connection won't be checked back in
     # unless the +prevent_permanent_checkout+ argument is set to +true+.
     def with_connection(prevent_permanent_checkout: false, &block)
+      if !Ractor.main?
+        return yield ConnectionAdapters::RactorConnectionProxy
+      end
+
       connection_pool.with_connection(prevent_permanent_checkout: prevent_permanent_checkout, &block)
     end
 
@@ -357,10 +365,24 @@ module ActiveRecord
     end
 
     def adapter_class # :nodoc:
+      if !Ractor.main? && defined?(@__cached_adapter_class) && @__cached_adapter_class
+        return @__cached_adapter_class
+      end
+
       connection_pool.db_config.adapter_class
     end
 
+    def make_adapter_class_shareable! # :nodoc:
+      return if defined?(@__cached_adapter_class) && @__cached_adapter_class
+
+      @__cached_adapter_class = adapter_class
+    end
+
     def connection_pool
+      if !Ractor.main?
+        return ConnectionAdapters::RactorConnectionPool
+      end
+
       connection_handler.retrieve_connection_pool(connection_specification_name, role: current_role, shard: current_shard, strict: true)
     end
 

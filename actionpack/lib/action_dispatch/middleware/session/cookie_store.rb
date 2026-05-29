@@ -114,6 +114,8 @@ module ActionDispatch
         end
 
         def set_cookie(request, session_id, cookie)
+          return unless Ractor.main?
+
           cookie_jar(request)[@key] = cookie
         end
 

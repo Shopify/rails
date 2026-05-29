@@ -332,23 +332,30 @@ module ActionDispatch
           #     foo_url(bar, baz, bang, sort_by: 'baz')
           #
           def define_url_helper(mod, name, helper, url_strategy)
-            mod.define_method(name) do |*args|
-              last = args.last
-              options = \
-                case last
-                when Hash
-                  args.pop
-                when ActionController::Parameters
-                  args.pop.to_h
-                end
-              helper.call(self, name, args, options, url_strategy)
-            end
+            route_name = name.to_s.sub(/_(?:path|url)\z/, "")
+            strategy_name = url_strategy == PATH ? "PATH" : "UNKNOWN"
+
+            mod.module_eval <<~RUBY, __FILE__, __LINE__ + 1
+              def #{name}(*args)
+                last = args.last
+                options = \
+                  case last
+                  when Hash
+                    args.pop
+                  when ActionController::Parameters
+                    args.pop.to_h
+                  end
+                route = _routes.named_routes.get(:#{route_name})
+                helper = ActionDispatch::Routing::RouteSet::NamedRouteCollection::UrlHelper.create(route, route.defaults, #{route_name.inspect})
+                helper.call(self, :#{name}, args, options, ActionDispatch::Routing::RouteSet::#{strategy_name})
+              end
+            RUBY
           end
       end
 
       # strategy for building URLs to send to the client
-      PATH    = ->(options) { ActionDispatch::Http::URL.path_for(options) }
-      UNKNOWN = ->(options) { ActionDispatch::Http::URL.url_for(options) }
+      PATH    = ractor_shareable_proc { |options| ActionDispatch::Http::URL.path_for(options) }
+      UNKNOWN = ractor_shareable_proc { |options| ActionDispatch::Http::URL.url_for(options) }
 
       attr_accessor :formatter, :set, :named_routes, :router
       attr_accessor :disable_clear_and_finalize, :resources_path_names
@@ -586,7 +593,7 @@ module ActionDispatch
             end
 
             def optimize_routes_generation?
-              @_proxy.optimize_routes_generation?
+              Rails.application.routes.optimize_routes_generation?
             end
 
             def polymorphic_url(record_or_hash_or_array, options = {})
@@ -597,7 +604,7 @@ module ActionDispatch
               @_proxy.polymorphic_path(record_or_hash_or_array, options)
             end
 
-            def _routes; @_proxy._routes; end
+            def _routes; Rails.application.routes; end
             def url_options; {}; end
           end
 
@@ -624,11 +631,15 @@ module ActionDispatch
 
           # And an instance method _routes. Note that UrlFor (included in this module) add
           # extra conveniences for working with @_routes.
-          define_method(:_routes) { @_routes || routes }
+          module_eval <<~RUBY, __FILE__, __LINE__ + 1
+            def _routes
+              @_routes || Rails.application.routes
+            end
 
-          define_method(:_generate_paths_by_default) do
-            supports_path
-          end
+            def _generate_paths_by_default
+              #{supports_path ? "true" : "false"}
+            end
+          RUBY
 
           private :_generate_paths_by_default
 

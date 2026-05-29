@@ -419,6 +419,10 @@ module ActiveModel
         end
 
         def attribute_method_patterns_matching(method_name)
+          unless Ractor.main?
+            return attribute_method_patterns.filter_map { |pattern| pattern.match(method_name) }
+          end
+
           attribute_method_patterns_cache.compute_if_absent(method_name) do
             attribute_method_patterns.filter_map { |pattern| pattern.match(method_name) }
           end

@@ -3,6 +3,7 @@
 # :markup: markdown
 
 require "active_support/core_ext/module/attribute_accessors"
+require "active_support/core_ext/kernel/ractor_shareability"
 require "action_dispatch/http/filter_redirect"
 require "action_dispatch/http/cache"
 require "monitor"
@@ -483,7 +484,7 @@ module ActionDispatch # :nodoc:
 
   private
     ContentTypeHeader = Struct.new :mime_type, :charset
-    NullContentTypeHeader = ContentTypeHeader.new nil, nil
+    NullContentTypeHeader = ractor_make_shareable(ContentTypeHeader.new(nil, nil))
 
     CONTENT_TYPE_PARSER = /
       \A

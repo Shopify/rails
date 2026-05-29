@@ -46,8 +46,9 @@ module ActionView
             as.to_sym
           else
             base = path.end_with?("/") ? "" : File.basename(path)
-            raise_invalid_identifier(path) unless base =~ /\A_?(.*?)(?:\.\w+)*\z/
-            $1.to_sym
+            match = base.match(/\A_?(.*?)(?:\.\w+)*\z/)
+            raise_invalid_identifier(path) unless match
+            match[1].to_sym
           end
         end
 
@@ -83,7 +84,11 @@ module ActionView
           end
 
           if view.prefix_partial_path_with_controller_namespace
-            PREFIXED_PARTIAL_NAMES[@context_prefix][path] ||= merge_prefix_into_object_path(@context_prefix, path.dup)
+            if Ractor.main?
+              PREFIXED_PARTIAL_NAMES[@context_prefix][path] ||= merge_prefix_into_object_path(@context_prefix, path.dup)
+            else
+              merge_prefix_into_object_path(@context_prefix, path.dup)
+            end
           else
             path
           end
