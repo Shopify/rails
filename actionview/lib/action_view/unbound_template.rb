@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "concurrent/map"
+require "active_support/core_ext/kernel/ractor_shareability"
 
 module ActionView
   class UnboundTemplate
@@ -18,6 +19,10 @@ module ActionView
     end
 
     def bind_locals(locals)
+      if frozen?
+        return @templates[locals] || build_template(normalize_locals(locals))
+      end
+
       unless template = @templates[locals]
         @write_lock.synchronize do
           normalized_locals = normalize_locals(locals)
@@ -43,6 +48,19 @@ module ActionView
 
     def built_templates # :nodoc:
       @templates.values
+    end
+
+    def make_shareable! # :nodoc:
+      return self if frozen?
+
+      snapshot = @templates.is_a?(Hash) ? @templates.dup : @templates.each_pair.to_h
+      snapshot.each_value { |template| ractor_make_shareable(template) }
+      ractor_make_shareable(snapshot.default) if snapshot.default
+
+      @templates = snapshot.freeze
+      @write_lock = nil
+
+      ractor_make_shareable(self)
     end
 
     private
