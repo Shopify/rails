@@ -92,13 +92,11 @@ module AbstractController
       # internal_methods), adding back in any methods that are internal, but still
       # exist on the class itself.
       def action_methods
-        @action_methods ||= begin
-          # All public instance methods of this class, including ancestors except for
-          # public instance methods of Base and its ancestors.
-          methods = public_instance_methods(true) - internal_methods
-          methods.map!(&:name)
-          methods.to_set
-        end
+        # All public instance methods of this class, including ancestors except for
+        # public instance methods of Base and its ancestors.
+        methods = public_instance_methods(true) - internal_methods
+        methods.map!(&:name)
+        methods.to_set
       end
 
       # action_methods are cached and there is sometimes a need to refresh them.
