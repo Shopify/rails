@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "active_support/core_ext/kernel/ractor_shareability"
 require "active_support/core_ext/string/filters"
 
 module ActiveRecord
@@ -8,8 +9,8 @@ module ActiveRecord
     extend ActiveSupport::Concern
 
     included do
-      class_attribute :_reflections, instance_writer: false, default: {}
-      class_attribute :aggregate_reflections, instance_writer: false, default: {}
+      class_attribute :_reflections, instance_writer: false, default: ractor_make_shareable({})
+      class_attribute :aggregate_reflections, instance_writer: false, default: ractor_make_shareable({})
       class_attribute :automatic_scope_inversing, instance_writer: false, default: false
       class_attribute :automatically_invert_plural_associations, instance_writer: false, default: false
     end
@@ -23,11 +24,11 @@ module ActiveRecord
       def add_reflection(ar, name, reflection)
         ar.clear_reflections_cache
         name = name.to_sym
-        ar._reflections = ar._reflections.except(name).merge!(name => reflection)
+        ar._reflections = ar._reflections.except(name).merge!(name => reflection).freeze
       end
 
       def add_aggregate_reflection(ar, name, reflection)
-        ar.aggregate_reflections = ar.aggregate_reflections.merge(name.to_sym => reflection)
+        ar.aggregate_reflections = ar.aggregate_reflections.merge(name.to_sym => reflection).freeze
       end
 
       private
@@ -80,22 +81,24 @@ module ActiveRecord
       end
 
       def normalized_reflections # :nodoc:
-        @__reflections ||= begin
-          ref = {}
+        return @__reflections if instance_variable_defined?(:@__reflections) && @__reflections
 
-          _reflections.each do |name, reflection|
-            parent_reflection = reflection.parent_reflection
+        ref = {}
 
-            if parent_reflection
-              parent_name = parent_reflection.name
-              ref[parent_name] = parent_reflection
-            else
-              ref[name] = reflection
-            end
+        _reflections.each do |name, reflection|
+          parent_reflection = reflection.parent_reflection
+
+          if parent_reflection
+            parent_name = parent_reflection.name
+            ref[parent_name] = parent_reflection
+          else
+            ref[name] = reflection
           end
-
-          ref.freeze
         end
+
+        ref.freeze
+        @__reflections = ref if Ractor.main?
+        ref
       end
 
       # Returns an array of AssociationReflection objects for all the

@@ -245,42 +245,10 @@ module Rails
           end
           model.instance_variable_set(:@_to_partial_path, ractor_make_shareable(model._to_partial_path)) if model.respond_to?(:_to_partial_path)
           model.make_adapter_class_shareable! if model.respond_to?(:make_adapter_class_shareable!)
-          if model.respond_to?(:attribute_aliases)
-            model.attribute_aliases = ractor_make_shareable(model.attribute_aliases.dup)
-          end
-          if model.respond_to?(:attribute_method_patterns)
-            model.attribute_method_patterns = ractor_make_shareable(model.attribute_method_patterns.dup)
-          end
-          if model.instance_variable_defined?(:@aliases_by_attribute_name)
-            model.instance_variable_set(:@aliases_by_attribute_name, ractor_make_shareable(model.instance_variable_get(:@aliases_by_attribute_name).dup))
-          end
-          if model.respond_to?(:_reflections) && model._reflections.empty?
-            model._reflections = ractor_make_shareable(model._reflections.dup)
-          end
-          if model.respond_to?(:aggregate_reflections) && model.aggregate_reflections.empty?
-            model.aggregate_reflections = ractor_make_shareable(model.aggregate_reflections.dup)
-          end
-          if model.respond_to?(:normalized_reflections) && model.normalized_reflections.empty?
-            model.instance_variable_set(:@__reflections, ractor_make_shareable(model.normalized_reflections.dup))
-          end
-          if model.respond_to?(:counter_cached_association_names)
-            counter_cached_association_names = ractor_make_shareable(model.counter_cached_association_names.dup.freeze)
-            model.counter_cached_association_names = counter_cached_association_names
-            model.instance_variable_set(:@__class_attr_counter_cached_association_names, counter_cached_association_names)
-          end
-          if model.respond_to?(:_counter_cache_columns)
-            counter_cache_columns = ractor_make_shareable(model._counter_cache_columns.dup)
-            model._counter_cache_columns = counter_cache_columns
-            model.instance_variable_set(:@__class_attr__counter_cache_columns, counter_cache_columns)
-          end
-          if model.respond_to?(:default_scopes)
-            model.default_scopes = ractor_make_shareable(model.default_scopes.dup)
-          end
           if model != ::ActiveRecord::Base && !(model.respond_to?(:abstract_class?) && model.abstract_class?) && model.respond_to?(:_default_attributes)
             begin
               if !model.respond_to?(:table_exists?) || model.table_exists?
                 model.define_attribute_methods if model.respond_to?(:define_attribute_methods)
-                model.attribute_aliases = ractor_make_shareable(model.attribute_aliases.dup) if model.respond_to?(:attribute_aliases)
                 model.instance_variable_set(:@default_attributes, ractor_make_shareable(model.send(:_default_attributes)))
                 model.instance_variable_set(:@attribute_types, ractor_make_shareable(model.attribute_types)) if model.respond_to?(:attribute_types)
                 model.instance_variable_set(:@columns, ractor_make_shareable(model.columns)) if model.respond_to?(:columns)
@@ -308,10 +276,6 @@ module Rails
             rescue ::ActiveRecord::StatementInvalid, ::ActiveRecord::TableNotSpecified
               # Some framework models are loaded even when their optional tables are not installed.
             end
-          end
-          if model.respond_to?(:counter_cached_association_names)
-            counter_cached_association_names = ractor_make_shareable(model.counter_cached_association_names.dup.freeze)
-            model.instance_variable_set(:@__class_attr_counter_cached_association_names, counter_cached_association_names)
           end
           if (relation_delegate_cache = model.instance_variable_get(:@relation_delegate_cache))
             model.instance_variable_set(:@relation_delegate_cache, ractor_make_shareable(relation_delegate_cache.dup))

@@ -1,13 +1,15 @@
 # frozen_string_literal: true
 
+require "active_support/core_ext/kernel/ractor_shareability"
+
 module ActiveRecord
   # = Active Record Counter Cache
   module CounterCache
     extend ActiveSupport::Concern
 
     included do
-      class_attribute :_counter_cache_columns, instance_accessor: false, default: []
-      class_attribute :counter_cached_association_names, instance_writer: false, default: []
+      class_attribute :_counter_cache_columns, instance_accessor: false, default: ractor_make_shareable([])
+      class_attribute :counter_cached_association_names, instance_writer: false, default: ractor_make_shareable([])
     end
 
     module ClassMethods
@@ -219,7 +221,7 @@ module ActiveRecord
           name.to_sym
         end
 
-        self.counter_cached_association_names |= association_names
+        self.counter_cached_association_names = ractor_make_shareable(counter_cached_association_names | association_names)
       end
     end
 

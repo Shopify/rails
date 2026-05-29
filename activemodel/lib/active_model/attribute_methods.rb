@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "active_support/core_ext/kernel/ractor_shareability"
 require "concurrent/map"
 
 module ActiveModel
@@ -66,10 +67,13 @@ module ActiveModel
 
     NAME_COMPILABLE_REGEXP = /\A[a-zA-Z_]\w*[!?=]?\z/
     CALL_COMPILABLE_REGEXP = /\A[a-zA-Z_]\w*[!?]?\z/
+    EMPTY_ALIASES_BY_ATTRIBUTE_NAME = ractor_make_shareable({})
+    EMPTY_ALIASES = ractor_make_shareable({})
+    EMPTY_ARRAY = ractor_make_shareable([])
 
     included do
-      class_attribute :attribute_aliases, instance_writer: false, default: {}
-      class_attribute :attribute_method_patterns, instance_writer: false, default: [ ClassMethods::AttributeMethodPattern.new ]
+      class_attribute :attribute_aliases, instance_writer: false, default: EMPTY_ALIASES
+      class_attribute :attribute_method_patterns, instance_writer: false, default: ractor_make_shareable([ ClassMethods::AttributeMethodPattern.new ])
     end
 
     module ClassMethods
@@ -104,7 +108,8 @@ module ActiveModel
       #   person.clear_name
       #   person.name          # => nil
       def attribute_method_prefix(*prefixes, parameters: nil)
-        self.attribute_method_patterns += prefixes.map! { |prefix| AttributeMethodPattern.new(prefix: prefix, parameters: parameters) }
+        patterns = attribute_method_patterns + prefixes.map! { |prefix| AttributeMethodPattern.new(prefix: prefix, parameters: parameters) }
+        self.attribute_method_patterns = ractor_make_shareable(patterns)
         undefine_attribute_methods
       end
 
@@ -138,7 +143,8 @@ module ActiveModel
       #   person.name          # => "Bob"
       #   person.name_short?   # => true
       def attribute_method_suffix(*suffixes, parameters: nil)
-        self.attribute_method_patterns += suffixes.map! { |suffix| AttributeMethodPattern.new(suffix: suffix, parameters: parameters) }
+        patterns = attribute_method_patterns + suffixes.map! { |suffix| AttributeMethodPattern.new(suffix: suffix, parameters: parameters) }
+        self.attribute_method_patterns = ractor_make_shareable(patterns)
         undefine_attribute_methods
       end
 
@@ -173,7 +179,8 @@ module ActiveModel
       #   person.reset_name_to_default!
       #   person.name                         # => 'Default Name'
       def attribute_method_affix(*affixes)
-        self.attribute_method_patterns += affixes.map! { |affix| AttributeMethodPattern.new(**affix) }
+        patterns = attribute_method_patterns + affixes.map! { |affix| AttributeMethodPattern.new(**affix) }
+        self.attribute_method_patterns = ractor_make_shareable(patterns)
         undefine_attribute_methods
       end
 
@@ -203,8 +210,11 @@ module ActiveModel
       def alias_attribute(new_name, old_name)
         old_name = old_name.to_s
         new_name = new_name.to_s
-        self.attribute_aliases = attribute_aliases.merge(new_name => old_name)
-        aliases_by_attribute_name[old_name] |= [new_name]
+        self.attribute_aliases = ractor_make_shareable(attribute_aliases.merge(new_name => old_name))
+
+        aliases = aliases_by_attribute_name.dup
+        aliases[old_name] = (aliases.fetch(old_name, EMPTY_ARRAY) | [new_name]).freeze
+        @aliases_by_attribute_name = ractor_make_shareable(aliases)
         eagerly_generate_alias_attribute_methods(new_name, old_name)
       end
 
@@ -273,7 +283,7 @@ module ActiveModel
         ActiveSupport::CodeGenerator.batch(generated_attribute_methods, __FILE__, __LINE__) do |owner|
           attr_names.flatten.each do |attr_name|
             define_attribute_method(attr_name, _owner: owner)
-            aliases_by_attribute_name[attr_name.to_s].each do |aliased_name|
+            aliases_by_attribute_name.fetch(attr_name.to_s, EMPTY_ARRAY).each do |aliased_name|
               generate_alias_attribute_methods owner, aliased_name, attr_name
             end
           end
@@ -380,7 +390,11 @@ module ActiveModel
       end
 
       def aliases_by_attribute_name # :nodoc:
-        @aliases_by_attribute_name ||= Hash.new { |h, k| h[k] = [] }
+        if instance_variable_defined?(:@aliases_by_attribute_name) && @aliases_by_attribute_name
+          @aliases_by_attribute_name
+        else
+          EMPTY_ALIASES_BY_ATTRIBUTE_NAME
+        end
       end
 
       private

@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "active_support/core_ext/kernel/ractor_shareability"
+
 module ActiveRecord::Associations::Builder # :nodoc:
   class BelongsTo < SingularAssociation # :nodoc:
     def self.macro
@@ -38,8 +40,8 @@ module ActiveRecord::Associations::Builder # :nodoc:
       }
 
       klass = reflection.class_name.safe_constantize
-      klass._counter_cache_columns |= [cache_column] if klass && klass.respond_to?(:_counter_cache_columns)
-      model.counter_cached_association_names |= [reflection.name]
+      klass._counter_cache_columns = ractor_make_shareable(klass._counter_cache_columns | [cache_column]) if klass && klass.respond_to?(:_counter_cache_columns)
+      model.counter_cached_association_names = ractor_make_shareable(model.counter_cached_association_names | [reflection.name])
     end
 
     def self.touch_record(o, changes, foreign_key, name, touch) # :nodoc:
