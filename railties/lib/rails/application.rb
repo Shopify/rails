@@ -221,46 +221,16 @@ module Rails
       end
       if defined?(::ActiveRecord::Base)
         ([::ActiveRecord::Base] + ::ActiveRecord::Base.descendants).each do |model|
-          if model.respond_to?(:model_name)
-            model.model_name.human
-            model.instance_variable_set(:@_model_name, ractor_make_shareable(model.model_name))
-          end
-          model.instance_variable_set(:@_to_partial_path, ractor_make_shareable(model._to_partial_path)) if model.respond_to?(:_to_partial_path)
           model.make_adapter_class_shareable! if model.respond_to?(:make_adapter_class_shareable!)
-          if model != ::ActiveRecord::Base && !(model.respond_to?(:abstract_class?) && model.abstract_class?) && model.respond_to?(:_default_attributes)
-            begin
-              if !model.respond_to?(:table_exists?) || model.table_exists?
-                model.define_attribute_methods if model.respond_to?(:define_attribute_methods)
-                model.instance_variable_set(:@default_attributes, ractor_make_shareable(model.send(:_default_attributes)))
-                model.instance_variable_set(:@attribute_types, ractor_make_shareable(model.attribute_types)) if model.respond_to?(:attribute_types)
-                model.instance_variable_set(:@columns, ractor_make_shareable(model.columns)) if model.respond_to?(:columns)
-                model.instance_variable_set(:@column_names, ractor_make_shareable(model.column_names)) if model.respond_to?(:column_names)
-                model.instance_variable_set(:@symbol_column_to_string_name_hash, ractor_make_shareable(model.column_names.index_by(&:to_sym))) if model.respond_to?(:column_names)
-                model.instance_variable_set(:@attributes_builder, ractor_make_shareable(model.send(:attributes_builder))) if model.respond_to?(:attributes_builder, true)
-                if model.respond_to?(:timestamp_attributes_for_create_in_model)
-                  model.instance_variable_set(:@timestamp_attributes_for_create_in_model, ractor_make_shareable(model.timestamp_attributes_for_create_in_model))
-                  model.instance_variable_set(:@timestamp_attributes_for_update_in_model, ractor_make_shareable(model.timestamp_attributes_for_update_in_model))
-                  model.instance_variable_set(:@all_timestamp_attributes_in_model, ractor_make_shareable(model.all_timestamp_attributes_in_model))
-                end
-                if model.respond_to?(:query_constraints_list)
-                  model.instance_variable_set(:@query_constraints_list, ractor_make_shareable(model.query_constraints_list))
-                  model.instance_variable_set(:@composite_query_constraints_list, ractor_make_shareable(model.composite_query_constraints_list)) if model.respond_to?(:composite_query_constraints_list)
-                end
-                if model.respond_to?(:with_connection)
-                  model.with_connection do |connection|
-                    model.instance_variable_set(:@_returning_columns_for_insert, ractor_make_shareable(model._returning_columns_for_insert(connection))) if model.respond_to?(:_returning_columns_for_insert)
-                    model.instance_variable_set(:@_returning_columns_for_update, ractor_make_shareable(model._returning_columns_for_update(connection))) if model.respond_to?(:_returning_columns_for_update)
-                  end
-                end
-                model.instance_variable_set(:@arel_table, ractor_make_shareable(model.arel_table)) if model.respond_to?(:arel_table)
-                model.instance_variable_set(:@predicate_builder, ractor_make_shareable(model.predicate_builder)) if model.respond_to?(:predicate_builder)
-              end
-            rescue ::ActiveRecord::StatementInvalid, ::ActiveRecord::TableNotSpecified
-              # Some framework models are loaded even when their optional tables are not installed.
-            end
-          end
-          if (relation_delegate_cache = model.instance_variable_get(:@relation_delegate_cache))
-            model.instance_variable_set(:@relation_delegate_cache, ractor_make_shareable(relation_delegate_cache.dup))
+          next if model == ::ActiveRecord::Base || (model.respond_to?(:abstract_class?) && model.abstract_class?)
+
+          begin
+            next if model.respond_to?(:table_exists?) && !model.table_exists?
+
+            model.define_attribute_methods if model.respond_to?(:define_attribute_methods)
+            model.ractor_share_schema_state! if model.respond_to?(:ractor_share_schema_state!, true)
+          rescue ::ActiveRecord::StatementInvalid, ::ActiveRecord::TableNotSpecified
+            # Some framework models are loaded even when their optional tables are not installed.
           end
         end
       end

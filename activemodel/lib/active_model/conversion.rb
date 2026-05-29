@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "active_support/core_ext/kernel/ractor_shareability"
+
 module ActiveModel
   # = Active \Model \Conversion
   #
@@ -108,13 +110,18 @@ module ActiveModel
       # Provide a class level cache for #to_partial_path. This is an
       # internal method and should not be accessed directly.
       def _to_partial_path # :nodoc:
-        @_to_partial_path ||= if respond_to?(:model_name)
+        return @_to_partial_path if instance_variable_defined?(:@_to_partial_path) && @_to_partial_path
+
+        partial_path = if respond_to?(:model_name)
           "#{model_name.collection}/#{model_name.element}"
         else
           element = ActiveSupport::Inflector.underscore(ActiveSupport::Inflector.demodulize(name))
           collection = ActiveSupport::Inflector.tableize(name)
           "#{collection}/#{element}"
         end
+        partial_path = ractor_make_shareable(partial_path)
+        @_to_partial_path = partial_path if Ractor.main?
+        partial_path
       end
     end
   end

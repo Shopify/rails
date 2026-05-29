@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "active_support/core_ext/kernel/ractor_shareability"
 require "active_support/core_ext/hash/except"
 require "active_support/core_ext/module/introspection"
 require "active_support/core_ext/module/redefine_method"
@@ -267,12 +268,14 @@ module ActiveModel
     #   Person.model_name.singular # => "person"
     #   Person.model_name.plural   # => "people"
     def model_name
-      @_model_name ||= begin
-        namespace = module_parents.detect do |n|
-          n.respond_to?(:use_relative_model_naming?) && n.use_relative_model_naming?
-        end
-        ActiveModel::Name.new(self, namespace)
+      return @_model_name if instance_variable_defined?(:@_model_name) && @_model_name
+
+      namespace = module_parents.detect do |n|
+        n.respond_to?(:use_relative_model_naming?) && n.use_relative_model_naming?
       end
+      model_name = ractor_make_shareable(ActiveModel::Name.new(self, namespace))
+      @_model_name = model_name if Ractor.main?
+      model_name
     end
 
     # Returns the plural class name of a record or class.

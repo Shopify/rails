@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "active_support/core_ext/kernel/ractor_shareability"
 
 module ActiveRecord
   module Delegation # :nodoc:
@@ -29,7 +30,7 @@ module ActiveRecord
       end
 
       def initialize_relation_delegate_cache
-        @relation_delegate_cache = cache = {}
+        cache = {}
         Delegation.delegated_classes.each do |klass|
           delegate = Class.new(klass) {
             include ClassSpecificRelation
@@ -41,6 +42,7 @@ module ActiveRecord
 
           cache[klass] = delegate
         end
+        @relation_delegate_cache = ractor_make_shareable(cache)
       end
 
       def inherited(child_class)

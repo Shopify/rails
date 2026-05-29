@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "active_support/core_ext/kernel/ractor_shareability"
 require "monitor"
 
 module ActiveRecord
@@ -631,10 +632,54 @@ module ActiveRecord
           @columns_hash = columns_hash.freeze
 
           _default_attributes # Precompute to cache DB-dependent attribute types
+          eager_load_schema_state!
         end
 
-        # Guesses the table name, but does not decorate it with prefix and suffix information.
-        def undecorated_table_name(model_name)
+        def eager_load_schema_state! # :nodoc:
+          @columns = columns_hash.values.freeze
+          @column_names = @columns.map(&:name).freeze
+          @symbol_column_to_string_name_hash = @column_names.index_by(&:to_sym).freeze
+          @attribute_types = attribute_types.freeze if respond_to?(:attribute_types)
+          @attributes_builder = attributes_builder if respond_to?(:attributes_builder, true)
+
+          if respond_to?(:timestamp_attributes_for_create_in_model)
+            @timestamp_attributes_for_create_in_model = timestamp_attributes_for_create_in_model
+            @timestamp_attributes_for_update_in_model = timestamp_attributes_for_update_in_model
+            @all_timestamp_attributes_in_model = all_timestamp_attributes_in_model
+          end
+
+          if respond_to?(:query_constraints_list)
+            @query_constraints_list = query_constraints_list
+            @composite_query_constraints_list = composite_query_constraints_list if respond_to?(:composite_query_constraints_list)
+          end
+
+          with_connection do |connection|
+            @_returning_columns_for_insert = _returning_columns_for_insert(connection) if respond_to?(:_returning_columns_for_insert)
+            @_returning_columns_for_update = _returning_columns_for_update(connection) if respond_to?(:_returning_columns_for_update)
+          end if respond_to?(:with_connection)
+
+          @arel_table = arel_table if respond_to?(:arel_table)
+          @predicate_builder = predicate_builder if respond_to?(:predicate_builder)
+        end
+
+        public
+          def ractor_share_schema_state! # :nodoc:
+          load_schema unless schema_loaded?
+          [
+            :@columns_hash, :@default_attributes, :@attribute_types, :@columns,
+            :@column_names, :@symbol_column_to_string_name_hash, :@attributes_builder,
+            :@timestamp_attributes_for_create_in_model, :@timestamp_attributes_for_update_in_model,
+            :@all_timestamp_attributes_in_model, :@query_constraints_list,
+            :@composite_query_constraints_list, :@_returning_columns_for_insert,
+            :@_returning_columns_for_update, :@arel_table, :@predicate_builder
+          ].each do |ivar|
+            instance_variable_set(ivar, ractor_make_shareable(instance_variable_get(ivar))) if instance_variable_defined?(ivar)
+          end
+        end
+
+        private
+          # Guesses the table name, but does not decorate it with prefix and suffix information.
+          def undecorated_table_name(model_name)
           table_name = model_name.to_s.demodulize.underscore
           pluralize_table_names ? table_name.pluralize : table_name
         end
