@@ -89,4 +89,12 @@ class BacktraceCleanerTest < ActiveSupport::TestCase
     frame = @cleaner.clean_frame("app/views/application/index.html.erb:4:in 'block in #{method_name}'", :all)
     assert_equal "app/views/application/index.html.erb:4", frame
   end
+
+  if RUBY_VERSION >= "4.0"
+    test "backtrace cleaner is ractor shareable" do
+      ractor_make_shareable(@cleaner)
+
+      assert ractor_shareable?(@cleaner)
+    end
+  end
 end

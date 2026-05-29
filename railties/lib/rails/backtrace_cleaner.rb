@@ -2,6 +2,7 @@
 
 require "active_support/backtrace_cleaner"
 require "active_support/core_ext/string/access"
+require "active_support/core_ext/kernel/ractor_shareability"
 
 module Rails
   class BacktraceCleaner < ActiveSupport::BacktraceCleaner # :nodoc:
@@ -9,23 +10,23 @@ module Rails
 
     def initialize
       super
-      add_filter do |line|
+      add_filter(&ractor_shareable_proc do |line|
         # We may be called before Rails.root is assigned.
         # When that happens we fallback to not truncating.
-        @root ||= Rails.root && "#{Rails.root}/"
-        @root && line.start_with?(@root) ? line.from(@root.size) : line
-      end
-      add_filter do |line|
+        root = Rails.root && "#{Rails.root}/"
+        root && line.start_with?(root) ? line.from(root.size) : line
+      end)
+      add_filter(&ractor_shareable_proc do |line|
         if RENDER_TEMPLATE_PATTERN.match?(line)
           line.sub(RENDER_TEMPLATE_PATTERN, "")
         else
           line
         end
-      end
+      end)
 
-      add_silencer do |line|
+      add_silencer(&ractor_shareable_proc  do |line|
         line.start_with?(File::SEPARATOR, "vendor/", "bin/")
-      end
+      end)
     end
 
     def clean(backtrace, kind = :silent)

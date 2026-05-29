@@ -232,6 +232,14 @@ class BacktraceCleanerFirstCleanLocationTest < ActiveSupport::TestCase
     @bc.add_silencer { true }
     assert_nil invoke_first_clean_location_defaults
   end
+
+  if RUBY_VERSION >= "4.0"
+    test "backtrace cleaner is ractor shareable" do
+      ractor_make_shareable(@bc)
+
+      assert ractor_shareable?(@bc)
+    end
+  end
 end
 
 class BacktraceCleanerCleanLocationsTest < ActiveSupport::TestCase
