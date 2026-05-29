@@ -215,6 +215,8 @@ module ActiveRecord
           end
 
           def complete(_)
+            return if defined?(Ractor) && Ractor.current != Ractor.main
+
             ActiveRecord::Base.connection_handler.each_connection_pool do |pool|
               if (connection = pool.active_connection?)
                 transaction = connection.current_transaction

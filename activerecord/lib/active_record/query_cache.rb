@@ -41,6 +41,8 @@ module ActiveRecord
 
     module ExecutorHooks # :nodoc:
       def self.run
+        return [] if defined?(Ractor) && Ractor.current != Ractor.main
+
         ActiveRecord::Base.connection_handler.each_connection_pool.reject(&:query_cache_enabled).each do |pool|
           next if pool.db_config&.query_cache == false
           pool.enable_query_cache!
