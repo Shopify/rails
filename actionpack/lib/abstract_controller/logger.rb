@@ -9,9 +9,25 @@ module AbstractController
     extend ActiveSupport::Concern
 
     included do
-      singleton_class.delegate :logger, :logger=, to: :config
-      delegate :logger, :logger=, to: :config
       include ActiveSupport::Benchmarkable
+    end
+
+    class_methods do
+      def logger
+        config.logger
+      end
+
+      def logger=(logger)
+        update_config_value(:logger, logger)
+      end
+    end
+
+    def logger
+      config.logger
+    end
+
+    def logger=(logger)
+      self.class.logger = logger
     end
   end
 end

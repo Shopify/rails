@@ -70,7 +70,8 @@ module ActiveSupport
           end
 
           # Put the new handler at the end because the list is read in reverse.
-          self.rescue_handlers += [[key, with]]
+          handlers = rescue_handlers + [[key, with]]
+          self.rescue_handlers = ractor_shareable?(with) ? ractor_make_shareable(handlers) : handlers.freeze
         end
       end
 

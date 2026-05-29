@@ -2,6 +2,8 @@
 
 # :markup: markdown
 
+require "active_support/core_ext/kernel/ractor_shareability"
+
 module ActionController
   module Railties
     module Helpers
@@ -15,7 +17,7 @@ module ActionController
           paths = ActionController::Helpers.helpers_path
         end
 
-        klass.helpers_path = paths
+        klass.helpers_path = ractor_make_shareable(paths.dup)
 
         if klass.superclass == ActionController::Base && ActionController::Base.include_all_helpers
           klass.helper :all

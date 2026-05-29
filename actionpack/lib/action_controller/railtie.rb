@@ -103,6 +103,8 @@ module ActionController
             raise "Invalid option key: #{k}"
           end
         end
+
+        ractor_share_config! if respond_to?(:ractor_share_config!)
       end
     end
 

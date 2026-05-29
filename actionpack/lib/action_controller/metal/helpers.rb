@@ -2,6 +2,8 @@
 
 # :markup: markdown
 
+require "active_support/core_ext/kernel/ractor_shareability"
+
 module ActionController
   # # Action Controller Helpers
   #
@@ -67,7 +69,7 @@ module ActionController
     include AbstractController::Helpers
 
     included do
-      class_attribute :helpers_path, default: []
+      class_attribute :helpers_path, default: ractor_make_shareable([])
       class_attribute :include_all_helpers, default: true
     end
 

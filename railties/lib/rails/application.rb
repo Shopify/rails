@@ -219,22 +219,6 @@ module Rails
         ractor_make_shareable(::Mime::EXTENSION_LOOKUP)
         ractor_make_shareable(::Mime::ALL) if defined?(::Mime::ALL)
       end
-      if defined?(::ActionController::Metal)
-        ([::ActionController::Metal] + ::ActionController::Metal.descendants).each do |controller|
-          controller.instance_variable_set(:@controller_path, ractor_make_shareable(controller.controller_path)) unless controller.anonymous?
-          controller.default_url_options = ractor_make_shareable(controller.default_url_options.dup) if controller.respond_to?(:default_url_options)
-          if controller.respond_to?(:config)
-            config = controller.config
-            if config[:cache_store] && !ractor_shareable?(config[:cache_store])
-              config = ActiveSupport::InheritableOptions.new.update(config.to_h.to_h.merge(cache_store: nil))
-            end
-            controller.config = ractor_make_shareable(config)
-          end
-          controller.__callbacks = ractor_make_shareable(controller.__callbacks.dup) if controller.respond_to?(:__callbacks)
-          controller.rescue_handlers = ractor_make_shareable(controller.rescue_handlers.dup) if controller.respond_to?(:rescue_handlers)
-          ractor_make_shareable(controller.view_context_class) if controller.respond_to?(:view_context_class)
-        end
-      end
       if defined?(::ActiveRecord::Base)
         ([::ActiveRecord::Base] + ::ActiveRecord::Base.descendants).each do |model|
           if model.respond_to?(:model_name)

@@ -2,6 +2,8 @@
 
 # :markup: markdown
 
+require "active_support/core_ext/kernel/ractor_shareability"
+
 module ActionDispatch
   module Routing
     # # Action Dispatch Routing UrlFor
@@ -97,12 +99,12 @@ module ActionDispatch
         unless method_defined?(:default_url_options)
           # Including in a class uses an inheritable hash. Modules get a plain hash.
           if respond_to?(:class_attribute)
-            class_attribute :default_url_options
+            class_attribute :default_url_options, default: ractor_make_shareable({})
           else
             mattr_writer :default_url_options
           end
 
-          self.default_url_options = {}
+          self.default_url_options = ractor_make_shareable({})
         end
 
         include(*_url_for_modules) if respond_to?(:_url_for_modules)
@@ -111,6 +113,12 @@ module ActionDispatch
       def initialize(...)
         @_routes = nil
         super
+      end
+
+      module ClassMethods
+        def default_url_options=(options)
+          super(ractor_make_shareable(options.dup))
+        end
       end
 
       # Hook overridden in controller to add request information with

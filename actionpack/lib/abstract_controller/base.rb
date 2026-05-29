@@ -7,6 +7,7 @@ require "active_support/descendants_tracker"
 require "active_support/inspect_backport"
 require "active_support/core_ext/module/anonymous"
 require "active_support/core_ext/module/attr_internal"
+require "active_support/core_ext/kernel/ractor_shareability"
 
 module AbstractController
   # Raised when a non-existing controller action is triggered.
@@ -65,8 +66,26 @@ module AbstractController
         unless klass.instance_variable_defined?(:@abstract)
           klass.instance_variable_set(:@abstract, false)
         end
-        klass.config = ActiveSupport::InheritableOptions.new(config)
+        subclass_config = ActiveSupport::InheritableOptions.new(config)
+        klass.config = ractor_shareable?(config) ? ractor_share_config_object(subclass_config) : subclass_config
         super
+      end
+
+      def update_config_value(name, value) # :nodoc:
+        updated_config = ActiveSupport::InheritableOptions.new(config)
+        updated_config[name] = value
+        self.config = config.frozen? ? ractor_share_config_object(updated_config) : updated_config
+      end
+
+      def ractor_share_config! # :nodoc:
+        self.config = ractor_share_config_object(config)
+      end
+
+      def ractor_share_config_object(config) # :nodoc:
+        config_hash = config.to_h.to_h
+        config_hash[:cache_store] = nil if config_hash[:cache_store] && !ractor_shareable?(config_hash[:cache_store])
+        config_hash[:logger] = nil if config_hash[:logger] && !ractor_shareable?(config_hash[:logger])
+        ractor_make_shareable(ActiveSupport::InheritableOptions.new.update(config_hash))
       end
 
       # A list of all internal methods for a controller. This finds the first abstract
@@ -115,7 +134,7 @@ module AbstractController
       #     MyApp::MyPostsController.controller_path # => "my_app/my_posts"
       #
       def controller_path
-        @controller_path ||= name.delete_suffix("Controller").underscore unless anonymous?
+        name.delete_suffix("Controller").underscore unless anonymous?
       end
 
       def configure # :nodoc:

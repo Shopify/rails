@@ -1030,23 +1030,20 @@ module ActiveSupport
           end
 
           def set_callbacks(name, callbacks) # :nodoc:
-            # HACK: We're making assumption on how `class_attribute` is implemented
-            # to save constantly duping the callback hash. If this desync with class_attribute
-            # we'll lose the optimization, but won't cause an actual behavior bug.
-            if !singleton_class.private_method_defined?(:__class_attr__callbacks_owner, false) || self.__callbacks.frozen?
-              self.__callbacks = __callbacks.dup
-            end
             name = name.to_sym
-            callbacks_was = self.__callbacks[name.to_sym]
+            callbacks_was = self.__callbacks[name]
             if (callbacks_was.nil? || callbacks_was.empty?) && !callbacks.empty?
               alias_method("_run_#{name}_callbacks", "_run_#{name}_callbacks!")
             end
-            self.__callbacks[name.to_sym] = callbacks
 
-            if defined?(ActiveSupport::ExecutionWrapper) && self <= ActiveSupport::ExecutionWrapper && self.name.nil? && !(defined?(ActiveSupport::Reloader) && self < ActiveSupport::Reloader)
-              self.__callbacks = ractor_make_shareable(self.__callbacks.dup)
+            callbacks_by_name = __callbacks.dup
+            callbacks_by_name[name] = callbacks
+
+            if (defined?(ActiveSupport::ExecutionWrapper) && self <= ActiveSupport::ExecutionWrapper && self.name.nil? && !(defined?(ActiveSupport::Reloader) && self < ActiveSupport::Reloader)) ||
+                (defined?(ActionController::Metal) && self <= ActionController::Metal)
+              self.__callbacks = ractor_make_shareable(callbacks_by_name)
             else
-              self.__callbacks
+              self.__callbacks = callbacks_by_name.freeze
             end
           end
       end

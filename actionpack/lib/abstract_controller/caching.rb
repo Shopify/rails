@@ -2,6 +2,8 @@
 
 # :markup: markdown
 
+require "active_support/core_ext/kernel/ractor_shareability"
+
 module AbstractController
   module Caching
     extend ActiveSupport::Concern
@@ -44,13 +46,13 @@ module AbstractController
       delegate :enable_fragment_cache_logging, :enable_fragment_cache_logging=, to: :config
       self.enable_fragment_cache_logging = false
 
-      class_attribute :_view_cache_dependencies, default: []
+      class_attribute :_view_cache_dependencies, default: ractor_make_shareable([])
       helper_method :view_cache_dependencies if respond_to?(:helper_method)
     end
 
     module ClassMethods
       def view_cache_dependency(&dependency)
-        self._view_cache_dependencies += [dependency]
+        self._view_cache_dependencies = ractor_make_shareable(_view_cache_dependencies + [dependency])
       end
     end
 

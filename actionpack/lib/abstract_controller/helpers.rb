@@ -3,6 +3,7 @@
 # :markup: markdown
 
 require "active_support/dependencies"
+require "active_support/core_ext/kernel/ractor_shareability"
 require "active_support/core_ext/name_error"
 
 module AbstractController
@@ -10,7 +11,7 @@ module AbstractController
     extend ActiveSupport::Concern
 
     included do
-      class_attribute :_helper_methods, default: Array.new
+      class_attribute :_helper_methods, default: ractor_make_shareable([])
 
       # This is here so that it is always higher in the inheritance chain than the
       # definition in lib/action_view/rendering.rb
@@ -127,7 +128,7 @@ module AbstractController
       #     made available on the view.
       def helper_method(*methods)
         methods.flatten!
-        self._helper_methods += methods
+        self._helper_methods = ractor_make_shareable(_helper_methods + methods)
 
         location = caller_locations(1, 1).first
         file, line = location.path, location.lineno
@@ -209,7 +210,7 @@ module AbstractController
       def clear_helpers
         inherited_helper_methods = _helper_methods
         self._helpers = Module.new
-        self._helper_methods = Array.new
+        self._helper_methods = ractor_make_shareable([])
 
         inherited_helper_methods.each { |meth| helper_method meth }
         default_helper_module! unless anonymous?
