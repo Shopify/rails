@@ -3,6 +3,7 @@
 # :markup: markdown
 
 require "rack/utils"
+require "active_support/core_ext/kernel/ractor_shareability"
 
 module ActionDispatch
   # # Action Dispatch Static
@@ -59,6 +60,7 @@ module ActionDispatch
       @precompressed = Array(precompressed).map(&:to_s) | %w[ identity ]
       @compressible_content_types = compressible_content_types
 
+      @default_static_extension = ractor_make_shareable(::ActionController::Base.default_static_extension)
       @file_server = ::Rack::Files.new(@root, headers)
       @file_server.remove_instance_variable(:@head) if @file_server.instance_variable_defined?(:@head)
     end
@@ -114,7 +116,7 @@ module ActionDispatch
         end
       end
 
-      DEFAULT_UTF8_CONTENT_TYPES = [ Mime[:html], Mime[:css] ].freeze
+      DEFAULT_UTF8_CONTENT_TYPES = ractor_make_shareable([ Mime[:html], Mime[:css] ])
       private_constant :DEFAULT_UTF8_CONTENT_TYPES
 
       def try_files(filepath, content_type, accept_encoding:)
@@ -182,7 +184,7 @@ module ActionDispatch
         # resolvable file extension. No need to check for foo.js.html and
         # foo.js/index.html.
         unless content_type
-          default_ext = ::ActionController::Base.default_static_extension
+          default_ext = @default_static_extension
           if ext != default_ext
             default_content_type = ::Rack::Mime.mime_type(default_ext, "text/plain")
 
