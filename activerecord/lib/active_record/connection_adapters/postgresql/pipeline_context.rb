@@ -228,33 +228,20 @@ module ActiveRecord
             consumed = []
             buffered = []
 
-            while intent = @pending_intents.first
+            while intent = @pending_intents[buffered.length]
               if intent.is_a?(SyncIntent)
-                begin
-                  sync_result = @raw_connection.get_result
-                rescue PG::Error, IOError, SystemCallError
-                  restore_buffered_intents(buffered)
-                  raise
-                end
+                sync_result = @raw_connection.get_result
+                return discard_buffered_results(buffered, consumed) unless sync_result
 
-                unless sync_result
-                  restore_buffered_intents(buffered)
-                  return consumed
-                end
-
-                begin
-                  sync_result.check
-                rescue => error
-                  restore_buffered_intents(buffered)
-                  raise error
-                end
+                sync_result.check
 
                 unless sync_result.result_status == PG::PGRES_PIPELINE_SYNC
-                  restore_buffered_intents(buffered)
                   raise "BUG: expected pipeline sync result, got #{sync_result.result_status}"
                 end
 
-                @pending_intents.shift
+                finalized_count = buffered.length + 1
+                @pending_intents.shift(finalized_count)
+
                 intent.raw_result = sync_result if TRACK_SYNCS
                 sync_result.clear unless TRACK_SYNCS
 
@@ -263,20 +250,10 @@ module ActiveRecord
                 next
               end
 
-              begin
-                raw_result = get_result(@raw_connection)
-              rescue PG::Error, IOError, SystemCallError
-                restore_buffered_intents(buffered)
-                raise
-              end
-
-              unless raw_result
-                restore_buffered_intents(buffered)
-                return consumed
-              end
+              raw_result = get_result(@raw_connection)
+              return discard_buffered_results(buffered, consumed) unless raw_result
 
               if raw_result.result_status == PG::PGRES_PIPELINE_ABORTED
-                @pending_intents.shift
                 buffered << [:not_run, intent, :server_aborted, take_notice_receiver_warnings]
                 next
               end
@@ -286,16 +263,14 @@ module ActiveRecord
               rescue => error
                 translated = translate_exception_with_cause(error, intent.processed_sql, intent.binds)
                 if retryable_connection_error?(translated)
-                  restore_buffered_intents(buffered)
+                  discard_buffered_results(buffered)
                   raise error
                 end
 
-                @pending_intents.shift
                 buffered << [:failure, intent, translated, take_notice_receiver_warnings]
                 next
               end
 
-              @pending_intents.shift
               buffered << [:result, intent, raw_result, take_notice_receiver_warnings]
             end
 
@@ -319,11 +294,12 @@ module ActiveRecord
             error if error.respond_to?(:result) && error.result
           end
 
-          def restore_buffered_intents(buffered)
-            return if buffered.empty?
-
-            @pending_intents = buffered.map { |(_, intent, _, _)| intent } + @pending_intents
+          def discard_buffered_results(buffered, return_value = nil)
+            buffered.each do |kind, _intent, value, _warnings|
+              value.clear if kind == :result
+            end
             buffered.clear
+            return_value
           end
 
           def deliver_buffered_intents(buffered, consumed)
