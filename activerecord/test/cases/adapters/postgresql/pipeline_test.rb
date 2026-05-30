@@ -471,6 +471,55 @@ module ActiveRecord
     end
 
 
+    def test_pipelined_result_is_not_delivered_before_sync_response
+      with_dedicated_connection do |conn|
+        conn.enter_pipeline_mode
+        intent = build_intent(conn, "SELECT 1 AS n", materialize_transactions: false)
+        intent.execute!
+        flush_server_results_without_sync(conn)
+        sync = record_sync_marker_without_server_sync(conn)
+
+        consumed = conn.send(:consume_pipeline)
+
+        assert_empty consumed
+        assert_not intent.raw_result_available?
+        assert_equal [intent, sync], conn.instance_variable_get(:@pending_intents)
+      end
+    end
+
+    def test_pipelined_result_is_delivered_after_sync_response
+      with_dedicated_connection do |conn|
+        conn.enter_pipeline_mode
+        intent = build_intent(conn, "SELECT 1 AS n", materialize_transactions: false)
+        intent.execute!
+        conn.pipeline_sync
+
+        consumed = conn.send(:consume_pipeline)
+
+        assert_equal [intent], consumed
+        assert intent.raw_result_available?
+        assert_equal [[1]], intent.cast_result.rows
+        assert_empty conn.instance_variable_get(:@pending_intents)
+      end
+    end
+
+    def test_pipelined_result_remains_pending_after_socket_close_without_sync_response
+      with_dedicated_connection do |conn|
+        conn.enter_pipeline_mode
+        intent = build_intent(conn, "SELECT 1 AS n", materialize_transactions: false)
+        intent.execute!
+        flush_server_results_without_sync(conn)
+        sync = record_sync_marker_without_server_sync(conn)
+        close_client_socket_file_descriptor(conn)
+
+        consumed = conn.send(:consume_pipeline)
+
+        assert_empty consumed
+        assert_not intent.raw_result_available?
+        assert_equal [intent, sync], conn.instance_variable_get(:@pending_intents)
+      end
+    end
+
     def test_pipelined_query_instrumentation
       events = []
       callback = ->(name, start, finish, id, payload) { events << payload }
@@ -1206,6 +1255,77 @@ module ActiveRecord
       end
     end
 
+    def test_synced_retryable_intents_replayed_after_connection_failure
+      # Tests the "synced but retryable" replay path: queries that have
+      # crossed a sync boundary (so the server may have executed them)
+      # but are all marked allow_retry, so replay is still safe.
+      #
+      # This complements test_connection_failure_while_enqueuing which
+      # tests the "unsynced" path (no sync boundary crossed, replay is
+      # safe regardless of allow_retry).
+      pool_config = ActiveRecord::Base.connection_pool.db_config
+      test_pool = ActiveRecord::ConnectionAdapters::ConnectionPool.new(
+        ActiveRecord::ConnectionAdapters::PoolConfig.new(
+          ActiveRecord::Base,
+          pool_config,
+          :writing,
+          :default
+        )
+      )
+
+      begin
+        conn = test_pool.checkout
+        conn.materialize_transactions
+        initial_pid = conn.select_value("SELECT pg_backend_pid()")
+
+        conn.enter_pipeline_mode
+
+        intent1 = ActiveRecord::ConnectionAdapters::QueryIntent.new(
+          adapter: conn,
+          raw_sql: "SELECT 1 AS n",
+          name: "TEST",
+          allow_retry: true
+        )
+        intent2 = ActiveRecord::ConnectionAdapters::QueryIntent.new(
+          adapter: conn,
+          raw_sql: "SELECT 2 AS n",
+          name: "TEST",
+          allow_retry: true
+        )
+
+        intent1.execute!
+        intent2.execute!
+
+        # Sync the pipeline - this succeeds, recording a SyncIntent
+        # marker. The server may have already processed the queries.
+        conn.pipeline_sync
+
+        # Now close the socket. The SyncIntent is already recorded,
+        # so these intents are "synced" (fate unknown).
+        raw_conn = conn.instance_variable_get(:@raw_connection)
+        previous_stderr = $stderr
+        begin
+          $stderr = StringIO.new
+          fd = raw_conn.socket
+        ensure
+          $stderr = previous_stderr
+        end
+        IO.for_fd(fd).close
+
+        # Accessing results triggers flush_pipeline, which detects
+        # the dead connection and replays because all synced intents
+        # have allow_retry.
+        assert_equal [[1]], intent1.cast_result.rows
+        assert_equal [[2]], intent2.cast_result.rows
+
+        new_pid = conn.select_value("SELECT pg_backend_pid()")
+        assert_not_equal initial_pid, new_pid
+      ensure
+        test_pool.disconnect! rescue nil
+      end
+    end
+
+
     def test_synced_non_retryable_intent_blocks_replay
       # When a synced intent is non-retryable, full replay is blocked.
       # The retryable intent recovers via individual retry; the
@@ -1938,8 +2058,45 @@ module ActiveRecord
         )
       end
 
+      def flush_server_results_without_sync(conn)
+        raw_connection = conn.instance_variable_get(:@raw_connection)
+        raw_connection.send_flush_request
+        raw_connection.flush
+
+        deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 2
+        until !raw_connection.is_busy
+          raw_connection.consume_input
+          raise "timed out waiting for flushed pipeline result" if Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
+
+          sleep 0.1
+        end
+      end
+
+      def record_sync_marker_without_server_sync(conn)
+        raw_connection = conn.instance_variable_get(:@raw_connection)
+        raw_connection.stub(:pipeline_sync, true) do
+          conn.pipeline_sync
+        end
+
+        sync = conn.instance_variable_get(:@pending_intents).last
+        assert_instance_of ActiveRecord::ConnectionAdapters::PostgreSQL::PipelineContext::SyncIntent, sync
+        sync
+      end
+
       def assert_connection_replaced(conn, previous_pid)
         assert_not_equal previous_pid, connection_id_from_server(conn)
+      end
+
+      def close_client_socket_file_descriptor(conn)
+        raw_conn = conn.instance_variable_get(:@raw_connection)
+        previous_stderr = $stderr
+        begin
+          $stderr = StringIO.new
+          fd = raw_conn.socket
+        ensure
+          $stderr = previous_stderr
+        end
+        IO.for_fd(fd).close
       end
 
       def close_client_socket(conn)
