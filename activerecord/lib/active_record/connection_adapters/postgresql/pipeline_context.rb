@@ -226,47 +226,77 @@ module ActiveRecord
             return if @pending_intents.empty?
 
             consumed = []
+            buffered = []
 
             while intent = @pending_intents.first
-              if intent.is_a?(SyncIntent) && !TRACK_SYNCS
-                @pending_intents.shift
-                next
-              end
-
-              raw_result = get_result(@raw_connection) { |result|
-                if result.result_status == PG::PGRES_PIPELINE_SYNC
-                  TRACK_SYNCS ? :break : :skip
-                end
-              }
-              @pending_intents.shift
-
               if intent.is_a?(SyncIntent)
-                intent.raw_result = raw_result if TRACK_SYNCS
-                next
-              end
+                begin
+                  sync_result = @raw_connection.get_result
+                rescue PG::Error, IOError, SystemCallError
+                  restore_buffered_intents(buffered)
+                  raise
+                end
 
-              if raw_result&.result_status == PG::PGRES_PIPELINE_ABORTED
-                intent.deliver_not_run(reason: :server_aborted)
-                consumed << intent
+                unless sync_result
+                  restore_buffered_intents(buffered)
+                  return consumed
+                end
+
+                begin
+                  sync_result.check
+                rescue => error
+                  restore_buffered_intents(buffered)
+                  raise error
+                end
+
+                unless sync_result.result_status == PG::PGRES_PIPELINE_SYNC
+                  restore_buffered_intents(buffered)
+                  raise "BUG: expected pipeline sync result, got #{sync_result.result_status}"
+                end
+
+                @pending_intents.shift
+                intent.raw_result = sync_result if TRACK_SYNCS
+                sync_result.clear unless TRACK_SYNCS
+
+                deliver_buffered_intents(buffered, consumed)
+                buffered = []
                 next
               end
 
               begin
-                raw_result&.check
-              rescue => error
-                translated = translate_exception_with_cause(error, intent.processed_sql, intent.binds)
-                intent.deliver_failure(translated)
-                consumed << intent
+                raw_result = get_result(@raw_connection)
+              rescue PG::Error, IOError, SystemCallError
+                restore_buffered_intents(buffered)
+                raise
+              end
+
+              unless raw_result
+                restore_buffered_intents(buffered)
+                return consumed
+              end
+
+              if raw_result.result_status == PG::PGRES_PIPELINE_ABORTED
+                @pending_intents.shift
+                buffered << [:not_run, intent, :server_aborted, take_notice_receiver_warnings]
                 next
               end
 
-              if intent.notification_payload && raw_result
-                intent.notification_payload[:affected_rows] = raw_result.cmd_tuples
-                intent.notification_payload[:row_count] = raw_result.ntuples
+              begin
+                raw_result.check
+              rescue => error
+                translated = translate_exception_with_cause(error, intent.processed_sql, intent.binds)
+                if retryable_connection_error?(translated)
+                  restore_buffered_intents(buffered)
+                  raise error
+                end
+
+                @pending_intents.shift
+                buffered << [:failure, intent, translated, take_notice_receiver_warnings]
+                next
               end
 
-              intent.deliver_result(raw_result)
-              consumed << intent
+              @pending_intents.shift
+              buffered << [:result, intent, raw_result, take_notice_receiver_warnings]
             end
 
             consumed
@@ -287,6 +317,40 @@ module ActiveRecord
             consume_notice_receiver_fatal_error
           rescue PG::Error => error
             error if error.respond_to?(:result) && error.result
+          end
+
+          def restore_buffered_intents(buffered)
+            return if buffered.empty?
+
+            @pending_intents = buffered.map { |(_, intent, _, _)| intent } + @pending_intents
+            buffered.clear
+          end
+
+          def deliver_buffered_intents(buffered, consumed)
+            buffered.each do |kind, intent, value, warnings|
+              case kind
+              when :result
+                if intent.notification_payload && value
+                  intent.notification_payload[:affected_rows] = value.cmd_tuples
+                  intent.notification_payload[:row_count] = value.ntuples
+                end
+                intent.deliver_result(value, warnings: warnings)
+              when :failure
+                intent.deliver_failure(value, warnings: warnings)
+              when :not_run
+                intent.deliver_not_run(reason: value, warnings: warnings)
+              end
+
+              consumed << intent
+            end
+          ensure
+            buffered.clear
+          end
+
+          def take_notice_receiver_warnings
+            @notice_receiver_sql_warnings.tap do
+              @notice_receiver_sql_warnings = []
+            end
           end
 
           # Classify and deliver terminal states to all pending intents after
