@@ -487,6 +487,99 @@ module ActiveRecord
       end
     end
 
+    def test_consume_pipeline_does_not_get_result_while_connection_is_busy
+      with_dedicated_connection do |conn|
+        conn.enter_pipeline_mode
+        intent = build_intent(conn, "SELECT pg_sleep(0.1)", materialize_transactions: false)
+        intent.execute!
+
+        raw_connection = conn.instance_variable_get(:@raw_connection)
+        raw_connection.stub(:is_busy, true) do
+          raw_connection.stub(:get_result, -> { raise "get_result would block" }) do
+            consumed = conn.send(:consume_pipeline)
+
+            assert_empty consumed
+            assert_not intent.raw_result_available?
+            assert_equal [intent], conn.instance_variable_get(:@pending_intents)
+          end
+        end
+      end
+    end
+
+    def test_consume_pipeline_collapses_raw_results_until_nil_boundary
+      with_dedicated_connection do |conn|
+        conn.exit_pipeline_mode if conn.pipeline_active?
+        raw_connection = conn.instance_variable_get(:@raw_connection)
+        first_result = raw_connection.exec("SELECT 1 AS n")
+        second_result = raw_connection.exec("SELECT 2 AS n")
+
+        conn.enter_pipeline_mode
+        intent = build_intent(conn, "SELECT 2 AS n", materialize_transactions: false)
+        sync = ActiveRecord::ConnectionAdapters::PostgreSQL::PipelineContext::SyncIntent.new
+        conn.instance_variable_set(:@pending_intents, [intent, sync])
+
+        results = [first_result, second_result, nil]
+        raw_connection.stub(:consume_input, -> { }) do
+          raw_connection.stub(:is_busy, false) do
+            raw_connection.stub(:get_result, -> { results.shift }) do
+              consumed = conn.send(:consume_pipeline)
+
+              assert_empty consumed
+              assert first_result.cleared?
+              assert_not second_result.cleared?
+              assert_not intent.raw_result_available?
+              assert_equal [intent, sync], conn.instance_variable_get(:@pending_intents)
+              assert_same second_result, conn.instance_variable_get(:@pipeline_buffer).first[2]
+            end
+          end
+        end
+      ensure
+        conn&.send(:discard_pipeline_buffer)
+        conn&.instance_variable_set(:@pending_intents, [])
+      end
+    end
+
+    def test_consume_pipeline_keeps_raw_result_until_nil_boundary_arrives
+      with_dedicated_connection do |conn|
+        conn.exit_pipeline_mode if conn.pipeline_active?
+        raw_connection = conn.instance_variable_get(:@raw_connection)
+        result = raw_connection.exec("SELECT 1 AS n")
+
+        conn.enter_pipeline_mode
+        intent = build_intent(conn, "SELECT 1 AS n", materialize_transactions: false)
+        conn.instance_variable_set(:@pending_intents, [intent])
+
+        busy = [false, true]
+        raw_connection.stub(:consume_input, -> { }) do
+          raw_connection.stub(:is_busy, -> { busy.shift }) do
+            raw_connection.stub(:get_result, -> { result }) do
+              consumed = conn.send(:consume_pipeline)
+
+              assert_empty consumed
+              assert_not result.cleared?
+              assert_same result, conn.instance_variable_get(:@pipeline_result_buffer)
+              assert_empty conn.instance_variable_get(:@pipeline_buffer)
+            end
+          end
+        end
+
+        raw_connection.stub(:consume_input, -> { }) do
+          raw_connection.stub(:is_busy, false) do
+            raw_connection.stub(:get_result, -> { }) do
+              consumed = conn.send(:consume_pipeline)
+
+              assert_empty consumed
+              assert_nil conn.instance_variable_get(:@pipeline_result_buffer)
+              assert_same result, conn.instance_variable_get(:@pipeline_buffer).first[2]
+            end
+          end
+        end
+      ensure
+        conn&.send(:discard_pipeline_buffer)
+        conn&.instance_variable_set(:@pending_intents, [])
+      end
+    end
+
     def test_pipelined_result_is_delivered_after_sync_response
       with_dedicated_connection do |conn|
         conn.enter_pipeline_mode
@@ -494,12 +587,41 @@ module ActiveRecord
         intent.execute!
         conn.pipeline_sync
 
+        consumed = conn.send(:drain_pipeline)
+
+        assert_equal [intent], consumed
+        assert intent.raw_result_available?
+        assert_equal [[1]], intent.cast_result.rows
+        assert_empty conn.instance_variable_get(:@pending_intents)
+      end
+    end
+
+    def test_pipelined_result_buffered_until_later_sync_response
+      with_dedicated_connection do |conn|
+        conn.enter_pipeline_mode
+        intent = build_intent(conn, "SELECT 1 AS n", materialize_transactions: false)
+        intent.execute!
+        flush_server_results_without_sync(conn)
+        sync = record_sync_marker_without_server_sync(conn)
+
+        consumed = conn.send(:consume_pipeline)
+
+        assert_empty consumed
+        assert_not intent.raw_result_available?
+        assert_equal [intent, sync], conn.instance_variable_get(:@pending_intents)
+        assert_equal 1, conn.instance_variable_get(:@pipeline_buffer).length
+
+        raw_connection = conn.instance_variable_get(:@raw_connection)
+        raw_connection.pipeline_sync
+        wait_for_available_pipeline_result(raw_connection)
+
         consumed = conn.send(:consume_pipeline)
 
         assert_equal [intent], consumed
         assert intent.raw_result_available?
         assert_equal [[1]], intent.cast_result.rows
         assert_empty conn.instance_variable_get(:@pending_intents)
+        assert_empty conn.instance_variable_get(:@pipeline_buffer)
       end
     end
 
@@ -510,13 +632,23 @@ module ActiveRecord
         intent.execute!
         flush_server_results_without_sync(conn)
         sync = record_sync_marker_without_server_sync(conn)
-        close_client_socket_file_descriptor(conn)
 
         consumed = conn.send(:consume_pipeline)
 
         assert_empty consumed
         assert_not intent.raw_result_available?
         assert_equal [intent, sync], conn.instance_variable_get(:@pending_intents)
+        assert_equal 1, conn.instance_variable_get(:@pipeline_buffer).length
+
+        close_client_socket_file_descriptor(conn)
+
+        assert_raises(PG::Error, IOError, SystemCallError) do
+          conn.send(:consume_pipeline)
+        end
+
+        assert_not intent.raw_result_available?
+        assert_equal [intent, sync], conn.instance_variable_get(:@pending_intents)
+        assert_empty conn.instance_variable_get(:@pipeline_buffer)
       end
     end
 
@@ -2062,7 +2194,10 @@ module ActiveRecord
         raw_connection = conn.instance_variable_get(:@raw_connection)
         raw_connection.send_flush_request
         raw_connection.flush
+        wait_for_available_pipeline_result(raw_connection)
+      end
 
+      def wait_for_available_pipeline_result(raw_connection)
         deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 2
         until !raw_connection.is_busy
           raw_connection.consume_input
