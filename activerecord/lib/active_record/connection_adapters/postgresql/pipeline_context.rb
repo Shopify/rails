@@ -73,12 +73,6 @@ module ActiveRecord
             @raw_connection.consume_input
             @pending_intents << SyncIntent.new
             @raw_connection.pipeline_sync
-          rescue PG::Error
-            if error = consume_available_fatal_result
-              raise error
-            else
-              raise
-            end
           end
         end
 
@@ -161,28 +155,17 @@ module ActiveRecord
             last_replayed_head = nil
 
             loop do
+              sync_error = nil
               begin
                 pipeline_sync
-                consumed = consume_pipeline
-              rescue PG::Error => error
-                translated = translate_exception_with_cause(error, nil, nil)
+              rescue PG::Error => e
+                sync_error = e
+              end
 
-                # A FATAL error means the server explicitly told us it's
-                # terminating the connection. Everything still in
-                # @pending_intents is definitively not-executed, so all
-                # are safe to replay regardless of allow_retry.
-                server_fatal = error.respond_to?(:result) &&
-                  connection_terminating_severity?(error.result)
-
-                replayable = retryable_connection_error?(translated) &&
-                  reconnect_can_restore_state? &&
-                  if server_fatal
-                    abandon_pipelined_intents(translated, allow_recovery: true, all_unsynced: true, last_replayed_head: last_replayed_head)
-                  else
-                    abandon_pipelined_intents(translated, allow_recovery: true, last_replayed_head: last_replayed_head)
-                  end
-
-                if replayable
+              begin
+                consumed = drain_pipeline
+              rescue PG::Error, IOError, SystemCallError => e
+                if replayable = recover_from_pipeline_connection_error(e, last_replayed_head)
                   last_replayed_head = replayable.first
                   reconnect!(restore_transactions: true)
                   enter_pipeline_mode
@@ -190,25 +173,31 @@ module ActiveRecord
                   next
                 end
 
-                # abandon_pipelined_intents already delivered terminal
-                # states if it was called (retryable error but recovery
-                # blocked). For non-retryable errors, abandon now.
-                abandon_pipelined_intents(translated)
                 return
               end
 
-              # Check if consume_pipeline encountered a connection error
-              # in a pipeline result (e.g., AdminShutdown). Only intents
+              # Check if drain_pipeline delivered a connection error
+              # from a pipeline result (e.g., AdminShutdown). Only intents
               # that failed or were not run need replay; successfully
               # resolved intents keep their results.
-              needs_replay = consumed&.select { |intent| intent.error || intent.not_run_reason }
-              if needs_replay&.any? { |intent| intent.error && retryable_connection_error?(intent.error) }
+              needs_replay = consumed&.select { |i| i.error || i.not_run_reason }
+              if needs_replay&.any? { |i| i.error && retryable_connection_error?(i.error) }
                 if reconnect_can_restore_state? && needs_replay.all?(&:allow_retry) && needs_replay.first != last_replayed_head
                   last_replayed_head = needs_replay.first
                   needs_replay.each(&:reset_for_retry)
                   reconnect!(restore_transactions: true)
                   enter_pipeline_mode
                   needs_replay.each { |intent| pipeline_add_query(intent) }
+                  next
+                end
+              end
+
+              if sync_error
+                if replayable = recover_from_pipeline_connection_error(sync_error, last_replayed_head)
+                  last_replayed_head = replayable.first
+                  reconnect!(restore_transactions: true)
+                  enter_pipeline_mode
+                  replayable.each { |intent| pipeline_add_query(intent) }
                   next
                 end
               end
@@ -220,90 +209,249 @@ module ActiveRecord
           maybe_deferred_release
         end
 
-        def consume_pipeline
+        def drain_pipeline
           @lock.synchronize do
             @pending_intents ||= []
-            return if @pending_intents.empty?
-
             consumed = []
-            buffered = []
 
-            while intent = @pending_intents[buffered.length]
-              if intent.is_a?(SyncIntent)
-                sync_result = @raw_connection.get_result
-                return discard_buffered_results(buffered, consumed) unless sync_result
+            while @pending_intents.any?
+              pending_count = @pending_intents.length
+              buffer_count = pipeline_buffer.length
 
-                sync_result.check
+              consumed.concat(consume_pipeline)
+              break if @pending_intents.empty?
 
-                unless sync_result.result_status == PG::PGRES_PIPELINE_SYNC
-                  raise "BUG: expected pipeline sync result, got #{sync_result.result_status}"
-                end
+              next if @pending_intents.length != pending_count || pipeline_buffer.length != buffer_count
+              break unless @raw_connection.is_busy
 
-                finalized_count = buffered.length + 1
-                @pending_intents.shift(finalized_count)
-
-                intent.raw_result = sync_result if TRACK_SYNCS
-                sync_result.clear unless TRACK_SYNCS
-
-                deliver_buffered_intents(buffered, consumed)
-                buffered = []
-                next
-              end
-
-              raw_result = get_result(@raw_connection)
-              return discard_buffered_results(buffered, consumed) unless raw_result
-
-              if raw_result.result_status == PG::PGRES_PIPELINE_ABORTED
-                buffered << [:not_run, intent, :server_aborted, take_notice_receiver_warnings]
-                next
-              end
-
-              begin
-                raw_result.check
-              rescue => error
-                translated = translate_exception_with_cause(error, intent.processed_sql, intent.binds)
-                if retryable_connection_error?(translated)
-                  discard_buffered_results(buffered)
-                  raise error
-                end
-
-                buffered << [:failure, intent, translated, take_notice_receiver_warnings]
-                next
-              end
-
-              buffered << [:result, intent, raw_result, take_notice_receiver_warnings]
+              @raw_connection.block
             end
 
             consumed
           end
         end
 
-        private
-          def consume_available_fatal_result
-            while !@raw_connection.is_busy && (result = @raw_connection.get_result)
-              if result.result_status == PG::PGRES_FATAL_ERROR &&
-                  connection_terminating_severity?(result)
-                result.check
+        def consume_pipeline
+          @lock.synchronize do
+            @pending_intents ||= []
+            return [] if @pending_intents.empty?
+
+            consumed = []
+
+            # Results are tentative until the server confirms the sync point.
+            # Keep pending intents in place while buffering so a connection
+            # failure before PGRES_PIPELINE_SYNC leaves the whole group
+            # available for replay / unknown-fate classification.
+            begin
+              while intent = @pending_intents[pipeline_buffer.length]
+                if intent.is_a?(SyncIntent)
+                  sync_result = get_available_pipeline_sync_result
+                  return consumed unless sync_result
+
+                  sync_result.check
+
+                  unless sync_result.result_status == PG::PGRES_PIPELINE_SYNC
+                    raise "BUG: expected pipeline sync result, got #{sync_result.result_status}"
+                  end
+
+                  finalized_count = pipeline_buffer.length + 1
+                  @pending_intents.shift(finalized_count)
+
+                  intent.raw_result = sync_result if TRACK_SYNCS
+                  sync_result.clear unless TRACK_SYNCS
+
+                  deliver_pipeline_buffer(consumed)
+                  next
+                end
+
+                raw_result = get_available_pipeline_query_result
+                return consumed unless raw_result
+
+                if raw_result.result_status == PG::PGRES_PIPELINE_ABORTED
+                  pipeline_buffer << [:not_run, intent, :server_aborted, take_notice_receiver_warnings]
+                  next
+                end
+
+                begin
+                  raw_result.check
+                rescue => e
+                  translated = translate_exception_with_cause(e, intent.processed_sql, intent.binds)
+                  if retryable_connection_error?(translated)
+                    discard_pipeline_buffer
+                    raise e
+                  end
+
+                  pipeline_buffer << [:failure, intent, translated, take_notice_receiver_warnings, raw_result]
+                  next
+                end
+
+                pipeline_buffer << [:result, intent, raw_result, take_notice_receiver_warnings]
               end
 
-              result.clear
+              consumed
+            rescue PG::Error, IOError, SystemCallError
+              discard_pipeline_buffer
+              raise
             end
+          end
+        end
 
-            consume_notice_receiver_fatal_error
-          rescue PG::Error => error
-            error if error.respond_to?(:result) && error.result
+        private
+          def recover_from_pipeline_connection_error(error, last_replayed_head)
+            translated = translate_pipeline_connection_error(error)
+
+            # A server FATAL/PANIC gives us a more precise failure point
+            # than a generic socket error; use it to classify the remaining
+            # pending window.
+            cause = translated.cause
+            server_fatal = cause.respond_to?(:result) &&
+              connection_terminating_severity?(cause.result)
+
+            replayable = retryable_connection_error?(translated) &&
+              reconnect_can_restore_state? &&
+              if server_fatal
+                abandon_pipelined_intents(translated, allow_recovery: true, all_unsynced: true, last_replayed_head: last_replayed_head)
+              else
+                abandon_pipelined_intents(translated, allow_recovery: true, last_replayed_head: last_replayed_head)
+              end
+
+            return replayable if replayable
+
+            # abandon_pipelined_intents already delivered terminal
+            # states if it was called (retryable error but recovery
+            # blocked). For non-retryable errors, abandon now.
+            abandon_pipelined_intents(translated)
+            nil
           end
 
-          def discard_buffered_results(buffered, return_value = nil)
-            buffered.each do |kind, _intent, value, _warnings|
-              value.clear if kind == :result
+          def translate_pipeline_connection_error(error)
+            if error.is_a?(PG::Error)
+              error = prefer_notice_receiver_fatal_error(error)
+              begin
+                raise error
+              rescue PG::Error => raised
+                return translate_exception_with_cause(raised, nil, nil)
+              end
             end
-            buffered.clear
-            return_value
+
+            raise error
+          rescue IOError, SystemCallError => raised
+            begin
+              raise ActiveRecord::ConnectionFailed.new(raised, connection_pool: @pool)
+            rescue ActiveRecord::ConnectionFailed => translated
+              translated
+            end
           end
 
-          def deliver_buffered_intents(buffered, consumed)
-            buffered.each do |kind, intent, value, warnings|
+          def prefer_notice_receiver_fatal_error(error)
+            return error if error.respond_to?(:result) && error.result
+            return error unless error.class == PG::Error || error.is_a?(PG::ConnectionBad)
+
+            consume_notice_receiver_fatal_error || error
+          end
+
+          def pipeline_buffer
+            @pipeline_buffer ||= []
+          end
+
+          def replace_pipeline_result_buffer(result)
+            @pipeline_result_buffer&.clear
+            @pipeline_result_buffer = result
+          end
+
+          def take_pipeline_result_buffer
+            @pipeline_result_buffer.tap do
+              @pipeline_result_buffer = nil
+            end
+          end
+
+          def discard_pipeline_result_buffer
+            @pipeline_result_buffer&.clear
+            @pipeline_result_buffer = nil
+          end
+
+          # Return input errors instead of raising immediately: libpq may
+          # have already parsed a result, including a typed FATAL result,
+          # before reporting that the socket has closed.
+          def consume_pipeline_input
+            @raw_connection.consume_input
+            nil
+          rescue PG::Error, IOError, SystemCallError => error
+            error
+          end
+
+          # In pipeline mode libpq returns nil between command results.
+          # Skip one such boundary while results remain immediately readable,
+          # but stop before any get_result call that PQisBusy says would block.
+          def get_available_pipeline_query_result
+            skipped_boundary = false
+
+            loop do
+              input_error = consume_pipeline_input
+              busy = @raw_connection.is_busy
+
+              if busy
+                raise input_error if input_error
+                return
+              end
+
+              result = @raw_connection.get_result
+              if result
+                replace_pipeline_result_buffer(result)
+                return take_pipeline_result_buffer if result.result_status == PG::PGRES_FATAL_ERROR &&
+                  connection_terminating_severity?(result)
+
+                skipped_boundary = false
+                next
+              end
+
+              return take_pipeline_result_buffer if @pipeline_result_buffer
+
+              raise input_error if input_error
+              return if skipped_boundary
+
+              skipped_boundary = true
+            end
+          end
+
+          def get_available_pipeline_sync_result
+            skipped_boundary = false
+
+            loop do
+              input_error = consume_pipeline_input
+              busy = @raw_connection.is_busy
+
+              if busy
+                raise input_error if input_error
+                return
+              end
+
+              result = @raw_connection.get_result
+              return result if result
+
+              raise input_error if input_error
+              return if skipped_boundary
+
+              skipped_boundary = true
+            end
+          end
+
+          def discard_pipeline_buffer
+            discard_pipeline_result_buffer
+
+            pipeline_buffer.each do |kind, _intent, value, _warnings, raw_result|
+              case kind
+              when :result
+                value.clear
+              when :failure
+                raw_result&.clear
+              end
+            end
+            pipeline_buffer.clear
+          end
+
+          def deliver_pipeline_buffer(consumed)
+            pipeline_buffer.each do |kind, intent, value, warnings, _raw_result|
               case kind
               when :result
                 if intent.notification_payload && value
@@ -320,7 +468,7 @@ module ActiveRecord
               consumed << intent
             end
           ensure
-            buffered.clear
+            pipeline_buffer.clear
           end
 
           def take_notice_receiver_warnings
@@ -341,6 +489,8 @@ module ActiveRecord
           # replay list is the same as the last attempt, we're not making
           # progress and fall through to deliver terminal states instead.
           def abandon_pipelined_intents(connection_error = nil, allow_recovery: false, all_unsynced: false, last_replayed_head: nil)
+            discard_pipeline_buffer
+
             intents = @pending_intents
             @pending_intents = []
 
@@ -372,7 +522,7 @@ module ActiveRecord
               end
             end
 
-            if allow_recovery && synced.all? { |intent| intent.allow_retry }
+            if allow_recovery && synced.all? { |i| i.allow_retry }
               all = synced + unsynced
               if all.first != last_replayed_head
                 all.each(&:reset_for_retry)
