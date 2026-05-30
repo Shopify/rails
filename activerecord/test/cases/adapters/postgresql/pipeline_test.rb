@@ -865,33 +865,39 @@ module ActiveRecord
 
         conn.enter_pipeline_mode
 
-        # Fast query, non-retryable - completes before the kill
+        # Sync group 1: fast query, non-retryable. It becomes final once
+        # the sync response is consumed, and should not participate in replay
+        # of the later failed group.
         intent1 = ActiveRecord::ConnectionAdapters::QueryIntent.new(
           adapter: conn,
           raw_sql: "SELECT 1 AS n",
           name: "TEST",
           allow_retry: false
         )
-        # Slow query, retryable - server dies while processing
+        intent1.execute!
+        conn.pipeline_sync
+
+        # Sync group 2: retryable query that self-destructs on the original
+        # connection, after group 1's sync boundary.
+        self_destruct_once_sql = "SELECT" \
+          " CASE WHEN pg_backend_pid() = #{initial_pid}" \
+          " THEN pg_terminate_backend(pg_backend_pid()) ELSE true END," \
+          " CASE WHEN pg_backend_pid() = #{initial_pid}" \
+          " THEN pg_sleep(5)::text END"
         intent2 = ActiveRecord::ConnectionAdapters::QueryIntent.new(
           adapter: conn,
-          raw_sql: "SELECT 2 AS n FROM pg_sleep(2)",
+          raw_sql: self_destruct_once_sql,
           name: "TEST",
           allow_retry: true
         )
-
-        intent1.execute!
         intent2.execute!
-        conn.pipeline_sync
-
-        @connection.execute("SELECT pg_terminate_backend(#{initial_pid})")
 
         # intent1 succeeded before the kill
         assert_equal [[1]], intent1.cast_result.rows
 
         # intent2 should recover via batch replay, not blocked by
         # intent1's allow_retry: false
-        assert_equal [[2]], intent2.cast_result.rows
+        assert_equal [[true, nil]], intent2.cast_result.rows
 
         new_pid = conn.select_value("SELECT pg_backend_pid()")
         assert_not_equal initial_pid, new_pid
@@ -1731,6 +1737,74 @@ module ActiveRecord
         end
       end
     end
+
+    def test_unsynced_pipelined_queries_replay_in_clean_transaction
+      with_dedicated_connection do |conn|
+        initial_connection_id = connection_id_from_server(conn)
+
+        with_rollback_transaction(conn) do
+          conn.enter_pipeline_mode
+
+          intent1 = build_intent(conn, "SELECT 1 AS n", allow_retry: false, materialize_transactions: false)
+          intent2 = build_intent(conn, "SELECT 2 AS n", allow_retry: false, materialize_transactions: false)
+          intent1.execute!
+          intent2.execute!
+
+          close_client_socket(conn)
+
+          assert_equal [[1]], intent1.cast_result.rows
+          assert_equal [[2]], intent2.cast_result.rows
+          assert_connection_replaced(conn, initial_connection_id)
+        end
+      end
+    end
+
+
+    def test_synced_retryable_pipelined_queries_replay_in_clean_transaction
+      with_dedicated_connection do |conn|
+        initial_pid = connection_id_from_server(conn)
+
+        with_rollback_transaction(conn) do
+          conn.enter_pipeline_mode
+
+          intent1 = build_intent(conn, "SELECT 1 AS n", allow_retry: true, materialize_transactions: false)
+          intent2 = build_intent(conn, "SELECT 2 AS n", allow_retry: true, materialize_transactions: false)
+          intent1.execute!
+          intent2.execute!
+          conn.pipeline_sync
+
+          close_client_socket(conn)
+
+          assert_equal [[1]], intent1.cast_result.rows
+          assert_equal [[2]], intent2.cast_result.rows
+          assert_connection_replaced(conn, initial_pid)
+        end
+      end
+    end
+
+
+    def test_synced_non_retryable_intent_fails_in_clean_transaction
+      with_dedicated_connection do |conn|
+        initial_pid = connection_id_from_server(conn)
+
+        with_rollback_transaction(conn) do
+          conn.enter_pipeline_mode
+
+          retryable_intent = build_intent(conn, "SELECT 1 AS n", allow_retry: true, materialize_transactions: false)
+          non_retryable_intent = build_intent(conn, "SELECT 2 AS n FROM pg_sleep(2)", allow_retry: false, materialize_transactions: false)
+          retryable_intent.execute!
+          non_retryable_intent.execute!
+          conn.pipeline_sync
+
+          close_client_socket(conn)
+
+          assert_equal [[1]], retryable_intent.cast_result.rows
+          assert_raises(ActiveRecord::ConnectionFailed) { non_retryable_intent.cast_result }
+          assert_connection_replaced(conn, initial_pid)
+        end
+      end
+    end
+
 
     def test_dirty_transaction_cannot_reconnect_during_pipeline_flush
       with_dedicated_connection do |conn|
