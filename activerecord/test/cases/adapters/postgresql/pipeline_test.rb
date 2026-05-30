@@ -470,6 +470,121 @@ module ActiveRecord
       assert_not @connection.pipeline_active?
     end
 
+    def test_pipelined_warning_is_handled_once_for_the_query_that_raised_it
+      warnings = []
+      warning_action = ->(warning) { warnings << [warning.message, warning.sql] }
+
+      original_warnings_action = ActiveRecord.db_warnings_action
+      original_warnings_ignore = ActiveRecord.db_warnings_ignore
+      ActiveRecord.db_warnings_action = warning_action
+      ActiveRecord.db_warnings_ignore = []
+      @connection.disconnect!
+      @connection.connect!
+
+      warning_sql = "DO E'BEGIN RAISE WARNING \\x27pipeline middle warning\\x27\\x3B " \
+        "END\\x3B'"
+
+      @connection.enter_pipeline_mode
+
+      intent1 = ActiveRecord::ConnectionAdapters::QueryIntent.new(
+        adapter: @connection,
+        raw_sql: "SELECT 1 AS n",
+        name: "FIRST"
+      )
+      intent2 = ActiveRecord::ConnectionAdapters::QueryIntent.new(
+        adapter: @connection,
+        raw_sql: warning_sql,
+        name: "MIDDLE"
+      )
+      intent3 = ActiveRecord::ConnectionAdapters::QueryIntent.new(
+        adapter: @connection,
+        raw_sql: "SELECT 3 AS n",
+        name: "LAST"
+      )
+
+      intent1.execute!
+      intent2.execute!
+      intent3.execute!
+
+      assert_not intent2.raw_result_available?
+
+      @connection.flush_pipeline
+
+      assert_equal [[1]], intent1.cast_result.rows
+      assert_equal [], intent2.cast_result.rows
+      assert_equal [[3]], intent3.cast_result.rows
+      assert_equal [["pipeline middle warning", warning_sql]], warnings
+    ensure
+      @connection.exit_pipeline_mode if @connection.pipeline_active?
+      @connection.instance_variable_get(:@notice_receiver_sql_warnings)&.clear
+      ActiveRecord.db_warnings_action = original_warnings_action || :ignore
+      ActiveRecord.db_warnings_ignore = original_warnings_ignore
+      @connection.disconnect!
+    end
+
+    def test_pipelined_warning_is_handled_without_masking_the_query_error
+      warning_sql = "DO E'BEGIN RAISE WARNING \\x27pipeline failure warning\\x27\\x3B " \
+        "RAISE EXCEPTION \\x27pipeline failure error\\x27\\x3B END\\x3B'"
+      warnings = []
+      warning_action = ->(warning) do
+        warnings << [warning.message, warning.sql]
+        raise warning
+      end
+
+      original_warnings_action = ActiveRecord.db_warnings_action
+      original_warnings_ignore = ActiveRecord.db_warnings_ignore
+      ActiveRecord.db_warnings_action = warning_action
+      ActiveRecord.db_warnings_ignore = []
+      @connection.disconnect!
+      @connection.connect!
+
+      @connection.enter_pipeline_mode
+
+      intent = ActiveRecord::ConnectionAdapters::QueryIntent.new(
+        adapter: @connection,
+        raw_sql: warning_sql,
+        name: "WARNING FAILURE"
+      )
+
+      intent.execute!
+
+      assert_not intent.raw_result_available?
+
+      @connection.flush_pipeline
+
+      error = assert_raises(ActiveRecord::StatementInvalid) do
+        intent.cast_result
+      end
+      assert_match(/pipeline failure error/, error.message)
+      assert_equal [["pipeline failure warning", warning_sql]], warnings
+    ensure
+      @connection.exit_pipeline_mode if @connection.pipeline_active?
+      @connection.instance_variable_get(:@notice_receiver_sql_warnings)&.clear
+      ActiveRecord.db_warnings_action = original_warnings_action || :ignore
+      ActiveRecord.db_warnings_ignore = original_warnings_ignore
+      @connection.disconnect!
+    end
+
+    def test_pipeline_sync_error_preference_does_not_consume_pending_non_fatal_results
+      with_dedicated_connection do |conn|
+        conn.enter_pipeline_mode
+        intent = build_intent(conn, "SELECT 1 AS n", materialize_transactions: false)
+        intent.execute!
+        flush_server_results_without_sync(conn)
+
+        notice_error = PG::AdminShutdown.new("FATAL: terminating connection")
+        conn.instance_variable_set(:@notice_receiver_fatal_error, notice_error)
+
+        assert_same notice_error, conn.send(:prefer_notice_receiver_fatal_error, PG::Error.new("server closed the connection unexpectedly"))
+
+        raw_result = conn.instance_variable_get(:@raw_connection).get_result
+        assert_equal PG::PGRES_TUPLES_OK, raw_result.result_status
+        assert_not intent.raw_result_available?
+        assert_equal [intent], conn.instance_variable_get(:@pending_intents)
+      ensure
+        raw_result&.clear
+      end
+    end
 
     def test_pipelined_result_is_not_delivered_before_sync_response
       with_dedicated_connection do |conn|
