@@ -57,16 +57,22 @@ module ActiveRecord
 
         prefix = "#{attribute}_" if prefix == true
 
-        token_prefix = prefix ? prefix.freeze : nil
-        token_length = length
+        if prefix
+          generate_token = -> do
+            token = self.generate_unique_secure_token(length: length)
+
+            "#{prefix}#{token}"
+          end
+        else
+          generate_token = -> { self.generate_unique_secure_token(length: length) }
+        end
 
         # Load securerandom only when has_secure_token is used.
         require "active_support/core_ext/securerandom"
-        define_method("regenerate_#{attribute}",
-          -> { update! attribute => (token_prefix ? "#{token_prefix}#{generate_unique_secure_token(length: token_length)}" : generate_unique_secure_token(length: token_length)) }.make_shareable!)
+        define_method("regenerate_#{attribute}") { update! attribute => generate_token.call }
         set_callback on, on == :initialize ? :after : :before do
           if new_record? && !query_attribute(attribute)
-            send("#{attribute}=", token_prefix ? "#{token_prefix}#{generate_unique_secure_token(length: token_length)}" : generate_unique_secure_token(length: token_length))
+            send("#{attribute}=", generate_token.call)
           end
         end
       end

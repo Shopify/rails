@@ -800,7 +800,6 @@ module ActiveRecord
             $1.delete('"').strip
           end
         end
-
     end
   end
 end

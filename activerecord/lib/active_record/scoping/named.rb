@@ -170,24 +170,18 @@ module ActiveRecord
 
           extension = Module.new(&block) if block
 
-          # Make the scope body shareable so the define_method lambda
-          # can be shared across Ractors.
-          body.make_shareable! rescue nil
-
           if body.respond_to?(:to_proc)
-            singleton_class.define_method(name,
-              -> (*args) {
-                scope = all._exec_scope(*args, &body)
-                scope = scope.extending(extension) if extension
-                scope
-              }.make_shareable!)
+            singleton_class.define_method(name) do |*args|
+              scope = all._exec_scope(*args, &body)
+              scope = scope.extending(extension) if extension
+              scope
+            end
           else
-            singleton_class.define_method(name,
-              -> (*args) {
-                scope = body.call(*args) || all
-                scope = scope.extending(extension) if extension
-                scope
-              }.make_shareable!)
+            singleton_class.define_method(name) do |*args|
+              scope = body.call(*args) || all
+              scope = scope.extending(extension) if extension
+              scope
+            end
           end
           singleton_class.send(:ruby2_keywords, name)
 

@@ -159,33 +159,20 @@ module ActiveRecord
         def define_non_cyclic_method(name, &block)
           return if method_defined?(name, false)
 
-          # Store the block as a module ivar so the method body
-          # doesn't need a closure (closures prevent methods from
-          # being called in non-main Ractors).
-          instance_variable_set(:"@_ncm_block_#{name}", block)
-
-          class_eval <<~RUBY, __FILE__, __LINE__ + 1
-            def #{name}(*args)
-              result = true; @_already_called ||= {}
-              unless @_already_called[:#{name}]
-                begin
-                  @_already_called[:#{name}] = true
-                  # Walk up the class hierarchy to find the block (class
-                  # instance variables don't inherit to subclasses).
-                  klass = self.class
-                  block = nil
-                  while klass && block.nil?
-                    block = klass.instance_variable_get(:@_ncm_block_#{name})
-                    klass = klass.superclass
-                  end
-                  result = instance_eval(&block) if block
-                ensure
-                  @_already_called[:#{name}] = false
-                end
+          define_method(name) do |*args|
+            result = true; @_already_called ||= {}
+            # Loop prevention for validation of associations
+            unless @_already_called[name]
+              begin
+                @_already_called[name] = true
+                result = instance_eval(&block)
+              ensure
+                @_already_called[name] = false
               end
-              result
             end
-          RUBY
+
+            result
+          end
         end
 
         # Adds validation and save callbacks for the association as specified by
@@ -232,15 +219,15 @@ module ActiveRecord
         def define_autosave_validation_callbacks(reflection)
           validation_method = :"validate_associated_records_for_#{reflection.name}"
           if reflection.validate? && !method_defined?(validation_method)
-            validation_impl = if reflection.collection?
-              :validate_collection_association
+            if reflection.collection?
+              method = :validate_collection_association
             elsif reflection.has_one?
-              :validate_has_one_association
+              method = :validate_has_one_association
             else
-              :validate_belongs_to_association
+              method = :validate_belongs_to_association
             end
 
-            define_non_cyclic_method(validation_method) { send(validation_impl, reflection) }
+            define_non_cyclic_method(validation_method) { send(method, reflection) }
             validate validation_method
             after_validation :_ensure_no_duplicate_errors
           end

@@ -444,10 +444,7 @@ module ActiveRecord
 
       # Indicates whether the table associated with this class exists
       def table_exists?
-        if instance_variable_defined?(:@table_exists)
-          return @table_exists
-        end
-        @table_exists = schema_cache.data_source_exists?(table_name)
+        schema_cache.data_source_exists?(table_name)
       end
 
       def attributes_builder # :nodoc:
@@ -467,17 +464,13 @@ module ActiveRecord
       end
 
       def _returning_columns_for_insert(connection) # :nodoc:
-        return @_returning_columns_for_insert if @_returning_columns_for_insert
-
-        result = begin
+        @_returning_columns_for_insert ||= begin
           auto_populated_columns = columns.filter_map do |c|
             c.name if connection.return_value_after_insert?(c)
           end
+
           auto_populated_columns.empty? ? Array(primary_key) : auto_populated_columns
         end
-
-        @_returning_columns_for_insert = result if Ractor.main?
-        result
       end
 
       def _returning_columns_for_update(connection)
@@ -519,11 +512,8 @@ module ActiveRecord
       end
 
       def symbol_column_to_string(name_symbol) # :nodoc:
-        if Ractor.main?
-          @symbol_column_to_string_name_hash ||= column_names.index_by(&:to_sym)
-        else
-          @symbol_column_to_string_name_hash || column_names.index_by(&:to_sym)
-        end[name_symbol]
+        @symbol_column_to_string_name_hash ||= column_names.index_by(&:to_sym)
+        @symbol_column_to_string_name_hash[name_symbol]
       end
 
       # Returns an array of column objects where the primary id, all columns ending in "_id" or "_count",
@@ -593,7 +583,6 @@ module ActiveRecord
         end
 
         def reload_schema_from_cache(recursive = true)
-          return if defined?(@_making_shareable) && @_making_shareable
           @_returning_columns_for_insert = nil
           @_returning_columns_for_update = nil
           @arel_table = nil

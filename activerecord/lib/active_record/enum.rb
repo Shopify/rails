@@ -229,9 +229,7 @@ module ActiveRecord
 
         # def self.statuses() statuses end
         detect_enum_conflict!(name, name.pluralize, true)
-        n = name.freeze
-        singleton_class.define_method(name.pluralize,
-          -> { defined_enums[n] }.make_shareable!)
+        singleton_class.define_method(name.pluralize) { enum_values }
         defined_enums[name] = enum_values
 
         detect_enum_conflict!(name, name)
@@ -303,30 +301,23 @@ module ActiveRecord
 
           def define_enum_methods(name, value_method_name, value, scopes, instance_methods)
             if instance_methods
-              n = name.freeze
-              v = (value.is_a?(String) ? value.freeze : value)
-
               # def active?() status_for_database == 0 end
               klass.send(:detect_enum_conflict!, name, "#{value_method_name}?")
-              define_method("#{value_method_name}?",
-                -> { public_send(:"#{n}_for_database") == v }.make_shareable!)
+              define_method("#{value_method_name}?") { public_send(:"#{name}_for_database") == value }
 
               # def active!() update!(status: 0) end
               klass.send(:detect_enum_conflict!, name, "#{value_method_name}!")
-              define_method("#{value_method_name}!",
-                -> { update!(n => v) }.make_shareable!)
+              define_method("#{value_method_name}!") { update!(name => value) }
             end
 
             if scopes
               # scope :active, -> { where(status: 0) }
               klass.send(:detect_enum_conflict!, name, value_method_name, true)
-              frozen_name = name.freeze
-              frozen_value = (value.is_a?(String) ? value.freeze : value)
-              klass.scope value_method_name, shareable_proc { where(frozen_name => frozen_value) }
+              klass.scope value_method_name, -> { where(name => value) }
 
               # scope :not_active, -> { where.not(status: 0) }
               klass.send(:detect_enum_conflict!, name, "not_#{value_method_name}", true)
-              klass.scope "not_#{value_method_name}", shareable_proc { where.not(frozen_name => frozen_value) }
+              klass.scope "not_#{value_method_name}", -> { where(predicate_builder[name, value, :is_distinct_from]) }
             end
           end
       end

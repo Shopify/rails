@@ -130,28 +130,7 @@ module ActiveRecord
       self.filter_attributes = []
 
       def self.connection_handler
-        ActiveSupport::IsolatedExecutionState[:active_record_connection_handler] ||
-          (Ractor.main? ? default_connection_handler : NullConnectionHandler)
-      end
-
-      # Null object returned by connection_handler in non-main Ractors
-      # where the real handler (with Mutexes and pools) isn't accessible.
-      # Responds to all handler methods as no-ops so callers don't need
-      # nil guards.
-      module NullConnectionHandler # :nodoc:
-        extend self
-
-        def each_connection_pool
-          [].each
-        end
-
-        def retrieve_connection_pool(*)
-          ConnectionHandling::RactorPoolProxy.instance
-        end
-
-        def establish_connection(*); end
-        def connected?(*) = false
-        def clear_all_connections!(*); end
+        ActiveSupport::IsolatedExecutionState[:active_record_connection_handler] || default_connection_handler
       end
 
       def self.connection_handler=(handler)
@@ -283,154 +262,6 @@ module ActiveRecord
     end
 
     module ClassMethods
-      # Prepare the model for Ractor shareability. Eagerly initializes
-      # all lazy schema state and makes ivar values shareable, but does
-      # NOT freeze the class (it must remain mutable for creating
-      # instances in the main Ractor).
-      def make_shareable!
-        @_making_shareable = true
-        unless abstract_class?
-          # Eagerly resolve all lazy schema state.
-          table_name
-          primary_key
-
-          # If the table doesn't exist (e.g., SolidQueue in a separate
-          # database that hasn't been migrated), skip schema resolution
-          # but still freeze instance variables below.
-          unless table_exists?
-            Rails.logger.warn("[make_shareable!] #{name}: table '#{table_name}' does not exist, skipping schema resolution") if defined?(Rails.logger) && Rails.logger
-          else
-
-          columns
-          columns_hash
-          column_names
-          _default_attributes
-          # Clear pending modifications — they've been applied to
-          # _default_attributes and may contain non-shareable Procs
-          # (from serialize/encrypts decorators with reassignable vars).
-          @pending_attribute_modifications = [].freeze
-          arel_table
-          predicate_builder
-          attributes_builder
-          query_constraints_list
-          _to_partial_path
-          all_timestamp_attributes_in_model
-          symbol_column_to_string(column_names.first&.to_sym) if column_names.any?
-
-          # Reflections handle their own freeze (see AbstractReflection#freeze)
-          reflections.each_value { |r| r.make_shareable! }
-          instance_variables.each do |ivar|
-            if ivar.to_s.start_with?("@_ncm_block_")
-              val = instance_variable_get(ivar)
-              val.make_shareable! unless val.shareable?
-            end
-          end
-
-          # Generate attribute methods and set lazy flags. Must be
-          # after all other calls because some trigger resets.
-          relation_delegate_class(ActiveRecord::Relation)
-          define_attribute_methods
-          @primary_key = primary_key
-          @finder_needs_type_condition = descends_from_active_record? ? :false : :true
-
-          # Eagerly resolve default_scope_override (normally lazy)
-          if respond_to?(:default_scope_override) && default_scope_override.nil?
-            self.default_scope_override = !ActiveRecord::Base.is_a?(method(:default_scope).owner)
-          end
-          end # unless table_exists?
-        end
-
-        # Eagerly resolve the inspection filter before freezing.
-        # @filter_attributes is set at boot time and never changes;
-        # @inspection_filter is lazily created from it on first inspect.
-        # Resolve both now so they can be frozen.
-        if instance_variable_defined?(:@filter_attributes) && @filter_attributes
-          inspection_filter
-        end
-
-        # Detach the connection handler -- it must stay mutable.
-        if self == ActiveRecord::Base
-          self.default_connection_handler = nil
-        end
-
-        # Make ivar values shareable. Only freeze simple data structures
-        # that don't contain deep object graphs with Monitors/Procs.
-        instance_variables.each do |ivar|
-          next if ivar.to_s.include?("connection") || ivar == :@_making_shareable
-          begin
-            val = instance_variable_get(ivar)
-          rescue Ractor::IsolationError
-            next
-          end
-          next if val.equal?(nil) || val.shareable?
-          next if val.is_a?(Thread::Mutex) || val.is_a?(Monitor) || val.is_a?(Proc)
-          if val.is_a?(String) || val.is_a?(Symbol) || val.is_a?(Numeric) ||
-             val.is_a?(TrueClass) || val.is_a?(FalseClass) || val.is_a?(Regexp)
-            val.freeze
-          else
-            begin
-              val.make_shareable!
-            rescue Ractor::Error, Ractor::IsolationError, FrozenError => e
-              unless Module::SHAREABLE_WARNED.key?(val)
-                Module::SHAREABLE_WARNED[val] = true
-                Rails.logger.warn("[make_shareable!] #{name}#{ivar}: #{e.message[0..100]}") if defined?(Rails.logger) && Rails.logger
-              end
-            end
-          end
-        end
-        singleton_class.instance_variables.each do |ivar|
-          next if ivar.to_s.include?("connection")
-          # attachment_reflections contain back-references to model
-          # classes (which we intentionally don't freeze). Freeze the
-          # hash itself but not its contents.
-          if ivar.to_s.include?("attachment_reflections")
-            val = singleton_class.instance_variable_get(ivar) rescue next
-            val.freeze unless val.nil? || val.frozen?
-            next
-          end
-          begin
-            val = singleton_class.instance_variable_get(ivar)
-          rescue Ractor::IsolationError
-            next
-          end
-          next if val.equal?(nil) || val.shareable?
-          next if val.is_a?(Thread::Mutex) || val.is_a?(Monitor) || val.is_a?(Proc)
-          if val.is_a?(String) || val.is_a?(Symbol) || val.is_a?(Numeric)
-            val.freeze
-          else
-            begin
-              val.make_shareable!
-            rescue Ractor::Error, Ractor::IsolationError, FrozenError => e
-              unless Module::SHAREABLE_WARNED.key?(val)
-                Module::SHAREABLE_WARNED[val] = true
-                Rails.logger.warn("[make_shareable!] #{name} singleton #{ivar}: #{e.message[0..100]}") if defined?(Rails.logger) && Rails.logger
-              end
-            end
-          end
-        end
-      ensure
-        @_making_shareable = false
-      end
-
-      # Proxy that mimics StatementCache for non-main Ractors
-      class RactorStatementProxy # :nodoc:
-        def initialize(block)
-          @block = block
-        end
-
-        def execute(values, connection, async: false, &block)
-          # Build a substitute that returns actual values instead of
-          # bind param placeholders.
-          flat_values = values.flatten
-          sub = Object.new
-          sub.define_singleton_method(:bind) { flat_values.shift }
-          relation = @block.call(sub)
-          records = relation.to_a
-          records.each(&block) if block
-          records
-        end
-      end
-
       def initialize_find_by_cache # :nodoc:
         @find_by_statement_cache = { true => Concurrent::Map.new, false => Concurrent::Map.new }
       end
@@ -439,9 +270,6 @@ module ActiveRecord
         # We don't have cache keys for this stuff yet
         return super unless ids.length == 1
         return super if block_given? || primary_key.nil? || scope_attributes?
-        # cached_find_by uses StatementCache which needs the adapter's
-        # cacheable_query -- not available through the Ractor proxy.
-        return super unless Ractor.main?
 
         id = ids.first
 
@@ -572,11 +400,7 @@ module ActiveRecord
 
       # Returns an instance of +Arel::Table+ loaded with the current table name.
       def arel_table # :nodoc:
-        @arel_table || begin
-          table = Arel::Table.new(table_name, klass: self)
-          @arel_table = table if Ractor.main?
-          table
-        end
+        @arel_table ||= Arel::Table.new(table_name, klass: self)
       end
 
       def predicate_builder # :nodoc:
@@ -588,12 +412,6 @@ module ActiveRecord
       end
 
       def cached_find_by_statement(connection, key, &block) # :nodoc:
-        if !Ractor.main?
-          # StatementCache requires the adapter's cacheable_query which
-          # isn't available through the proxy. Return a wrapper that
-          # executes the relation directly.
-          return RactorStatementProxy.new(block)
-        end
         cache = @find_by_statement_cache[connection.prepared_statements]
         cache.compute_if_absent(key) { StatementCache.create(connection, &block) }
       end

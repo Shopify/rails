@@ -14,15 +14,8 @@ module Arel # :nodoc: all
       private
         attr_reader :dispatch
 
-        # Per-Ractor dispatch caches. The class-level cache used to be a
-        # plain Hash with a write-through default proc; after ractorize!
-        # froze the class, the default proc was stripped and every miss
-        # recomputed the symbol name without memoizing. Move the cache
-        # into Ractor-local storage so each request-serving Ractor has a
-        # writable Hash keyed by visitor subclass.
         def self.dispatch_cache
-          caches = (Ractor[:_arel_dispatch_caches] ||= {}.compare_by_identity)
-          caches[self] ||= Hash.new do |hash, klass|
+          @dispatch_cache ||= Hash.new do |hash, klass|
             hash[klass] = :"visit_#{(klass.name || "").gsub("::", "_")}"
           end.compare_by_identity
         end
@@ -41,13 +34,10 @@ module Arel # :nodoc: all
         rescue NoMethodError => e
           raise e if respond_to?(dispatch_method, true)
           superklass = object.class.ancestors.find { |klass|
-            method_name = dispatch[klass]
-            respond_to?(method_name, true)
+            respond_to?(dispatch[klass], true)
           }
           raise(TypeError, "Cannot visit #{object.class}") unless superklass
-          found_method = dispatch[superklass]
-          dispatch[object.class] = found_method
-          dispatch_method = found_method
+          dispatch[object.class] = dispatch[superklass]
           retry
         end
     end

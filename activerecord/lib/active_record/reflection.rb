@@ -161,27 +161,6 @@ module ActiveRecord
     #     PolymorphicReflection
     #     RuntimeReflection
     class AbstractReflection # :nodoc:
-      # Eagerly resolve all lazy fields before freezing so they're
-      # available after the reflection is made Ractor-shareable.
-      def freeze
-        unless respond_to?(:polymorphic?) && polymorphic?
-          class_name
-          klass
-        end
-        foreign_key
-        association_foreign_key
-        counter_cache_column
-        inverse_which_updates_counter_cache if respond_to?(:inverse_which_updates_counter_cache)
-        has_inverse?
-        inverse_of
-        check_validity_of_inverse!
-        check_validity!
-        active_record_primary_key
-        join_foreign_key
-        deprecated_nested_reflections if respond_to?(:deprecated_nested_reflections)
-        super
-      end
-
       def initialize
         @class_name = nil
         @counter_cache_column = nil
@@ -263,7 +242,6 @@ module ActiveRecord
       end
 
       def counter_cache_column
-        return @counter_cache_column if frozen?
         @counter_cache_column ||= begin
           counter_cache = options[:counter_cache]
 

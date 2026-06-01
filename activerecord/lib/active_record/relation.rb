@@ -1466,8 +1466,6 @@ module ActiveRecord
           end
         end
 
-
-
         skip_query_cache_if_necessary do
           if where_clause.contradiction?
             [].freeze

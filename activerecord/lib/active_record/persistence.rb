@@ -221,8 +221,7 @@ module ActiveRecord
       end
 
       def query_constraints_list # :nodoc:
-        return @query_constraints_list if instance_variable_defined?(:@query_constraints_list)
-        @query_constraints_list = if base_class? || primary_key != base_class.primary_key
+        @query_constraints_list ||= if base_class? || primary_key != base_class.primary_key
           primary_key if primary_key.is_a?(Array)
         else
           base_class.query_constraints_list
