@@ -135,17 +135,25 @@ module Rails
       require "rails/logging/actor"
       require "rails/logging/proxy"
       old_logger = Rails.logger
-      logger_actor = Rails::Logging::Actor.new(old_logger)
-      ractor_logger = Rails::Logging::Proxy.new(
-        logger_actor,
-        level: old_logger.level,
-        progname: old_logger.progname || "Rails",
-        sync_threshold: (ENV["LOGGER_SYNC_THRESHOLD"] || "0").to_i,
-      )
-      Rails.logger = ractor_logger
+      if old_logger.is_a?(Rails::Logging::Proxy)
+        ractor_logger = old_logger
+      else
+        logger_actor = Rails::Logging::Actor.new(old_logger)
+        ractor_logger = Rails::Logging::Proxy.new(
+          logger_actor,
+          level: old_logger.level,
+          progname: old_logger.progname || "Rails",
+          sync_threshold: (ENV["LOGGER_SYNC_THRESHOLD"] || "0").to_i,
+        )
+        Rails.logger = ractor_logger
+        @ractor_logger_actor = logger_actor
+        at_exit do
+          logger_actor.shutdown
+        rescue => e
+          warn "[Rails::Logging::Actor] shutdown error: #{e.class}: #{e.message}"
+        end
+      end
       @app_env_config["action_dispatch.logger"] = ractor_logger
-      @ractor_logger_actor = logger_actor
-      at_exit { logger_actor.shutdown rescue nil }
 
       # Update component loggers that cached the old BroadcastLogger.
       # Each engine's initializer captures Rails.logger at boot time
@@ -665,7 +673,7 @@ module Rails
       # ActionController::Base.descendants.each below — autoloading
       # ActionController::Base triggers ActionView::ViewPaths' Concern
       # `included do` block, which mutates @view_paths_by_class.
-      ::ActionView::LookupContext::Accessors::DEFAULT_PROCS.make_shareable!
+      ::ActionView::LookupContext.default_procs.make_shareable!
       ::ActiveRecord::Relation::WhereClause.empty
       ::ActiveRecord::Relation::FromClause.empty
       ::ActionView::Template::Handlers.extensions
