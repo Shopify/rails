@@ -128,41 +128,6 @@ module Rails
       routes
       app
 
-      # Replace the logger with an Actor-model proxy. One consumer
-      # Thread owns the real device; every Ractor's Rails.logger is a
-      # shareable proxy that sends messages to the actor.
-      require "rails/logging/actor"
-      require "rails/logging/proxy"
-      old_logger = Rails.logger
-      logger_actor = Rails::Logging::Actor.new(old_logger)
-      ractor_logger = Rails::Logging::Proxy.new(
-        logger_actor,
-        level: old_logger.level,
-        progname: old_logger.progname || "Rails",
-        sync_threshold: (ENV["LOGGER_SYNC_THRESHOLD"] || "0").to_i,
-      )
-      Rails.logger = ractor_logger
-      @app_env_config["action_dispatch.logger"] = ractor_logger
-      @ractor_logger_actor = logger_actor
-      at_exit { logger_actor.shutdown rescue nil }
-
-      # Update component loggers that cached the old BroadcastLogger.
-      # Each engine's initializer captures Rails.logger at boot time
-      # — before this swap — so the module-level accessors below
-      # still point at the original (now frozen-IO) logger unless we
-      # rebind them.
-      ::ActiveRecord::Base.logger    = ractor_logger if defined?(::ActiveRecord::Base)
-      ::ActionController::Base.logger = ractor_logger if defined?(::ActionController::Base)
-      ::ActionMailer::Base.logger    = ractor_logger if defined?(::ActionMailer::Base)
-      ::ActiveJob::Base.logger       = ractor_logger if defined?(::ActiveJob::Base)
-      ::ActionView::Base.logger      = ractor_logger if defined?(::ActionView::Base)
-      ::ActionMailbox.logger          = ractor_logger if defined?(::ActionMailbox) && ::ActionMailbox.respond_to?(:logger=)
-      ::ActiveStorage.logger          = ractor_logger if defined?(::ActiveStorage) && ::ActiveStorage.respond_to?(:logger=)
-      if defined?(::ActionCable) && ::ActionCable.respond_to?(:server) && ::ActionCable.server.respond_to?(:config)
-        ::ActionCable.server.config.logger = ractor_logger
-      end
-      ::Rails.error.logger = ractor_logger if ::Rails.respond_to?(:error) && ::Rails.error.respond_to?(:logger=)
-
       # Save the connection handler (nilled during AR::Base.make_shareable!)
       saved_handler = ::ActiveRecord::Base.default_connection_handler
 
