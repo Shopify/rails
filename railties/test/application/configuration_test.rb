@@ -4717,6 +4717,13 @@ module ApplicationTests
       assert_equal :thread, ActiveSupport::IsolatedExecutionState.isolation_level
     end
 
+    test "#unshareable_proc_action can be set" do
+      add_to_config "config.active_support.unshareable_proc_action = :raise"
+
+      app "development"
+      assert_equal :raise, ActiveSupport::Ractors.unshareable_proc_action
+    end
+
     test "isolation_level can be set in app config" do
       add_to_config "config.active_support.isolation_level = :fiber"
 

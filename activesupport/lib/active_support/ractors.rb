@@ -5,6 +5,8 @@ module ActiveSupport
   # unconditionally regardless of the Ruby version.
   module Ractors # :nodoc:
     class << self
+      attr_accessor :unshareable_proc_action
+
       if defined?(Ractor) && RUBY_VERSION >= "4.0"
         # Makes +obj+ Ractor-shareable by delegating to +Ractor.make_shareable+.
         #

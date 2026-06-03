@@ -23,6 +23,14 @@ module ActiveSupport
       end
     end
 
+    initializer "active_support.unshareable_proc_action" do
+      config.after_initialize do |app|
+        if action = app.config.active_support.unshareable_proc_action
+          ActiveSupport::Ractors.unshareable_proc_action = action
+        end
+      end
+    end
+
     initializer "active_support.raise_on_invalid_cache_expiration_time" do |app|
       config.after_initialize do
         if app.config.active_support.raise_on_invalid_cache_expiration_time

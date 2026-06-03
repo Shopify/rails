@@ -3167,6 +3167,14 @@ The default value depends on the `config.load_defaults` target version:
 | (original)            | `false`              |
 | 7.0                   | `true`               |
 
+#### `config.active_support.unshareable_proc_action`
+
+Controls whether procs passed to class macros (e.g. routes) are made Ractor-shareable before being instance_exec'd, and what happens when one can't be shared:
+
+* :raise — try to make it shareable; let Ractor::IsolationError propagate.
+* :warn — try to make it shareable; rescue Ractor::IsolationError and emit a deprecation warning.
+* nil (default) — don't try to make the proc shareable.
+
 #### `ActiveSupport::Logger.silencer`
 
 Is set to `false` to disable the ability to silence logging in a block. The default is `true`.
