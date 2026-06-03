@@ -187,6 +187,53 @@ module ActionDispatch
         assert_nil route
       end
 
+      if RUBY_VERSION >= "4.0"
+        test "#resolve raises an error when a proc is not shareable and unshareable_proc_action is :raise" do
+          old = ActiveSupport::Ractors.unshareable_proc_action
+          ActiveSupport::Ractors.unshareable_proc_action = :raise
+
+          assert_raise(Ractor::IsolationError) do
+            draw do
+              to_resolve = [:basket, anchor: "items"]
+
+              resolve("Cart") { to_resolve }
+            end
+          end
+        ensure
+          ActiveSupport::Ractors.unshareable_proc_action = old
+        end
+
+        test "#resolve trigger a deprecation when a proc is not shareable and unshareable_proc_action is :warn" do
+          old = ActiveSupport::Ractors.unshareable_proc_action
+          ActiveSupport::Ractors.unshareable_proc_action = :warn
+
+          assert_deprecated(/Rails attempted to make a Proc .* Ractor shareable/, ActiveSupport.deprecator) do
+            draw do
+              to_resolve = [:basket, anchor: "items"]
+
+              resolve("Cart") { to_resolve }
+            end
+          end
+        ensure
+          ActiveSupport::Ractors.unshareable_proc_action = old
+        end
+
+        test "#resolve does not attempt to make a proc shareable when unshareable_proc_action is nil" do
+          old = ActiveSupport::Ractors.unshareable_proc_action
+          ActiveSupport::Ractors.unshareable_proc_action = :nil
+
+          assert_nothing_raised do
+            draw do
+              to_resolve = [:basket, anchor: "items"]
+
+              resolve("Cart") { to_resolve }
+            end
+          end
+        ensure
+          ActiveSupport::Ractors.unshareable_proc_action = old
+        end
+      end
+
       private
         def draw(&block)
           @set.draw(&block)
