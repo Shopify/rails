@@ -400,11 +400,11 @@ module ActiveRecord
 
       # Returns an instance of +Arel::Table+ loaded with the current table name.
       def arel_table # :nodoc:
-        @arel_table ||= Arel::Table.new(table_name, klass: self)
+        @arel_table || ActiveSupport::Ractors.on_main(self) { @arel_table ||= Arel::Table.new(table_name, klass: self) }
       end
 
       def predicate_builder # :nodoc:
-        @predicate_builder ||= PredicateBuilder.new(TableMetadata.new(self, arel_table))
+        @predicate_builder || ActiveSupport::Ractors.on_main(self) { @predicate_builder ||= PredicateBuilder.new(TableMetadata.new(self, arel_table)) }
       end
 
       def type_caster # :nodoc:

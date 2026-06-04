@@ -146,7 +146,7 @@ module ActiveRecord
             return if abstract_class?
 
             if default_scope_override.nil?
-              self.default_scope_override = !Base.is_a?(method(:default_scope).owner)
+              default_scope_override || ActiveSupport::Ractors.on_main(self) { self.default_scope_override = !Base.is_a?(method(:default_scope).owner) }
             end
 
             if default_scope_override

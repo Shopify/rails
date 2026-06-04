@@ -105,20 +105,22 @@ module ActiveRecord
         return false if @attribute_methods_generated
         # Use a mutex; we don't want two threads simultaneously trying to define
         # attribute methods.
-        GeneratedAttributeMethods::LOCK.synchronize do
-          return false if @attribute_methods_generated
+        ActiveSupport::Ractors.on_main(self) do
+          GeneratedAttributeMethods::LOCK.synchronize do
+            return false if @attribute_methods_generated
 
-          superclass.define_attribute_methods unless base_class?
+            superclass.define_attribute_methods unless base_class?
 
-          unless abstract_class?
-            load_schema
-            super(attribute_names)
-            alias_attribute :id_value, :id if _has_attribute?("id") && !_has_attribute?("id_value")
+            unless abstract_class?
+              load_schema
+              super(attribute_names)
+              alias_attribute :id_value, :id if _has_attribute?("id") && !_has_attribute?("id_value")
+            end
+
+            generate_alias_attributes
+
+            @attribute_methods_generated = true
           end
-
-          generate_alias_attributes
-
-          @attribute_methods_generated = true
         end
 
         true

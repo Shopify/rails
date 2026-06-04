@@ -161,3 +161,4 @@ gem "tzinfo-data", platforms: [:windows, :jruby]
 gem "wdm", ">= 0.1.0", platforms: [:windows]
 
 gem "launchy"
+gem "ractor-dispatch"

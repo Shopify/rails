@@ -448,9 +448,11 @@ module ActiveRecord
       end
 
       def attributes_builder # :nodoc:
-        @attributes_builder ||= begin
-          defaults = _default_attributes.except(*(column_names - [primary_key]))
-          ActiveModel::AttributeSet::Builder.new(attribute_types, defaults)
+        @attributes_builder || ActiveSupport::Ractors.on_main(self) do
+          @attributes_builder ||= begin
+            defaults = _default_attributes.except(*(column_names - [primary_key]))
+            ActiveSupport::Ractors.make_shareable(ActiveModel::AttributeSet::Builder.new(attribute_types, defaults))
+          end
         end
       end
 
@@ -460,7 +462,7 @@ module ActiveRecord
       end
 
       def columns
-        @columns ||= columns_hash.values.freeze
+        @columns || ActiveSupport::Ractors.on_main(self) { @columns ||= columns_hash.values.freeze }
       end
 
       def _returning_columns_for_insert(connection) # :nodoc:
@@ -508,11 +510,13 @@ module ActiveRecord
 
       # Returns an array of column names as strings.
       def column_names
-        @column_names ||= columns.map(&:name).freeze
+        @column_names || ActiveSupport::Ractors.on_main(self) { @column_names ||= columns.map(&:name).freeze }
       end
 
       def symbol_column_to_string(name_symbol) # :nodoc:
-        @symbol_column_to_string_name_hash ||= column_names.index_by(&:to_sym)
+        @symbol_column_to_string_name_hash || ActiveSupport::Ractors.on_main(self) do
+          @symbol_column_to_string_name_hash ||= column_names.index_by(&:to_sym).freeze
+        end
         @symbol_column_to_string_name_hash[name_symbol]
       end
 
