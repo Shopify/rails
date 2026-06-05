@@ -54,6 +54,10 @@ module ActiveSupport
         def shareable_lambda(...)
           Ractor.shareable_lambda(...)
         end
+
+        def main?
+          Ractor.main?
+        end
       else
         def on_main(obj, &block)
           obj.instance_eval(&block)
@@ -73,6 +77,10 @@ module ActiveSupport
 
         def shareable_lambda(self: nil, &block)
           block
+        end
+
+        def main?
+          true
         end
       end
     end
