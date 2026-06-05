@@ -212,8 +212,8 @@ module ActiveRecord
       def query_constraints(*columns_list)
         raise ArgumentError, "You must specify at least one column to be used in querying" if columns_list.empty?
         columns_list.freeze
-        @query_constraints_list || ActiveSupport::Ractors.on_main(self) { @query_constraints_list = columns_list.map(&:to_s) }
-        @has_query_constraints || ActiveSupport::Ractors.on_main(self) { @has_query_constraints = @query_constraints_list }
+        @query_constraints_list = columns_list.map(&:to_s)
+        @has_query_constraints = @query_constraints_list
       end
 
       def has_query_constraints? # :nodoc:
@@ -221,13 +221,11 @@ module ActiveRecord
       end
 
       def query_constraints_list # :nodoc:
-        @query_constraints_list || ActiveSupport::Ractors.on_main(self) do
-          @query_constraints_list ||= if base_class? || primary_key != base_class.primary_key
+        @query_constraints_list ||= if base_class? || primary_key != base_class.primary_key
             primary_key if primary_key.is_a?(Array)
           else
             base_class.query_constraints_list
           end
-        end
       end
 
       # Returns an array of column names to be used in queries. The source of column

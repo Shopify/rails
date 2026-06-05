@@ -409,11 +409,11 @@ module ActiveRecord
 
       # Returns an instance of +Arel::Table+ loaded with the current table name.
       def arel_table # :nodoc:
-        @arel_table || ActiveSupport::Ractors.on_main(self) { @arel_table ||= Arel::Table.new(table_name, klass: self) }
+        @arel_table ||= Arel::Table.new(table_name, klass: self)
       end
 
       def predicate_builder # :nodoc:
-        @predicate_builder || ActiveSupport::Ractors.on_main(self) { @predicate_builder ||= PredicateBuilder.new(TableMetadata.new(self, arel_table)) }
+        @predicate_builder ||= PredicateBuilder.new(TableMetadata.new(self, arel_table))
       end
 
       def type_caster # :nodoc:
@@ -423,6 +423,23 @@ module ActiveRecord
       def cached_find_by_statement(connection, key, &block) # :nodoc:
         cache = @find_by_statement_cache[connection.prepared_statements]
         cache.compute_if_absent(key) { StatementCache.create(connection, &block) }
+      end
+
+      def ractorize!
+        return if abstract_class? || !table_exists?
+        arel_table
+        predicate_builder
+        table_name
+        attribute_method_patterns_cache
+        _to_partial_path
+        define_attribute_methods
+        finder_needs_type_condition?
+        columns
+        column_names
+        symbol_column_to_string(:id)
+        query_constraints_list
+        attributes_builder
+        build_default_scope
       end
 
       private

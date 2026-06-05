@@ -128,8 +128,7 @@ module ActiveRecord
           #
           #   Project.primary_key # => "foo_id"
           def primary_key=(value)
-            ActiveSupport::Ractors.on_main(self) do
-              @primary_key = if value.is_a?(Array)
+            @primary_key = if value.is_a?(Array)
                 include CompositePrimaryKey
                 @primary_key = value.map { |v| -v.to_s }.freeze
               elsif value
@@ -138,7 +137,6 @@ module ActiveRecord
 
               @composite_primary_key = value.is_a?(Array)
               @attributes_builder = nil
-            end
           end
 
           private

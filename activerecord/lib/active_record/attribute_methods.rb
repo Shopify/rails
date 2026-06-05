@@ -105,8 +105,7 @@ module ActiveRecord
         return false if @attribute_methods_generated
         # Use a mutex; we don't want two threads simultaneously trying to define
         # attribute methods.
-        ActiveSupport::Ractors.on_main(self) do
-          GeneratedAttributeMethods::LOCK.synchronize do
+        GeneratedAttributeMethods::LOCK.synchronize do
             return false if @attribute_methods_generated
 
             superclass.define_attribute_methods unless base_class?
@@ -121,7 +120,6 @@ module ActiveRecord
 
             @attribute_methods_generated = true
           end
-        end
 
         true
       end

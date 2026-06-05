@@ -73,6 +73,13 @@ module Rails
         app.reloader.prepare!
       end
 
+      initializer :ractorize do
+        # if ractorize config is true
+        Rails.autoloaders.main.on_load do |_, mod|
+          mod.try(:ractorize!)
+        end
+      end
+
       initializer :eager_load! do |app|
         if config.eager_load
           ActiveSupport.run_load_hooks(:before_eager_load, self)
