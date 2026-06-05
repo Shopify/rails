@@ -15,12 +15,22 @@ module ActiveSupport
 
       SEVERITY_METHODS = %i[debug info warn error fatal unknown].freeze
 
-      attr_reader :level, :progname
+      attr_reader :level, :progname, :sync_threshold
       attr_accessor :formatter, :silencer
       alias_method :sev_threshold, :level
 
-      def initialize(*args, level: ::Logger::DEBUG, progname: nil, formatter: nil, datetime_format: nil, **logdev_options)
-        @actor = Actor.spawn(*args, **logdev_options)
+      # +sync_threshold+: when +nil+ (the default) the proxy is purely async.
+      # When set to a positive Integer, producers switch from async +cast+ to synchronous +call(:write, ...)+ once the
+      # actor's in-flight count reaches the threshold, trading producer latency for a bounded queue depth.
+      def initialize(*args, sync_threshold: nil, level: ::Logger::DEBUG, progname: nil, formatter: nil, datetime_format: nil, **logdev_options)
+        validate_sync_threshold(sync_threshold)
+        @sync_threshold = sync_threshold
+        @inflight =
+          if @sync_threshold
+            require_ractor_safe!
+            ::RactorSafe::AtomicInteger.new(0)
+          end
+        @actor = Actor.spawn(*args, inflight: @inflight, **logdev_options)
 
         config = ActiveSupport::Logger.new(nil, level:, progname:, formatter:, datetime_format:)
         @level = config.level
@@ -102,8 +112,27 @@ module ActiveSupport
       end
 
       private
+        # The threshold check is a soft limit, multiple producers may observe +threshold - 1+ and briefly exceed it.
         def dispatch(message)
-          @actor.async(message)
+          if @sync_threshold && @inflight.value >= @sync_threshold
+            @actor.call(:write, message)
+          else
+            @inflight&.increment
+            @actor.async(message)
+          end
+        end
+
+        def validate_sync_threshold(value)
+          return if value.nil? || (value.is_a?(Integer) && value > 0)
+          raise ArgumentError,
+            "sync_threshold must be a positive Integer or nil, got #{value.inspect}"
+        end
+
+        def require_ractor_safe!
+          gem "ractor_safe"
+          require "ractor_safe"
+        rescue LoadError => error
+          raise LoadError, "sync_threshold requires the ractor_safe gem (#{error.message})"
         end
 
         def format_message(severity, message, progname)

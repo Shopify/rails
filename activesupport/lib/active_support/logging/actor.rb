@@ -17,12 +17,9 @@ module ActiveSupport
         @port = ::Ractor::Port.new
       end
 
-      # +logdev+, +shift_age+, +shift_size+ and the +binmode+/+shift_period_suffix+
-      # options mirror Logger.new and are used to build the consumer's own
-      # Logger::LogDevice.
-      def spawn(logdev = nil, shift_age = 0, shift_size = 1048576, binmode: false, shift_period_suffix: "%Y%m%d")
+      def spawn(logdev = nil, shift_age = 0, shift_size = 1048576, binmode: false, shift_period_suffix: "%Y%m%d", inflight: nil)
         device = build_logdev(logdev, shift_age, shift_size, binmode, shift_period_suffix)
-        start_consumer(@port, device)
+        start_consumer(@port, device, inflight)
         ::Ractor.make_shareable(self)
       end
 
@@ -66,17 +63,28 @@ module ActiveSupport
             binmode: binmode)
         end
 
-        def start_consumer(port, logdev)
+        def start_consumer(port, logdev, inflight)
           Thread.new do
             closed = false
             loop do
               message = port.receive
               case message[0]
               when :write
-                logdev.write(message[1])
+                begin
+                  logdev.write(message[1])
+                ensure
+                  # Always decrement, even on write failure, so producers don't
+                  # get stuck above the threshold.
+                  inflight&.decrement
+                end
               when :call
-                _, reply, operation, _args = message
+                _, reply, operation, args = message
                 case operation
+                when :write
+                  # Synchronous write requested by a backpressured producer. The producer is already blocked, so this
+                  # path leaves the inflight counter untouched.
+                  logdev.write(args.first)
+                  reply << [:ok, :ok]
                 when :drain
                   flush_device(logdev)
                   reply << [:ok, :ok]
