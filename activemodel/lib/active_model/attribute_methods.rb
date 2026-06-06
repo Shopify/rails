@@ -68,8 +68,8 @@ module ActiveModel
     CALL_COMPILABLE_REGEXP = /\A[a-zA-Z_]\w*[!?]?\z/
 
     included do
-      class_attribute :attribute_aliases, instance_writer: false, default: {}
-      class_attribute :attribute_method_patterns, instance_writer: false, default: [ ClassMethods::AttributeMethodPattern.new ]
+      class_attribute :attribute_aliases, instance_writer: false, default: {}.freeze
+      class_attribute :attribute_method_patterns, instance_writer: false, default: [ ClassMethods::AttributeMethodPattern.new ].freeze
     end
 
     module ClassMethods
@@ -104,7 +104,8 @@ module ActiveModel
       #   person.clear_name
       #   person.name          # => nil
       def attribute_method_prefix(*prefixes, parameters: nil)
-        self.attribute_method_patterns += prefixes.map! { |prefix| AttributeMethodPattern.new(prefix: prefix, parameters: parameters) }
+        patterns = prefixes.map! { |prefix| AttributeMethodPattern.new(prefix: prefix, parameters: parameters) }
+        self.attribute_method_patterns = (attribute_method_patterns + patterns).freeze
         undefine_attribute_methods
       end
 
@@ -138,7 +139,8 @@ module ActiveModel
       #   person.name          # => "Bob"
       #   person.name_short?   # => true
       def attribute_method_suffix(*suffixes, parameters: nil)
-        self.attribute_method_patterns += suffixes.map! { |suffix| AttributeMethodPattern.new(suffix: suffix, parameters: parameters) }
+        patterns = suffixes.map! { |suffix| AttributeMethodPattern.new(suffix: suffix, parameters: parameters) }
+        self.attribute_method_patterns = (attribute_method_patterns + patterns).freeze
         undefine_attribute_methods
       end
 
@@ -173,7 +175,8 @@ module ActiveModel
       #   person.reset_name_to_default!
       #   person.name                         # => 'Default Name'
       def attribute_method_affix(*affixes)
-        self.attribute_method_patterns += affixes.map! { |affix| AttributeMethodPattern.new(**affix) }
+        patterns = affixes.map! { |affix| AttributeMethodPattern.new(**affix) }
+        self.attribute_method_patterns = (attribute_method_patterns + patterns).freeze
         undefine_attribute_methods
       end
 
@@ -203,7 +206,7 @@ module ActiveModel
       def alias_attribute(new_name, old_name)
         old_name = old_name.to_s
         new_name = new_name.to_s
-        self.attribute_aliases = attribute_aliases.merge(new_name => old_name)
+        self.attribute_aliases = attribute_aliases.merge(new_name => old_name).freeze
         aliases_by_attribute_name[old_name] |= [new_name]
         eagerly_generate_alias_attribute_methods(new_name, old_name)
       end
