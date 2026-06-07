@@ -699,6 +699,7 @@ module ActiveRecord
         handle = active_record_instrumenter.build_handle("sql.active_record", payload)
         handle.start
         intent.log_handle = handle
+        @unfinalized_intents << intent
       end
 
       def finish_intent_log(intent, exception: nil) # :nodoc:
@@ -706,6 +707,7 @@ module ActiveRecord
         return unless handle
 
         intent.log_handle = nil
+        @unfinalized_intents.delete(intent)
 
         if exception
           payload = intent.notification_payload
@@ -714,6 +716,17 @@ module ActiveRecord
         end
 
         handle.finish
+      end
+
+      def finalize_remaining_intents # :nodoc:
+        intents = @unfinalized_intents
+        @unfinalized_intents = []
+
+        intents.each do |intent|
+          next if intent.finalized?
+
+          intent.send(:finish_log, exception: intent.error)
+        end
       end
 
       # Executes SQL statements in the context of this connection without
