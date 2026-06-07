@@ -3,6 +3,10 @@
 module ActiveRecord
   module ConnectionAdapters
     class QueryIntent # :nodoc:
+      # Raised when attempting to deliver to or reset a finalized intent.
+      class FinalizedError < ActiveRecordError # :nodoc:
+      end
+
       # Buffers instrumentation events during background execution for later publishing
       class EventBuffer
         def initialize(intent, instrumenter)
@@ -59,7 +63,9 @@ module ActiveRecord
 
       attr_reader :arel, :name, :prepare, :allow_retry, :allow_async,
                   :materialize_transactions, :batch, :pool, :session, :lock_wait,
-                  :event_buffer, :retries_remaining, :retry_deadline, :error, :reconnectable
+                  :event_buffer, :retries_remaining, :retry_deadline, :error, :reconnectable,
+                  :finalized
+      alias_method :finalized?, :finalized
       attr_writer :raw_sql, :session
       attr_accessor :adapter, :binds, :ran_async, :notification_payload, :log_handle
 
@@ -96,7 +102,7 @@ module ActiveRecord
         @lock_wait = nil
         @event_buffer = nil
         @log_handle = nil
-        @log_finished = false
+        @finalized = false
 
         # Retry tracking state (initialized when execution begins)
         @retries_remaining = nil
@@ -233,6 +239,8 @@ module ActiveRecord
       end
 
       def deliver_result(value)
+        raise FinalizedError, "delivering result to a finalized intent" if @finalized
+
         adapter.lock.synchronize do
           @raw_result = value
           @error = nil
@@ -246,6 +254,8 @@ module ActiveRecord
       end
 
       def deliver_failure(exception)
+        raise FinalizedError, "delivering failure to a finalized intent" if @finalized
+
         adapter.lock.synchronize do
           @error = exception
 
@@ -281,6 +291,8 @@ module ActiveRecord
       end
 
       def reset_for_retry
+        raise FinalizedError, "resetting a finalized intent" if @finalized
+
         @raw_result = nil
         @raw_result_available = false
         @error = nil
@@ -358,9 +370,9 @@ module ActiveRecord
 
       private
         def finish_log(exception: nil)
-          return if @log_finished
+          return if @finalized
 
-          @log_finished = true
+          @finalized = true
           adapter.finish_intent_log(self, exception: exception)
         end
 
