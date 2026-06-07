@@ -333,10 +333,7 @@ module ActiveRecord
               @reconnectable = false
             end
 
-            adapter.send(:ensure_connection_ready,
-              allow_retry: @allow_retry,
-              materialize_transactions: @materialize_transactions)
-            adapter.perform_sync_attempt(self)
+            adapter.execute_intent(self)
             next
           end
 
