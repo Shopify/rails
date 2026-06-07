@@ -613,8 +613,8 @@ module ActiveRecord
       end
 
       # Lowest-level abstract execution of a query, called only from the intent itself.
-      # Final wrapper around the subclass-specific +perform_query+. Populates the calling
-      # intent's raw_result.
+      # Final wrapper around the subclass-specific +perform_query+. Delivers the outcome
+      # back to the calling intent.
       def execute_intent(intent) # :nodoc:
         should_dirty = false
 
@@ -627,31 +627,55 @@ module ActiveRecord
 
         start_intent_log(intent)
         begin
-          with_raw_connection(allow_retry: intent.allow_retry, materialize_transactions: false) do |conn|
+          @lock.synchronize do
+            reconnectable = ensure_connection_ready(
+              allow_retry: intent.allow_retry,
+              materialize_transactions: false
+            )
+
             should_dirty = intent.materialize_transactions
-            begin
-              result = perform_query(conn, intent)
-              intent.raw_result = result
 
-              query_completed = true
-            ensure
-              begin
-                handle_warnings(result, intent.processed_sql)
-              rescue
-                raise if query_completed
+            intent.initialize_retry_state(
+              retries: intent.allow_retry ? connection_retries : 0,
+              deadline: retry_deadline && Process.clock_gettime(Process::CLOCK_MONOTONIC) + retry_deadline,
+              reconnectable: reconnectable
+            )
 
-                # The query failed, so we need to swallow this exception
-                # from handle_warnings to avoid masking the original.
-              end
-            end
+            perform_sync_attempt(intent)
           end
-          finish_intent_log(intent)
         rescue => error
-          finish_intent_log(intent, exception: error)
+          intent.send(:finish_log, exception: error) unless intent.raw_result_available?
           raise
         end
       ensure
         dirty_current_transaction if should_dirty
+      end
+
+      def perform_sync_attempt(intent) # :nodoc:
+        result =
+          begin
+            result = perform_query(@raw_connection, intent)
+            query_completed = true
+            result
+          rescue ::RangeError
+            raise
+          rescue => error
+            translated = translate_exception_with_cause(error, intent.processed_sql, intent.binds)
+            invalidate_transaction(translated)
+            intent.deliver_failure(translated)
+            return
+          ensure
+            begin
+              handle_warnings(result, intent.processed_sql)
+            rescue
+              raise if query_completed
+
+              # The query failed, so we need to swallow this exception
+              # from handle_warnings to avoid masking the original.
+            end
+          end
+
+        intent.deliver_result(result)
       end
 
       def start_intent_log(intent) # :nodoc:
