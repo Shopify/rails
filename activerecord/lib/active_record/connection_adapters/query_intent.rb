@@ -59,7 +59,7 @@ module ActiveRecord
 
       attr_reader :arel, :name, :prepare, :allow_retry, :allow_async,
                   :materialize_transactions, :batch, :pool, :session, :lock_wait,
-                  :event_buffer
+                  :event_buffer, :retries_remaining, :retry_deadline, :error, :reconnectable
       attr_writer :raw_sql, :session
       attr_accessor :adapter, :binds, :ran_async, :notification_payload, :log_handle
 
@@ -96,6 +96,12 @@ module ActiveRecord
         @lock_wait = nil
         @event_buffer = nil
         @log_handle = nil
+        @log_finished = false
+
+        # Retry tracking state (initialized when execution begins)
+        @retries_remaining = nil
+        @retry_deadline = nil
+        @reconnectable = nil
       end
 
       # Returns a hash representation of the QueryIntent for debugging/introspection
@@ -220,8 +226,64 @@ module ActiveRecord
 
       # Internal setter for raw result
       def raw_result=(value)
-        @raw_result = value
-        @raw_result_available = true
+        adapter.lock.synchronize do
+          @raw_result = value
+          @raw_result_available = true
+        end
+      end
+
+      def deliver_result(value)
+        adapter.lock.synchronize do
+          @raw_result = value
+          @error = nil
+
+          adapter.send(:dirty_current_transaction) if @materialize_transactions
+
+          @raw_result_available = true
+        end
+
+        finish_log
+      end
+
+      def deliver_failure(exception)
+        adapter.lock.synchronize do
+          @error = exception
+
+          adapter.send(:downgrade_connection_after_error, exception)
+          adapter.send(:dirty_current_transaction) if @materialize_transactions
+
+          @raw_result_available = true
+        end
+      end
+
+      def initialize_retry_state(retries:, deadline:, reconnectable:)
+        return unless @retries_remaining.nil?
+
+        @retries_remaining = retries
+        @retry_deadline = deadline
+        @reconnectable = reconnectable
+      end
+
+      def consume_retry
+        return false unless @retries_remaining && @retries_remaining > 0
+        return false if retry_deadline_exceeded?
+
+        @retries_remaining -= 1
+        true
+      end
+
+      def retry_deadline_exceeded?
+        @retry_deadline && @retry_deadline < Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      end
+
+      def retriable?
+        @allow_retry && @retries_remaining && @retries_remaining > 0 && !retry_deadline_exceeded?
+      end
+
+      def reset_for_retry
+        @raw_result = nil
+        @raw_result_available = false
+        @error = nil
       end
 
       # Check if result has been populated yet (without blocking)
@@ -242,10 +304,40 @@ module ActiveRecord
           execute_or_wait
         end
 
-        @event_buffer&.flush
+        loop do
+          @event_buffer&.flush
 
-        # Raise any error captured during deferred execution
-        raise @error if @error
+          if @error && retriable?
+            action = adapter.send(:classify_retry_action, @error, reconnectable: @reconnectable)
+            break unless action
+
+            consume_retry
+            reset_for_retry
+
+            case action
+            when :retry_query
+              adapter.send(:backoff, adapter.send(:connection_retries) - @retries_remaining)
+            when :retry_after_reconnect
+              @reconnectable = false
+            end
+
+            adapter.send(:ensure_connection_ready,
+              allow_retry: @allow_retry,
+              materialize_transactions: @materialize_transactions)
+            adapter.perform_sync_attempt(self)
+            next
+          end
+
+          break
+        end
+
+        if @error
+          finish_log(exception: @error)
+          @event_buffer&.flush
+          raise @error
+        end
+
+        @event_buffer&.flush
       end
 
       def cast_result
@@ -265,6 +357,13 @@ module ActiveRecord
       end
 
       private
+        def finish_log(exception: nil)
+          return if @log_finished
+
+          @log_finished = true
+          adapter.finish_intent_log(self, exception: exception)
+        end
+
         def async_schedule!(session)
           if adapter.current_transaction.joinable?
             raise AsynchronousQueryInsideTransactionError, "Asynchronous queries are not allowed inside transactions"
