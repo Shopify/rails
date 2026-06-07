@@ -198,6 +198,7 @@ module ActiveRecord
         @last_activity = nil
         @verified = false
         @needs_reconnect = false
+        @unfinalized_intents = []
 
         @pool_jitter = rand * max_jitter
       end
@@ -355,6 +356,7 @@ module ActiveRecord
             @owner = nil
             enable_lazy_transactions!
             unset_query_cache!
+            finalize_remaining_intents
           end
         else
           raise ActiveRecordError, "Cannot expire connection, it is not currently leased."
