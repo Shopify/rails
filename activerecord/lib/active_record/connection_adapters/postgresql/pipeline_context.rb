@@ -153,36 +153,55 @@ module ActiveRecord
             return unless pipeline_active?
             return unless pipeline_pending?
 
-            begin
-              pipeline_sync
-              consume_pipeline
-            rescue PG::Error => error
-              translated = translate_exception_with_cause(error, nil, nil)
+            loop do
+              begin
+                pipeline_sync
+                consumed = consume_pipeline
+              rescue PG::Error => error
+                translated = translate_exception_with_cause(error, nil, nil)
 
-              # A FATAL error means the server explicitly told us it's
-              # terminating the connection. Everything still in
-              # @pending_intents is definitively not-executed, so all
-              # are safe to replay regardless of allow_retry.
-              server_fatal = error.respond_to?(:result) &&
-                connection_terminating_severity?(error.result)
+                # A FATAL error means the server explicitly told us it's
+                # terminating the connection. Everything still in
+                # @pending_intents is definitively not-executed, so all
+                # are safe to replay regardless of allow_retry.
+                server_fatal = error.respond_to?(:result) &&
+                  connection_terminating_severity?(error.result)
 
-              replayable = retryable_connection_error?(translated) &&
-                reconnect_can_restore_state? &&
-                if server_fatal
-                  abandon_pipelined_intents(translated, allow_recovery: true, all_unsynced: true)
-                else
-                  abandon_pipelined_intents(translated, allow_recovery: true)
+                replayable = retryable_connection_error?(translated) &&
+                  reconnect_can_restore_state? &&
+                  if server_fatal
+                    abandon_pipelined_intents(translated, allow_recovery: true, all_unsynced: true)
+                  else
+                    abandon_pipelined_intents(translated, allow_recovery: true)
+                  end
+
+                if replayable
+                  reconnect!(restore_transactions: true)
+                  enter_pipeline_mode
+                  replayable.each { |intent| pipeline_add_query(intent) }
+                  next
                 end
 
-              if replayable
-                reconnect!(restore_transactions: true)
-                enter_pipeline_mode
-                replayable.each { |intent| pipeline_add_query(intent) }
-                retry
+                abandon_pipelined_intents(translated)
+                return
               end
 
-              abandon_pipelined_intents(translated)
-              raise translated
+              # Check if consume_pipeline encountered a connection error
+              # in a pipeline result (e.g., AdminShutdown). Only intents
+              # that failed or were not run need replay; successfully
+              # resolved intents keep their results.
+              needs_replay = consumed&.select { |intent| intent.error || intent.not_run_reason }
+              if needs_replay&.any? { |intent| intent.error && retryable_connection_error?(intent.error) }
+                if reconnect_can_restore_state? && needs_replay.all?(&:allow_retry)
+                  needs_replay.each(&:reset_for_retry)
+                  reconnect!(restore_transactions: true)
+                  enter_pipeline_mode
+                  needs_replay.each { |intent| pipeline_add_query(intent) }
+                  next
+                end
+              end
+
+              return
             end
           end
         end
@@ -191,6 +210,8 @@ module ActiveRecord
           @lock.synchronize do
             @pending_intents ||= []
             return if @pending_intents.empty?
+
+            consumed = []
 
             while intent = @pending_intents.first
               if intent.is_a?(SyncIntent) && !TRACK_SYNCS
@@ -212,6 +233,7 @@ module ActiveRecord
 
               if raw_result&.result_status == PG::PGRES_PIPELINE_ABORTED
                 intent.deliver_not_run(reason: :server_aborted)
+                consumed << intent
                 next
               end
 
@@ -220,6 +242,7 @@ module ActiveRecord
               rescue => error
                 translated = translate_exception_with_cause(error, intent.processed_sql, intent.binds)
                 intent.deliver_failure(translated)
+                consumed << intent
                 next
               end
 
@@ -229,7 +252,10 @@ module ActiveRecord
               end
 
               intent.deliver_result(raw_result)
+              consumed << intent
             end
+
+            consumed
           end
         end
 
