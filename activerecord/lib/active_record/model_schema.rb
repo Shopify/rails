@@ -448,10 +448,8 @@ module ActiveRecord
       end
 
       def attributes_builder # :nodoc:
-        @attributes_builder ||= begin
-            defaults = _default_attributes.except(*(column_names - [primary_key]))
-            ActiveSupport::Ractors.make_shareable(ActiveModel::AttributeSet::Builder.new(attribute_types, defaults))
-          end
+        defaults = _default_attributes.except(*(column_names - [primary_key]))
+        ActiveSupport::Ractors.make_shareable(ActiveModel::AttributeSet::Builder.new(attribute_types, defaults))
       end
 
       def columns_hash # :nodoc:
@@ -508,12 +506,11 @@ module ActiveRecord
 
       # Returns an array of column names as strings.
       def column_names
-        @column_names ||= columns.map(&:name).freeze
+        columns.map(&:name).freeze
       end
 
       def symbol_column_to_string(name_symbol) # :nodoc:
-        @symbol_column_to_string_name_hash ||= column_names.index_by(&:to_sym).freeze
-        @symbol_column_to_string_name_hash[name_symbol]
+        column_names.index_by(&:to_sym)[name_symbol]
       end
 
       # Returns an array of column objects where the primary id, all columns ending in "_id" or "_count",
@@ -586,11 +583,8 @@ module ActiveRecord
           @_returning_columns_for_insert = nil
           @_returning_columns_for_update = nil
           @arel_table = nil
-          @column_names = nil
-          @symbol_column_to_string_name_hash = nil
           @content_columns = nil
           @column_defaults = nil
-          @attributes_builder = nil
           @columns = nil
           @columns_hash = nil
           @schema_loaded = false
