@@ -721,7 +721,14 @@ module ActiveRecord
         intents.each do |intent|
           next if intent.finalized?
 
-          intent.send(:finish_log, exception: intent.error)
+          exception = intent.error
+          if exception.nil? && intent.not_run_reason
+            exception = ActiveRecord::QueryNotRun.new(
+              "Query was not run due to pipeline failure (#{intent.not_run_reason})"
+            )
+          end
+
+          intent.send(:finish_log, exception: exception)
         end
       end
 
