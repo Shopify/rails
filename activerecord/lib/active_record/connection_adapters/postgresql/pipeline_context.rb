@@ -84,13 +84,41 @@ module ActiveRecord
         def flush_pipeline
           @lock.synchronize do
             return unless pipeline_active?
+            return unless pipeline_pending?
+
+            begin
+              consume_pipeline
+            rescue PG::Error => error
+              translated = translate_exception_with_cause(error, nil, nil)
+              abandon_pipelined_intents(translated)
+            end
+          end
+        end
+
+        def consume_pipeline
+          @lock.synchronize do
             @pending_intents ||= []
             return if @pending_intents.empty?
 
             @raw_connection.pipeline_sync
 
             while intent = @pending_intents.shift
-              intent.raw_result = consume_next_pipeline_result
+              raw_result = consume_next_pipeline_result
+
+              begin
+                raw_result&.check
+              rescue => error
+                translated = translate_exception_with_cause(error, intent.processed_sql, intent.binds)
+                intent.deliver_failure(translated)
+                next
+              end
+
+              if intent.notification_payload && raw_result
+                intent.notification_payload[:affected_rows] = raw_result.cmd_tuples
+                intent.notification_payload[:row_count] = raw_result.ntuples
+              end
+
+              intent.deliver_result(raw_result)
             end
           end
         end
@@ -100,16 +128,31 @@ module ActiveRecord
             result = nil
 
             while true
-              r = @raw_connection.get_result
-              break unless r
+              incoming = @raw_connection.get_result
+              break unless incoming
 
               # Skip PGRES_PIPELINE_SYNC markers
-              next if r.result_status == PG::PGRES_PIPELINE_SYNC
+              next if incoming.result_status == PG::PGRES_PIPELINE_SYNC
 
-              result = r
+              result = incoming
             end
 
             result
+          end
+
+          def abandon_pipelined_intents(connection_error = nil)
+            intents = @pending_intents
+            @pending_intents = []
+
+            return unless intents&.any?
+
+            error = connection_error || ActiveRecord::ConnectionFailed.new("Connection lost during pipeline execution")
+            intents.each do |intent|
+              next if intent.is_a?(SyncIntent)
+              next if intent.raw_result_available?
+
+              intent.deliver_failure(error)
+            end
           end
       end
     end
