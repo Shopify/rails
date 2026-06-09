@@ -136,6 +136,45 @@ module ActiveRecord
       @connection.exit_pipeline_mode
     end
 
+    def test_active_probes_unsynced_pipeline_without_syncing
+      @connection.enter_pipeline_mode
+
+      intent = @connection.send(:internal_build_intent, "SELECT 1 AS n", "TEST")
+      intent.execute!
+
+      assert_not intent.raw_result_available?
+      assert @connection.active?
+      assert @connection.pipeline_active?
+      assert_not intent.raw_result_available?
+      assert_equal [intent], @connection.instance_variable_get(:@pending_intents)
+      assert_equal 1, @connection.instance_variable_get(:@pipeline_buffer).length
+
+      @connection.exit_pipeline_mode
+
+      assert intent.raw_result_available?
+      assert_equal [[1]], intent.cast_result.rows
+    end
+
+    def test_active_probe_treats_pipeline_aborted_probe_as_active
+      @connection.enter_pipeline_mode
+
+      failing = @connection.send(:internal_build_intent, "SELECT * FROM nonexistent_table_xyz", "TEST")
+      aborted = @connection.send(:internal_build_intent, "SELECT 1 AS n", "TEST")
+      failing.execute!
+      aborted.execute!
+
+      assert @connection.active?
+      assert_not failing.raw_result_available?
+      assert_not aborted.raw_result_available?
+
+      @connection.exit_pipeline_mode
+
+      assert failing.raw_result_available?
+      assert aborted.raw_result_available?
+      assert_equal :server_aborted, aborted.not_run_reason
+      assert_raises(ActiveRecord::StatementInvalid) { failing.cast_result }
+    end
+
     def test_syntax_error_in_pipelined_query
       @connection.enter_pipeline_mode
 
@@ -2664,6 +2703,32 @@ module ActiveRecord
       # But the data was rolled back when the batch failed
       count = @connection.select_value("SELECT COUNT(*) FROM pipeline_batch_test")
       assert_equal 0, count
+    end
+
+    def test_active_probe_does_not_commit_unsynced_pipeline_batch
+      @connection.enter_pipeline_mode
+
+      intent = @connection.send(:internal_build_intent,
+        "INSERT INTO pipeline_batch_test (value) VALUES ('active_probe')", "TEST")
+      intent.execute!
+
+      assert @connection.active?
+      assert_not intent.raw_result_available?
+
+      observer = ActiveRecord::Base.connection_pool.checkout
+      begin
+        count = observer.select_value("SELECT COUNT(*) FROM pipeline_batch_test")
+        assert_equal 0, count
+      ensure
+        ActiveRecord::Base.connection_pool.checkin(observer)
+      end
+
+      @connection.flush_pipeline
+      @connection.exit_pipeline_mode
+
+      assert intent.raw_result_available?
+      count = @connection.select_value("SELECT COUNT(*) FROM pipeline_batch_test")
+      assert_equal 1, count
     end
 
     def test_pipeline_results_reflect_execution_not_commit

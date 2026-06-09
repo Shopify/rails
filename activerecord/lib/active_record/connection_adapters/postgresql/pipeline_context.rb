@@ -16,6 +16,9 @@ module ActiveRecord
         # SyncIntent markers are always recorded to track sync boundaries.
         TRACK_SYNCS = false
 
+        PIPELINE_HEALTH_CHECK_SQL = ";"
+        private_constant :PIPELINE_HEALTH_CHECK_SQL
+
         # Marker for sync points in the pipeline.
         class SyncIntent # :nodoc:
           attr_accessor :raw_result
@@ -36,6 +39,28 @@ module ActiveRecord
             @pending_intents ||= []
             @pending_intents.any?
           end
+        end
+
+        def active_pipeline_connection?
+          @lock.synchronize do
+            return false unless pipeline_active?
+
+            @pending_intents ||= []
+
+            if @pending_intents.empty? || @pending_intents.last.is_a?(SyncIntent)
+              pipeline_sync
+              drain_pipeline
+            else
+              probe_pipeline_connection
+            end
+
+            connected? && !@needs_reconnect
+          end
+        rescue PG::Error, IOError, SystemCallError
+          discard_pipeline_buffer
+          false
+        ensure
+          maybe_deferred_release
         end
 
         def enter_pipeline_mode
@@ -297,6 +322,48 @@ module ActiveRecord
         end
 
         private
+          def probe_pipeline_connection
+            @raw_connection.send_query_params(PIPELINE_HEALTH_CHECK_SQL, [])
+            @raw_connection.send_flush_request
+            @raw_connection.flush
+
+            result = consume_pipeline_probe_result
+            begin
+              case result.result_status
+              when PG::PGRES_EMPTY_QUERY, PG::PGRES_TUPLES_OK, PG::PGRES_COMMAND_OK, PG::PGRES_PIPELINE_ABORTED
+              else
+                result.check
+              end
+            ensure
+              result.clear
+            end
+          end
+
+          def consume_pipeline_probe_result
+            loop do
+              pending_count = @pending_intents.length
+              buffer_count = pipeline_buffer.length
+
+              consume_pipeline
+
+              return wait_for_pipeline_query_result if pipeline_buffer.length == @pending_intents.length
+
+              next if @pending_intents.length != pending_count || pipeline_buffer.length != buffer_count
+
+              @raw_connection.block
+            end
+          end
+
+          def wait_for_pipeline_query_result
+            loop do
+              if result = get_available_pipeline_query_result
+                return result
+              end
+
+              @raw_connection.block
+            end
+          end
+
           def recover_from_pipeline_connection_error(error, last_replayed_head)
             translated = translate_pipeline_connection_error(error)
 
