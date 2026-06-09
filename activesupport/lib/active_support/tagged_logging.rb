@@ -122,15 +122,6 @@ module ActiveSupport
       new ActiveSupport::Logger.new(*args, **kwargs)
     end
 
-    # Returns a logger that can be used from Ractors. Accepts the same arguments
-    # as Logger.new. The returned Proxy already includes TaggedLogging, so no
-    # extending/cloning is needed.
-    def self.ractor_logger(*args, **kwargs) # :nodoc:
-      require "active_support/logging/proxy"
-
-      ActiveSupport::Logging::Proxy.new(*args, **kwargs)
-    end
-
     def self.new(logger)
       logger = logger.clone
 
