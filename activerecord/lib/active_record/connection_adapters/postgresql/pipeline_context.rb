@@ -42,6 +42,8 @@ module ActiveRecord
         end
 
         def active_pipeline_connection?
+          probe = nil
+
           @lock.synchronize do
             return false unless pipeline_active?
 
@@ -49,9 +51,17 @@ module ActiveRecord
 
             if @pending_intents.empty? || @pending_intents.last.is_a?(SyncIntent)
               pipeline_sync
-              drain_pipeline
             else
-              probe_pipeline_connection
+              probe = pipeline_connection_probe_intent
+              pipeline_add_query(probe)
+              @raw_connection.send_flush_request
+              @raw_connection.flush
+            end
+
+            drain_pipeline
+
+            if probe&.error
+              return false
             end
 
             connected? && !@needs_reconnect
@@ -60,6 +70,12 @@ module ActiveRecord
           discard_pipeline_buffer
           false
         ensure
+          if probe
+            @lock.synchronize do
+              @pending_intents&.delete(probe)
+              probe.clear_raw_result
+            end
+          end
           maybe_deferred_release
         end
 
@@ -292,6 +308,11 @@ module ActiveRecord
                 raw_result = get_available_pipeline_query_result
                 return consumed unless raw_result
 
+                if intent.deliver_pipeline_result_before_sync?
+                  deliver_pipeline_result_before_sync(intent, raw_result, consumed)
+                  next
+                end
+
                 if raw_result.result_status == PG::PGRES_PIPELINE_ABORTED
                   pipeline_buffer << [:not_run, intent, :server_aborted, take_notice_receiver_warnings]
                   next
@@ -322,46 +343,41 @@ module ActiveRecord
         end
 
         private
-          def probe_pipeline_connection
-            @raw_connection.send_query_params(PIPELINE_HEALTH_CHECK_SQL, [])
-            @raw_connection.send_flush_request
-            @raw_connection.flush
+          def pipeline_connection_probe_intent
+            QueryIntent.new(
+              adapter: self,
+              processed_sql: PIPELINE_HEALTH_CHECK_SQL,
+              name: "SCHEMA",
+              materialize_transactions: false,
+              deliver_pipeline_result_before_sync: true
+            )
+          end
 
-            result = consume_pipeline_probe_result
-            begin
-              case result.result_status
-              when PG::PGRES_EMPTY_QUERY, PG::PGRES_TUPLES_OK, PG::PGRES_COMMAND_OK, PG::PGRES_PIPELINE_ABORTED
+          def deliver_pipeline_result_before_sync(intent, raw_result, consumed)
+            @pending_intents.delete_at(pipeline_buffer.length)
+            take_notice_receiver_warnings
+
+            if raw_result.result_status == PG::PGRES_PIPELINE_ABORTED
+              intent.deliver_result(raw_result)
+            else
+              begin
+                raw_result.check
+              rescue => e
+                translated = translate_exception_with_cause(e, intent.processed_sql, intent.binds)
+                if retryable_connection_error?(translated)
+                  raw_result.clear
+                  discard_pipeline_buffer
+                  raise e
+                end
+
+                raw_result.clear
+                intent.deliver_failure(translated)
               else
-                result.check
+                intent.deliver_result(raw_result)
               end
-            ensure
-              result.clear
             end
-          end
 
-          def consume_pipeline_probe_result
-            loop do
-              pending_count = @pending_intents.length
-              buffer_count = pipeline_buffer.length
-
-              consume_pipeline
-
-              return wait_for_pipeline_query_result if pipeline_buffer.length == @pending_intents.length
-
-              next if @pending_intents.length != pending_count || pipeline_buffer.length != buffer_count
-
-              @raw_connection.block
-            end
-          end
-
-          def wait_for_pipeline_query_result
-            loop do
-              if result = get_available_pipeline_query_result
-                return result
-              end
-
-              @raw_connection.block
-            end
+            consumed << intent
           end
 
           def recover_from_pipeline_connection_error(error, last_replayed_head)
