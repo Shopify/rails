@@ -2,7 +2,7 @@
 
 require_relative "abstract_unit"
 
-class KernelRactorShareabilityTest < ActiveSupport::TestCase
+class RactorsTest < ActiveSupport::TestCase
   if RUBY_VERSION >= "4.0"
     def test_main_is_true_on_the_main_ractor
       assert ActiveSupport::Ractors.main?
