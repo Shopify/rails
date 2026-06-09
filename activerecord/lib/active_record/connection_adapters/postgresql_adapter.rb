@@ -418,45 +418,16 @@ module ActiveRecord
         @lock.synchronize do
           return false unless connected?
 
-          restore_pipeline = false
-
           if pipeline_active?
-            if pipeline_pending?
-              # Flush any pending work; connection errors surface while draining results
-              flush_pipeline
-            else
-              unless defined?(@pipelining_locked) && @pipelining_locked
-                restore_pipeline = true
-
-                begin
-                  exit_pipeline_mode
-                rescue PG::Error
-                  return false
-                end
-
-                begin
-                  @raw_connection.query ";"
-                rescue PG::Error
-                  return false
-                end
-              end
-            end
+            return false unless active_pipeline_connection?
           else
             @raw_connection.query ";"
-          end
-
-          if restore_pipeline && connected?
-            begin
-              enter_pipeline_mode
-            rescue PG::Error
-              return false
-            end
           end
 
           verified!
           true
         end
-      rescue PG::Error
+      rescue PG::Error, IOError, SystemCallError
         false
       end
 
