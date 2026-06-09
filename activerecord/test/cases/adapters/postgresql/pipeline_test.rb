@@ -175,6 +175,21 @@ module ActiveRecord
       assert_raises(ActiveRecord::StatementInvalid) { failing.cast_result }
     end
 
+    def test_active_drains_pending_pipeline_that_already_ends_in_sync
+      @connection.enter_pipeline_mode
+
+      intent = @connection.send(:internal_build_intent, "SELECT 1 AS n", "TEST")
+      intent.execute!
+      @connection.pipeline_sync
+
+      assert_not intent.raw_result_available?
+      assert @connection.active?
+      assert @connection.pipeline_active?
+      assert intent.raw_result_available?
+      assert_empty @connection.instance_variable_get(:@pending_intents)
+      assert_equal [[1]], intent.cast_result.rows
+    end
+
     def test_syntax_error_in_pipelined_query
       @connection.enter_pipeline_mode
 
