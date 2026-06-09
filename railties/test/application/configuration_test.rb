@@ -2043,6 +2043,27 @@ module ApplicationTests
       assert_includes(Rails.logger.broadcasts, logger)
     end
 
+    test "config.logger can be a tagged ractor logger" do
+      skip "Ractor::Port is unavailable" unless defined?(::Ractor::Port)
+
+      add_to_config <<~RUBY
+        require "active_support/tagged_logging"
+        config.logger = ActiveSupport::TaggedLogging.ractor_logger(Rails.root.join("log/ractor.log"))
+      RUBY
+
+      app "development"
+
+      ractor_logger = Rails.logger.broadcasts.first
+      assert_instance_of ActiveSupport::Logging::Logger, ractor_logger
+      assert_kind_of ::Logger, ractor_logger
+      assert_equal Rails.logger, Rails.application.config.action_controller.logger
+
+      Rails.logger.tagged("request-id") { Rails.logger.info("hello") }
+      Rails.logger.drain!
+
+      assert_includes File.read(app_path("log/ractor.log")), "[request-id] hello"
+    end
+
     test "respond_to? accepts include_private" do
       make_basic_app
 
