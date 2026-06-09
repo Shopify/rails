@@ -28,6 +28,38 @@ module ActiveRecord
           end
         end
 
+        class ConnectionProbeIntent # :nodoc:
+          attr_reader :error
+
+          def processed_sql
+            PIPELINE_HEALTH_CHECK_SQL
+          end
+
+          def type_casted_binds
+            []
+          end
+
+          def binds
+            []
+          end
+
+          def deliver_result(result)
+            @raw_result = result
+          end
+
+          def deliver_failure(error)
+            @error = error
+          end
+
+          def clear_raw_result
+            if @raw_result.respond_to?(:clear) && (!@raw_result.respond_to?(:cleared?) || !@raw_result.cleared?)
+              @raw_result.clear
+            end
+            @raw_result = nil
+          end
+        end
+        private_constant :ConnectionProbeIntent
+
         def pipeline_active?
           @lock.synchronize do
             connected? && @raw_connection.pipeline_status != PG::PQ_PIPELINE_OFF
@@ -308,8 +340,8 @@ module ActiveRecord
                 raw_result = get_available_pipeline_query_result
                 return consumed unless raw_result
 
-                if intent.deliver_pipeline_result_before_sync?
-                  deliver_pipeline_result_before_sync(intent, raw_result, consumed)
+                if intent.is_a?(ConnectionProbeIntent)
+                  deliver_pipeline_probe_result(intent, raw_result, consumed)
                   next
                 end
 
@@ -344,16 +376,10 @@ module ActiveRecord
 
         private
           def pipeline_connection_probe_intent
-            QueryIntent.new(
-              adapter: self,
-              processed_sql: PIPELINE_HEALTH_CHECK_SQL,
-              name: "SCHEMA",
-              materialize_transactions: false,
-              deliver_pipeline_result_before_sync: true
-            )
+            ConnectionProbeIntent.new
           end
 
-          def deliver_pipeline_result_before_sync(intent, raw_result, consumed)
+          def deliver_pipeline_probe_result(intent, raw_result, consumed)
             @pending_intents.delete_at(pipeline_buffer.length)
             take_notice_receiver_warnings
 
