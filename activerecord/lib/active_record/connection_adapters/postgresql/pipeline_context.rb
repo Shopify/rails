@@ -108,7 +108,7 @@ module ActiveRecord
               probe.clear_raw_result
             end
           end
-          maybe_deferred_release
+          pool.release_connection_if_unheld(self)
         end
 
         def enter_pipeline_mode
@@ -279,7 +279,7 @@ module ActiveRecord
             end
           end
         ensure
-          maybe_deferred_release
+          pool.release_connection_if_unheld(self)
         end
 
         def drain_pipeline

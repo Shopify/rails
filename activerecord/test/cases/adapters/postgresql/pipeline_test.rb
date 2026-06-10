@@ -2459,8 +2459,8 @@ module ActiveRecord
       conn = @test_pool.connections.first
       assert_predicate conn, :in_use?,
         "Connection should still be in use"
-      assert conn.deferred_pool_release,
-        "Connection should be marked for deferred release"
+      assert_equal conn, @test_pool.active_connection?,
+        "Connection should remain attached to the current lease"
 
       # Clean up: access the result to drain pipeline, then release
       assert_equal [[1]], intent.cast_result.rows
@@ -2504,7 +2504,7 @@ module ActiveRecord
     def test_connection_released_when_pipeline_drains_outside_block
       # When the pipeline drains outside any with_connection block
       # (e.g., by accessing intent results directly), the connection
-      # should be released via maybe_deferred_release.
+      # should be released once the last lease hold clears.
       intent = nil
 
       @test_pool.with_connection do |conn|
@@ -2525,7 +2525,7 @@ module ActiveRecord
       assert_predicate conn, :in_use?
 
       # Access result outside any with_connection block - triggers
-      # flush_pipeline → maybe_deferred_release
+      # flush_pipeline, clearing the pipeline hold.
       assert_equal [[99]], intent.cast_result.rows
 
       assert_not_predicate conn, :in_use?,
@@ -2638,8 +2638,6 @@ module ActiveRecord
       conn = @test_pool.connections.first
       assert_not_predicate conn, :in_use?,
         "Connection should be released normally when no pipeline is pending"
-      assert_not conn.deferred_pool_release,
-        "Deferred flag should not be set"
     end
 
     def test_deferred_release_does_not_make_connection_permanently_sticky
