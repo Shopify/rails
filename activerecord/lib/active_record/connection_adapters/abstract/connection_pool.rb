@@ -156,16 +156,19 @@ module ActiveRecord
 
       class Lease # :nodoc:
         attr_accessor :connection, :sticky
+        attr_reader :with_connection_depth
 
         def initialize
           @connection = nil
           @sticky = nil
+          @with_connection_depth = 0
         end
 
         def release
           conn = @connection
           @connection = nil
           @sticky = nil
+          @with_connection_depth = 0
           conn
         end
 
@@ -173,10 +176,23 @@ module ActiveRecord
           if @connection == connection
             @connection = nil
             @sticky = nil
+            @with_connection_depth = 0
             true
           else
             false
           end
+        end
+
+        def increment_with_connection_depth
+          @with_connection_depth += 1
+        end
+
+        def decrement_with_connection_depth
+          @with_connection_depth -= 1
+        end
+
+        def held?
+          sticky || @with_connection_depth > 0 || @connection&.pipeline_pending?
         end
       end
 
@@ -430,11 +446,21 @@ module ActiveRecord
       def release_connection(existing_lease = nil)
         return if self.discarded?
 
-        if conn = connection_lease.release
+        lease = existing_lease || connection_lease
+        if conn = lease.release
           checkin conn
           return true
         end
         false
+      end
+
+      def release_connection_if_unheld(connection = nil) # :nodoc:
+        lease = connection_lease
+        return false if connection && !lease.connection.equal?(connection)
+        return false unless lease.connection
+        return false if lease.held?
+
+        release_connection(lease)
       end
 
       # Yields a connection from the connection pool to the block. If no connection
@@ -452,35 +478,24 @@ module ActiveRecord
         lease.sticky = false if prevent_permanent_checkout
 
         if lease.connection
+          conn = lease.connection
           begin
-            lease.connection.increment_with_connection_depth
-            yield lease.connection
+            lease.increment_with_connection_depth
+            yield conn
           ensure
-            conn = lease.connection
-            conn&.decrement_with_connection_depth
+            lease.decrement_with_connection_depth if lease.connection.equal?(conn)
             lease.sticky = sticky_was if prevent_permanent_checkout
-            if conn&.with_connection_depth == 0 &&
-               conn&.deferred_pool_release &&
-               !conn&.pipeline_pending?
-              conn.deferred_pool_release = false
-              release_connection(lease) unless lease.sticky
-            end
+            release_connection_if_unheld
           end
         else
           begin
             conn = lease.connection = checkout
-            conn.increment_with_connection_depth
+            lease.increment_with_connection_depth
             yield conn
           ensure
-            conn = lease.connection
-            conn&.decrement_with_connection_depth
+            lease.decrement_with_connection_depth if conn && lease.connection.equal?(conn)
             lease.sticky = sticky_was if prevent_permanent_checkout
-            if conn&.pipeline_pending?
-              conn.deferred_pool_release = true
-            else
-              conn&.deferred_pool_release = false
-              release_connection(lease) unless lease.sticky
-            end
+            release_connection_if_unheld
           end
         end
       end
