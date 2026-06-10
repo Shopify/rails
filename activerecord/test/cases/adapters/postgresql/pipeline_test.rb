@@ -2532,6 +2532,39 @@ module ActiveRecord
         "Connection should be released after pipeline drains outside block"
     end
 
+    def test_connection_made_sticky_before_pipeline_drains_is_not_released
+      # If the request turns the retained lease into a sticky lease
+      # before the pipeline drains, clearing the pipeline hold should
+      # not check the connection in.
+      intent = nil
+
+      @test_pool.with_connection do |conn|
+        conn.connect!
+        conn.enter_pipeline_mode
+
+        intent = ActiveRecord::ConnectionAdapters::QueryIntent.new(
+          adapter: conn,
+          raw_sql: "SELECT 123 AS n",
+          name: "TEST",
+          allow_retry: true,
+          materialize_transactions: false
+        )
+        intent.execute!
+      end
+
+      conn = @test_pool.connections.first
+      assert_predicate conn, :in_use?
+      assert_same conn, @test_pool.lease_connection
+
+      assert_equal [[123]], intent.cast_result.rows
+
+      assert_predicate conn, :in_use?,
+        "Sticky connection should remain leased after pipeline drains"
+      assert_equal conn, @test_pool.active_connection?
+    ensure
+      @test_pool.release_connection
+    end
+
     def test_nested_with_connection_does_not_release_at_inner_exit
       # Pipeline drains in inner block, but connection should not be
       # released until the outer block exits.
