@@ -17,12 +17,9 @@ module ActiveSupport
         @port = ::Ractor::Port.new
       end
 
-      # +logdev+, +shift_age+, +shift_size+ and the +binmode+/+shift_period_suffix+
-      # options mirror Logger.new and are used to build the consumer's own
-      # Logger::LogDevice.
-      def spawn(logdev = nil, shift_age = 0, shift_size = 1048576, binmode: false, shift_period_suffix: "%Y%m%d")
+      def spawn(logdev = nil, shift_age = 0, shift_size = 1048576, binmode: false, shift_period_suffix: "%Y%m%d", inflight: nil)
         device = build_logdev(logdev, shift_age, shift_size, binmode, shift_period_suffix)
-        start_consumer(@port, device)
+        start_consumer(@port, device, inflight)
         ::Ractor.make_shareable(self)
       end
 
@@ -78,7 +75,7 @@ module ActiveSupport
 
         # The consumer must survive a failing log device the same way the stock Logger does: a write error is swallowed
         # and reported to stderr, and the logger keeps working.
-        def start_consumer(port, logdev)
+        def start_consumer(port, logdev, inflight)
           Thread.new do
             closed = false
             until closed
@@ -94,11 +91,14 @@ module ActiveSupport
                   logdev.write(message[1])
                 rescue StandardError => error
                   warn_failure(error)
+                ensure
+                  inflight&.decrement
                 end
               when :call
                 _, reply, operation, args = message
                 begin
                   case operation
+                  when :write    then logdev.write(args.first)
                   when :flush    then flush_device(logdev)
                   when :reopen   then logdev.reopen(args[0], **args[1])
                   when :shutdown then flush_device(logdev); logdev.close; closed = true
