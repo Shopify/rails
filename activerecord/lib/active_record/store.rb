@@ -162,7 +162,8 @@ module ActiveRecord
                 return unless attribute_changed?(sa)
                 prev_store, new_store = changes[sa]
                 accessor = store_accessor_for(sa)
-                [accessor.get(prev_store, k), accessor.get(new_store, k)]
+                prev_value, new_value = accessor.get(prev_store, k), accessor.get(new_store, k)
+                [prev_value, new_value] unless prev_value == new_value
               }.make_shareable!)
 
             define_method("#{accessor_key}_was",
@@ -186,7 +187,8 @@ module ActiveRecord
                 return unless saved_change_to_attribute?(sa)
                 prev_store, new_store = saved_changes[sa]
                 accessor = store_accessor_for(sa)
-                [accessor.get(prev_store, k), accessor.get(new_store, k)]
+                prev_value, new_value = accessor.get(prev_store, k), accessor.get(new_store, k)
+                [prev_value, new_value] unless prev_value == new_value
               }.make_shareable!)
 
             define_method("#{accessor_key}_before_last_save",
@@ -250,8 +252,7 @@ module ActiveRecord
         end
 
         def self.read(object, attribute, key)
-          store_object = prepare(object, attribute)
-          store_object[key]
+          get(object.public_send(attribute), key)
         end
 
         def self.write(object, attribute, key, value)
@@ -286,6 +287,12 @@ module ActiveRecord
       end
 
       class IndifferentHashAccessor < ActiveRecord::Store::HashAccessor # :nodoc:
+        def self.get(store_object, key)
+          if store_object
+            IndifferentCoder.as_indifferent_hash(store_object)[key]
+          end
+        end
+
         def self.prepare(object, attribute)
           store_object = object.public_send(attribute)
 

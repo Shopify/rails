@@ -75,7 +75,7 @@ module ActiveStorage
       # The +:dependent+ option defaults to +:purge_later+. This means the attachment will be
       # purged (i.e. destroyed) in the background whenever the record is destroyed.
       # If an ActiveJob::Backend queue adapter is not set in the application set it to
-      # +purge+ instead.
+      # +:purge+ instead.
       #
       # If you need the attachment to use a service which differs from the globally configured one,
       # pass the +:service+ option. For example:
@@ -193,7 +193,7 @@ module ActiveStorage
       # The +:dependent+ option defaults to +:purge_later+. This means the attachments will be
       # purged (i.e. destroyed) in the background whenever the record is destroyed.
       # If an ActiveJob::Backend queue adapter is not set in the application set it to
-      # +purge+ instead.
+      # +:purge+ instead.
       #
       # If you need the attachment to use a service which differs from the globally configured one,
       # pass the +:service+ option. For example:
@@ -305,6 +305,8 @@ module ActiveStorage
         end
     end
 
+    attr_writer :attachment_changes # :nodoc:
+
     def attachment_changes # :nodoc:
       @attachment_changes ||= {}
     end
@@ -321,6 +323,15 @@ module ActiveStorage
 
     def reload(*) # :nodoc:
       super.tap { @attachment_changes = nil }
+    end
+
+    def becomes(klass) # :nodoc:
+      super.tap do |became|
+        attachment_changes = @attachment_changes&.each_value do |change|
+          change.record = became
+        end
+        became.attachment_changes = attachment_changes
+      end
     end
   end
 end

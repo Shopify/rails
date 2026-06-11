@@ -150,7 +150,8 @@ module ActionDispatch # :nodoc:
 
         @str_body = nil
         @response.commit!
-        @buf.push string
+        @buf.push string.frozen? ? string : string.dup
+        string.bytesize
       end
       alias_method :<<, :write
 
@@ -482,7 +483,7 @@ module ActionDispatch # :nodoc:
 
   private
     ContentTypeHeader = Struct.new :mime_type, :charset
-    NullContentTypeHeader = ContentTypeHeader.new nil, nil
+    NullContentTypeHeader = ContentTypeHeader.new(nil, nil).freeze
 
     CONTENT_TYPE_PARSER = /
       \A

@@ -8,7 +8,7 @@ module ActionText
     TAG_NAME = "figure"
     SELECTOR = "[data-trix-attachment]"
 
-    COMPOSED_ATTRIBUTES = %w( caption presentation )
+    COMPOSED_ATTRIBUTES = %w( caption presentation ).freeze
     ATTRIBUTES = %w( sgid contentType url href filename filesize width height previewable content ) + COMPOSED_ATTRIBUTES
     ATTRIBUTE_TYPES = {
       "previewable" => ->(value) { value.to_s == "true" },

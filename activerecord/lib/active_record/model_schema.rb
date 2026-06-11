@@ -452,7 +452,7 @@ module ActiveRecord
 
       def attributes_builder # :nodoc:
         @attributes_builder ||= begin
-          defaults = _default_attributes.except(*(column_names - [primary_key]))
+          defaults = _default_attributes.except(*(column_names - Array(primary_key)))
           ActiveModel::AttributeSet::Builder.new(attribute_types, defaults)
         end
       end
@@ -478,6 +478,12 @@ module ActiveRecord
 
         @_returning_columns_for_insert = result if Ractor.main?
         result
+      end
+
+      def _returning_columns_for_update(connection)
+        @_returning_columns_for_update ||= columns.filter_map do |c|
+          c.name if connection.return_value_after_update?(c)
+        end
       end
 
       # Returns the column object for the named attribute.
@@ -589,6 +595,7 @@ module ActiveRecord
         def reload_schema_from_cache(recursive = true)
           return if defined?(@_making_shareable) && @_making_shareable
           @_returning_columns_for_insert = nil
+          @_returning_columns_for_update = nil
           @arel_table = nil
           @column_names = nil
           @symbol_column_to_string_name_hash = nil

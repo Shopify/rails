@@ -54,12 +54,8 @@ module ActiveSupport
 
       def tag_stack
         # We use our object ID here to avoid conflicting with other instances
-        thread_key = if frozen?
-          "activesupport_tagged_logging_tags:#{object_id}"
-        else
-          @thread_key ||= "activesupport_tagged_logging_tags:#{object_id}"
-        end
-        IsolatedExecutionState[thread_key] ||= TagStack.new
+        @thread_key ||= "activesupport_tagged_logging_tags:#{object_id}"
+        IsolatedExecutionState[@thread_key] ||= TagStack.new
       end
 
       def current_tags
@@ -68,6 +64,11 @@ module ActiveSupport
 
       def tags_text
         tag_stack.format_message("")
+      end
+
+      def freeze
+        tag_stack
+        super
       end
     end
 

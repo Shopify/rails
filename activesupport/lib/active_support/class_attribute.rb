@@ -3,43 +3,31 @@
 module ActiveSupport
   module ClassAttribute # :nodoc:
     class << self
-      def redefine(owner, name, namespaced_name, value)
-        ivar = :"@#{namespaced_name}"
+      def redefine(owner, name, owner_method, reader_method, value, instance_reader)
+        ivar_name = :"@#{reader_method}"
+        owner.instance_variable_set(ivar_name, value)
 
-        if owner.singleton_class?
-          if owner.attached_object.is_a?(Module)
-            owner.instance_variable_set(ivar, value)
-            redefine_string_method(owner, namespaced_name, "instance_variable_get(:#{ivar})", private: true)
+        owner_proc =
+          if defined?(Ractor.shareable_proc)
+            Ractor.shareable_proc { owner }
           else
-            owner.instance_variable_set(ivar, value)
-            redefine_string_method(owner, name, "instance_variable_get(:#{ivar})")
+            -> { owner }
           end
+
+        # If redefining on a singleton class, and including instance_reader, we
+        # need to update it to use self.singleton_class instead of self.class
+        if owner.singleton_class? && !owner.attached_object.is_a?(Module) && instance_reader
+          owner.class_eval("def #{name}; self.singleton_class.#{reader_method}; end", __FILE__, __LINE__)
         end
 
-        # Store value as a class instance variable on the singleton class.
-        # This avoids capturing it in a Proc closure, which would prevent
-        # the method from being called in non-main Ractors.
-        owner.singleton_class.instance_variable_set(ivar, value)
-
-        redefine_string_method(owner.singleton_class, namespaced_name, <<~BODY, private: true)
-          if singleton_class.instance_variable_defined?(:#{ivar})
-            singleton_class.instance_variable_get(:#{ivar})
-          else
-            superclass.send(:#{namespaced_name})
-          end
-        BODY
-
-        redefine_string_method(owner.singleton_class, "#{namespaced_name}=", <<~BODY, private: true, args: "value")
-          singleton_class.instance_variable_set(:#{ivar}, value) unless singleton_class.frozen?
-        BODY
+        redefine_method(owner.singleton_class, owner_method, private: true, &owner_proc)
       end
 
-      private
-        def redefine_string_method(owner, name, body, private: false, args: "")
-          owner.silence_redefinition_of_method(name)
-          owner.class_eval("def #{name}(#{args}); #{body}; end", __FILE__, __LINE__)
-          owner.send(:private, name) if private
-        end
+      def redefine_method(owner, name, private: false, &block)
+        owner.silence_redefinition_of_method(name)
+        owner.define_method(name, &block)
+        owner.send(:private, name) if private
+      end
     end
   end
 end

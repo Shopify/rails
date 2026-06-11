@@ -571,14 +571,16 @@ module ActiveRecord
     private
       def reset_fixtures(*fixture_names)
         ActiveRecord::FixtureSet.reset_cache
-
-        fixture_names.each do |fixture_name|
-          ActiveRecord::FixtureSet.create_fixtures(FIXTURES_ROOT, fixture_name)
-        end
+        # Pass all fixtures at once: on PostgreSQL 18.4+, switching back to `ENFORCED` checks
+        # existing rows against the constraint, so loading child fixtures before parents
+        # would raise a FK violation.
+        ActiveRecord::FixtureSet.create_fixtures(FIXTURES_ROOT, fixture_names)
       end
   end
 
   class AdapterConnectionTest < ActiveRecord::TestCase
+    include ConnectionHelper
+
     unless in_memory_db?
       self.use_transactional_tests = false
 
@@ -972,6 +974,28 @@ module ActiveRecord
         assert_empty slow
       ensure
         connection&.disconnect!
+      end
+    end
+
+    unless in_memory_db?
+      test "suppresses notifications when sql_notifications=false" do
+        run_without_connection do |orig_connection|
+          ActiveRecord::Base.establish_connection(orig_connection.merge(sql_notifications: false))
+
+          notifications = capture_notifications("sql.active_record") do
+            Post.first
+          end
+
+          assert_empty notifications
+        end
+      end
+
+      test "sql_notifications are enabled by default" do
+        notifications = capture_notifications("sql.active_record") do
+          Post.first
+        end
+
+        assert_not_empty notifications
       end
     end
   end

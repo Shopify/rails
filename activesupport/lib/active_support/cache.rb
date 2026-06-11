@@ -21,6 +21,7 @@ module ActiveSupport
     autoload :MemCacheStore,    "active_support/cache/mem_cache_store"
     autoload :NullStore,        "active_support/cache/null_store"
     autoload :RedisCacheStore,  "active_support/cache/redis_cache_store"
+    autoload :DeprecatedRedisCacheStore,  "active_support/cache/deprecated_redis_cache_store"
 
     # These options mean something to all cache implementations. Individual cache
     # implementations may support additional options.
@@ -701,7 +702,7 @@ module ActiveSupport
         return 0 if names.empty?
 
         options = merged_options(options)
-        names.map! { |key| normalize_key(key, options) }
+        names = names.map { |key| normalize_key(key, options) }
 
         instrument_multi(:delete_multi, names, options) do
           delete_multi_entries(names, **options)
@@ -983,7 +984,7 @@ module ActiveSupport
         end
 
         def expand_and_namespace_key(key, options = nil)
-          str_key = expanded_key(key)
+          str_key = key.class == ::String ? key : expanded_key(key)
           raise(ArgumentError, "key cannot be blank") if !str_key || str_key.empty?
 
           namespace_key str_key, options
