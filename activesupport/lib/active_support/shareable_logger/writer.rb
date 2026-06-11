@@ -3,15 +3,15 @@
 require "active_support/logger"
 
 module ActiveSupport
-  module Logging # :nodoc:
-    class Actor # :nodoc:
+  class ShareableLogger
+    class Writer # :nodoc:
       def self.spawn(...)
         new.spawn(...)
       end
 
       def initialize
         unless defined?(::Ractor::Port)
-          raise NotImplementedError, "ActiveSupport::Logging::Actor requires Ractor::Port support"
+          raise NotImplementedError, "ActiveSupport::ShareableLogger::Writer requires Ractor::Port support"
         end
 
         @port = ::Ractor::Port.new
@@ -59,8 +59,8 @@ module ActiveSupport
         # Reuse one reply port per calling thread instead of allocating one per call. A thread blocks on its own reply,
         # so its calls are serial and the port is safe to reuse.
         def reply_port
-          ::Thread.current.thread_variable_get(:active_support_logging_reply_port) ||
-            ::Thread.current.thread_variable_set(:active_support_logging_reply_port, ::Ractor::Port.new)
+          ::Thread.current.thread_variable_get(:active_support_shareable_logger_reply_port) ||
+            ::Thread.current.thread_variable_set(:active_support_shareable_logger_reply_port, ::Ractor::Port.new)
         end
 
         def build_logdev(logdev, shift_age, shift_size, binmode, shift_period_suffix)
@@ -121,7 +121,7 @@ module ActiveSupport
         end
 
         def warn_failure(error)
-          warn "[ActiveSupport::Logging::Actor] #{error.class}: #{error.message}"
+          warn "[ActiveSupport::ShareableLogger::Writer] #{error.class}: #{error.message}"
         end
 
         def flush_device(logdev)

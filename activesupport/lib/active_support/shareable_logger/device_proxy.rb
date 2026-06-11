@@ -1,12 +1,12 @@
 # frozen_string_literal: true
 
-require "active_support/logging/actor"
+require "active_support/shareable_logger/writer"
 
 module ActiveSupport
-  module Logging # :nodoc:
+  class ShareableLogger
     class DeviceProxy # :nodoc:
       # +sync_threshold+: when set to a positive Integer, producers switch from async to a synchronous, blocking write
-      # once the actor's in-flight count reaches it, bounding queue depth at the cost of producer latency. +nil+ (the
+      # once the writer's in-flight count reaches it, bounding queue depth at the cost of producer latency. +nil+ (the
       # default) is purely async.
       def initialize(*args, sync_threshold: nil, **logdev_options)
         validate_sync_threshold(sync_threshold)
@@ -16,7 +16,7 @@ module ActiveSupport
             require_ractor_safe!
             ::RactorSafe::AtomicInteger.new(0)
           end
-        @actor = Actor.spawn(*args, inflight: @inflight, **logdev_options)
+        @writer = Writer.spawn(*args, inflight: @inflight, **logdev_options)
         @closed = false
       end
 
@@ -26,29 +26,29 @@ module ActiveSupport
         return if @closed
 
         if @sync_threshold && @inflight.value >= @sync_threshold
-          @actor.call(:write, message)
+          @writer.call(:write, message)
         else
           @inflight&.increment
-          @actor.async(message)
+          @writer.async(message)
         end
         message.bytesize
       end
 
       def flush
-        @actor.flush unless @closed
+        @writer.flush unless @closed
         true
       end
 
       def close
         return true if @closed
 
-        @actor.shutdown
+        @writer.shutdown
         @closed = true unless frozen?
         true
       end
 
       def reopen(log = nil, **options)
-        @actor.reopen(log, options) unless @closed
+        @writer.reopen(log, options) unless @closed
         self
       end
 

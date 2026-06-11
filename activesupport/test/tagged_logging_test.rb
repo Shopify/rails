@@ -2,7 +2,7 @@
 
 require_relative "abstract_unit"
 require "active_support/logger"
-require "active_support/logging/logger"
+require "active_support/shareable_logger"
 require "active_support/tagged_logging"
 require "fileutils"
 require "timeout"
@@ -285,9 +285,9 @@ class RactorTaggedLoggingTest < ActiveSupport::TestCase
     Warning[:experimental] = @original_experimental_warning unless @original_experimental_warning.nil?
   end
 
-  test ".ractor_logger writes through an actor" do
+  test ".shareable_logger writes through a writer" do
     path = log_path("basic.log")
-    logger = ActiveSupport::TaggedLogging.ractor_logger(path)
+    logger = ActiveSupport::TaggedLogging.shareable_logger(path)
 
     logger.info("hello")
     logger.flush
@@ -297,11 +297,11 @@ class RactorTaggedLoggingTest < ActiveSupport::TestCase
     logger&.close
   end
 
-  test ".ractor_logger returns a ::Logger subclass wrapped with tagged logging" do
+  test ".shareable_logger returns a ::Logger subclass wrapped with tagged logging" do
     path = log_path("subclass.log")
-    logger = ActiveSupport::TaggedLogging.ractor_logger(path)
+    logger = ActiveSupport::TaggedLogging.shareable_logger(path)
 
-    assert_kind_of ActiveSupport::Logging::Logger, logger
+    assert_kind_of ActiveSupport::ShareableLogger, logger
     assert_kind_of ::Logger, logger
   ensure
     logger&.close
@@ -310,7 +310,7 @@ class RactorTaggedLoggingTest < ActiveSupport::TestCase
   test "consumer preserves Logger::LogDevice rotation" do
     path = log_path("rotation.log")
     # Rotate after a tiny size so a few writes trigger a roll-over.
-    logger = ActiveSupport::Logging::Logger.new(path, 5, 64)
+    logger = ActiveSupport::ShareableLogger.new(path, 5, 64)
 
     20.times { |i| logger.info("rotation-message-#{i}") }
     logger.flush
@@ -323,7 +323,7 @@ class RactorTaggedLoggingTest < ActiveSupport::TestCase
 
   test "reopen refreshes the device after the file is rotated externally" do
     path = log_path("reopen.log")
-    logger = ActiveSupport::TaggedLogging.ractor_logger(path)
+    logger = ActiveSupport::TaggedLogging.shareable_logger(path)
 
     logger.info("before")
     logger.flush
@@ -344,7 +344,7 @@ class RactorTaggedLoggingTest < ActiveSupport::TestCase
 
   test "uses Active Support tagged logging formatter for tags" do
     path = log_path("tags.log")
-    logger = ActiveSupport::TaggedLogging.ractor_logger(path)
+    logger = ActiveSupport::TaggedLogging.shareable_logger(path)
 
     logger.tagged("request-id") { logger.info("hello") }
     logger.flush
@@ -356,7 +356,7 @@ class RactorTaggedLoggingTest < ActiveSupport::TestCase
 
   test "uses LocalTagStorage for tagged logger without block" do
     path = log_path("local_tag_storage.log")
-    logger = ActiveSupport::TaggedLogging.ractor_logger(path)
+    logger = ActiveSupport::TaggedLogging.shareable_logger(path)
 
     tagged_logger = logger.tagged("job")
     tagged_logger.info("performed")
@@ -373,7 +373,7 @@ class RactorTaggedLoggingTest < ActiveSupport::TestCase
 
   test "log_at uses logger-local level storage" do
     path = log_path("log_at.log")
-    logger = ActiveSupport::TaggedLogging.ractor_logger(path)
+    logger = ActiveSupport::TaggedLogging.shareable_logger(path)
     logger.level = Logger::INFO
 
     logger.debug("outside")
@@ -391,26 +391,26 @@ class RactorTaggedLoggingTest < ActiveSupport::TestCase
 
   test "log_at works through BroadcastLogger" do
     path = log_path("broadcast_log_at.log")
-    ractor_logger = ActiveSupport::TaggedLogging.ractor_logger(path)
-    logger = ActiveSupport::BroadcastLogger.new(ractor_logger)
+    shareable_logger = ActiveSupport::TaggedLogging.shareable_logger(path)
+    logger = ActiveSupport::BroadcastLogger.new(shareable_logger)
     logger.level = Logger::INFO
 
     logger.debug("outside")
     logger.log_at(:debug) { logger.debug("inside") }
     logger.debug("outside-again")
-    ractor_logger.flush
+    shareable_logger.flush
 
     contents = File.read(path)
     assert_includes contents, "inside"
     assert_not_includes contents, "outside"
     assert_not_includes contents, "outside-again"
   ensure
-    ractor_logger&.close
+    shareable_logger&.close
   end
 
   test "silence uses logger-local level storage" do
     path = log_path("silence.log")
-    logger = ActiveSupport::TaggedLogging.ractor_logger(path)
+    logger = ActiveSupport::TaggedLogging.shareable_logger(path)
     logger.level = Logger::DEBUG
 
     logger.silence(Logger::ERROR) { logger.info("quiet-line") }
@@ -426,7 +426,7 @@ class RactorTaggedLoggingTest < ActiveSupport::TestCase
 
   test "ractor logger actor is shareable" do
     path = log_path("shareable_actor.log")
-    actor = ActiveSupport::Logging::Actor.spawn(path)
+    actor = ActiveSupport::ShareableLogger::Writer.spawn(path)
 
     assert Ractor.shareable?(actor)
 
@@ -440,7 +440,7 @@ class RactorTaggedLoggingTest < ActiveSupport::TestCase
 
   test "ractor logger can be made shareable" do
     path = log_path("shareable.log")
-    logger = ActiveSupport::TaggedLogging.ractor_logger(path)
+    logger = ActiveSupport::TaggedLogging.shareable_logger(path)
 
     Ractor.make_shareable(logger)
 
@@ -455,7 +455,7 @@ class RactorTaggedLoggingTest < ActiveSupport::TestCase
 
   test "a shareable logger logs from a non-main Ractor" do
     path = log_path("from_ractor.log")
-    logger = ActiveSupport::TaggedLogging.ractor_logger(path)
+    logger = ActiveSupport::TaggedLogging.shareable_logger(path)
     Ractor.make_shareable(logger)
 
     Ractor.new(logger) do |lg|
@@ -472,7 +472,7 @@ class RactorTaggedLoggingTest < ActiveSupport::TestCase
 
   test "default mode does not require ractor_safe and writes all messages" do
     path = log_path("default_mode.log")
-    logger = ActiveSupport::TaggedLogging.ractor_logger(path)
+    logger = ActiveSupport::TaggedLogging.shareable_logger(path)
 
     10.times { |i| logger.info("message-#{i}") }
     logger.flush
@@ -484,7 +484,7 @@ class RactorTaggedLoggingTest < ActiveSupport::TestCase
 
   test "sync_threshold: nil is equivalent to the default" do
     path = log_path("explicit_nil.log")
-    logger = ActiveSupport::TaggedLogging.ractor_logger(path, sync_threshold: nil)
+    logger = ActiveSupport::TaggedLogging.shareable_logger(path, sync_threshold: nil)
 
     logger.info("hello")
     logger.flush
@@ -497,15 +497,15 @@ class RactorTaggedLoggingTest < ActiveSupport::TestCase
   test "sync_threshold rejects invalid values before requiring ractor_safe" do
     path = log_path("invalid_threshold.log")
 
-    assert_raises(ArgumentError) { ActiveSupport::TaggedLogging.ractor_logger(path, sync_threshold: 0) }
-    assert_raises(ArgumentError) { ActiveSupport::TaggedLogging.ractor_logger(path, sync_threshold: -1) }
-    assert_raises(ArgumentError) { ActiveSupport::TaggedLogging.ractor_logger(path, sync_threshold: "1000") }
+    assert_raises(ArgumentError) { ActiveSupport::TaggedLogging.shareable_logger(path, sync_threshold: 0) }
+    assert_raises(ArgumentError) { ActiveSupport::TaggedLogging.shareable_logger(path, sync_threshold: -1) }
+    assert_raises(ArgumentError) { ActiveSupport::TaggedLogging.shareable_logger(path, sync_threshold: "1000") }
   end
 
   test "backpressure writes all messages" do
     require_ractor_safe!
     path = log_path("backpressure.log")
-    logger = ActiveSupport::TaggedLogging.ractor_logger(path, sync_threshold: 1)
+    logger = ActiveSupport::TaggedLogging.shareable_logger(path, sync_threshold: 1)
 
     10.times { |i| logger.info("message-#{i}") }
     logger.flush
@@ -518,7 +518,7 @@ class RactorTaggedLoggingTest < ActiveSupport::TestCase
   test "backpressure keeps tags, log_at, and flush behavior" do
     require_ractor_safe!
     path = log_path("backpressure_features.log")
-    logger = ActiveSupport::TaggedLogging.ractor_logger(path, sync_threshold: 1)
+    logger = ActiveSupport::TaggedLogging.shareable_logger(path, sync_threshold: 1)
     logger.level = Logger::INFO
 
     logger.tagged("request-id") { logger.info("tagged") }
@@ -536,7 +536,7 @@ class RactorTaggedLoggingTest < ActiveSupport::TestCase
 
   test "a failing log device does not kill the consumer or raise in the caller" do
     device = FailingDevice.new(fail_writes: true, fail_flush: true)
-    logger = ActiveSupport::TaggedLogging.ractor_logger(device)
+    logger = ActiveSupport::TaggedLogging.shareable_logger(device)
 
     # The device write/flush failures are reported to stderr like the stock
     # Logger does; capture it so the expected noise stays out of the test output.
@@ -557,7 +557,7 @@ class RactorTaggedLoggingTest < ActiveSupport::TestCase
   end
 
   test "a dead consumer degrades to a no-op instead of hanging" do
-    actor = ActiveSupport::Logging::Actor.spawn(NullDevice.new)
+    actor = ActiveSupport::ShareableLogger::Writer.spawn(NullDevice.new)
     actor.instance_variable_get(:@port).close # simulate a consumer that has gone away
 
     Timeout.timeout(5) do
@@ -592,7 +592,7 @@ class RactorTaggedLoggingTest < ActiveSupport::TestCase
     def close; end
   end
 
-  NullDevice = ActiveSupport::Logging::Actor::NullDevice
+  NullDevice = ActiveSupport::ShareableLogger::Writer::NullDevice
 
   private
     def require_ractor_safe!
