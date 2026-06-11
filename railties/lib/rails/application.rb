@@ -630,7 +630,7 @@ module Rails
       # ActionController::Base.descendants.each below — autoloading
       # ActionController::Base triggers ActionView::ViewPaths' Concern
       # `included do` block, which mutates @view_paths_by_class.
-      ::ActionView::LookupContext::Accessors::DEFAULT_PROCS.make_shareable!
+      ::ActionView::LookupContext.default_procs.make_shareable!
       ::ActiveRecord::Relation::WhereClause.empty
       ::ActiveRecord::Relation::FromClause.empty
       ::ActionView::Template::Handlers.extensions

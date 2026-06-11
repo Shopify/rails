@@ -2,7 +2,11 @@
 
 module ActiveSupport
   module TimeFormats
-    @list = {
+    # Deeply shareable so the class instance variable can be read from
+    # non-main Ractors: TimeFormats.lookup reads @list during e.g.
+    # Time#to_fs, which runs inside request-serving Ractors. The values
+    # include lambdas, so a shallow .freeze is not enough.
+    @list = ActiveSupport::Ractors.make_shareable({
       db: "%Y-%m-%d %H:%M:%S",
       inspect: "%Y-%m-%d %H:%M:%S.%9N %z",
       number: "%Y%m%d%H%M%S",
@@ -21,11 +25,11 @@ module ActiveSupport
       },
       rfc2822: lambda { |time| time.rfc2822 },
       iso8601: lambda { |time| time.iso8601 }
-    }.freeze
+    }.freeze)
 
     singleton_class.attr_reader :list # :nodoc:
 
-    DEPRECATED_LIST = @list.dup # :nodoc:
+    DEPRECATED_LIST = ActiveSupport::Ractors.make_shareable(@list.dup) # :nodoc:
 
     def self.lookup(format) # :nodoc:
       @list[format] || DEPRECATED_LIST[format]
@@ -36,7 +40,7 @@ module ActiveSupport
     # Use the format name as the name and either a strftime string or
     # Proc instance that takes a date argument as the value.
     def self.register(name, format)
-      @list = @list.merge(name => format).freeze
+      @list = ActiveSupport::Ractors.make_shareable(@list.merge(name => format).freeze)
     end
   end
 end

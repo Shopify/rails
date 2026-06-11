@@ -8,8 +8,11 @@ module Rails
     RENDER_TEMPLATE_PATTERN = /:in [`'].*_\w+_{2,3}\d+_\d+'/
 
     class << self
+      # Memoize a frozen String so the class instance variable is
+      # Ractor-shareable: backtrace cleaning runs inside request-serving
+      # Ractors (e.g. when rendering error pages), which read this @root.
       def root
-        @root ||= Rails.root && "#{Rails.root}/"
+        @root ||= Rails.root && "#{Rails.root}/".freeze
       end
     end
 
