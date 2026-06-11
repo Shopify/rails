@@ -205,6 +205,70 @@ class ShareableLoggerTest < ActiveSupport::TestCase
     logger&.close
   end
 
+  test "default mode does not require ractor_safe and writes all messages" do
+    path = log_path("default_mode.log")
+    logger = ActiveSupport::TaggedLogging.shareable_logger(path)
+
+    10.times { |i| logger.info("message-#{i}") }
+    logger.flush
+
+    assert_equal 10, File.read(path).lines.grep(/message-/).size
+  ensure
+    logger&.close
+  end
+
+  test "sync_threshold: nil is equivalent to the default" do
+    path = log_path("explicit_nil.log")
+    logger = ActiveSupport::TaggedLogging.shareable_logger(path, sync_threshold: nil)
+
+    logger.info("hello")
+    logger.flush
+
+    assert_includes File.read(path), "hello"
+  ensure
+    logger&.close
+  end
+
+  test "sync_threshold rejects invalid values before requiring ractor_safe" do
+    path = log_path("invalid_threshold.log")
+
+    assert_raises(ArgumentError) { ActiveSupport::TaggedLogging.shareable_logger(path, sync_threshold: 0) }
+    assert_raises(ArgumentError) { ActiveSupport::TaggedLogging.shareable_logger(path, sync_threshold: -1) }
+    assert_raises(ArgumentError) { ActiveSupport::TaggedLogging.shareable_logger(path, sync_threshold: "1000") }
+  end
+
+  test "backpressure writes all messages" do
+    require_ractor_safe!
+    path = log_path("backpressure.log")
+    logger = ActiveSupport::TaggedLogging.shareable_logger(path, sync_threshold: 1)
+
+    10.times { |i| logger.info("message-#{i}") }
+    logger.flush
+
+    assert_equal 10, File.read(path).lines.grep(/message-/).size
+  ensure
+    logger&.close
+  end
+
+  test "backpressure keeps tags, log_at, and flush behavior" do
+    require_ractor_safe!
+    path = log_path("backpressure_features.log")
+    logger = ActiveSupport::TaggedLogging.shareable_logger(path, sync_threshold: 1)
+    logger.level = Logger::INFO
+
+    logger.tagged("request-id") { logger.info("tagged") }
+    logger.log_at(:debug) { logger.debug("inside") }
+    logger.debug("outside")
+    assert_equal true, logger.flush
+
+    contents = File.read(path)
+    assert_includes contents, "[request-id] tagged"
+    assert_includes contents, "inside"
+    assert_not_includes contents, "outside"
+  ensure
+    logger&.close
+  end
+
   test "a failing log device does not kill the consumer or raise in the caller" do
     device = FailingDevice.new(fail_writes: true, fail_flush: true)
     logger = ActiveSupport::TaggedLogging.shareable_logger(device)
@@ -266,6 +330,12 @@ class ShareableLoggerTest < ActiveSupport::TestCase
   NullDevice = ActiveSupport::ShareableLogger::Writer::NullDevice
 
   private
+    def require_ractor_safe!
+      require "ractor_safe"
+    rescue LoadError
+      skip "ractor_safe gem is not available in this bundle"
+    end
+
     def log_path(name)
       path = File.join(@tmp_dir, name)
       File.delete(path) if File.exist?(path)
