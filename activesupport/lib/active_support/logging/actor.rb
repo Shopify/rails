@@ -79,7 +79,12 @@ module ActiveSupport
           Thread.new do
             closed = false
             until closed
-              message = port.receive
+              begin
+                message = port.receive
+              rescue ::Ractor::ClosedError
+                # Port closed; nothing left to consume.
+                break
+              end
               case message[0]
               when :write
                 begin
@@ -105,8 +110,6 @@ module ActiveSupport
                 end
               end
             end
-          rescue ::Ractor::ClosedError
-            # Port closed; nothing left to consume.
           ensure
             # On an unexpected exit close the port too, so producers get a ClosedError instead of blocking forever on a
             # dead consumer.

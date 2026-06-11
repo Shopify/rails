@@ -2059,7 +2059,7 @@ module ApplicationTests
       assert_equal Rails.logger, Rails.application.config.action_controller.logger
 
       Rails.logger.tagged("request-id") { Rails.logger.info("hello") }
-      Rails.logger.drain!
+      Rails.logger.flush
 
       assert_includes File.read(app_path("log/ractor.log")), "[request-id] hello"
     end
