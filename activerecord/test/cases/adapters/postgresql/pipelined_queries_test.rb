@@ -6,13 +6,15 @@ require "models/post"
 class PipelinedQueriesTest < ActiveRecord::PostgreSQLTestCase
   self.use_transactional_tests = false
 
+  fixtures :posts, :comments, :tags, :taggings
+
   def setup
     super
     @connection = ActiveRecord::Base.lease_connection
   end
 
   def teardown
-    @connection.exit_pipeline_mode if @connection.pipeline_active?
+    @connection.exit_pipeline_mode if @connection&.pipeline_active?
     super
   end
 
@@ -123,6 +125,23 @@ class PipelinedQueriesTest < ActiveRecord::PostgreSQLTestCase
     assert_equal [{ "n" => 2 }], future2.result.to_a
     assert_not future1.pending?
     assert_equal [{ "n" => 1 }], future1.result.to_a
+  end
+
+  def test_relation_preload_queries_batch_together
+    pending_lengths = []
+    original_flush = @connection.method(:flush_pipeline)
+
+    @connection.stub(:flush_pipeline, -> {
+      pending_lengths << Array(@connection.instance_variable_get(:@pending_intents)).length
+      original_flush.call
+    }) do
+      posts = Post.includes(:comments, :taggings).where(id: [posts(:welcome).id, posts(:thinking).id]).to_a
+
+      assert posts.all? { |post| post.association(:comments).loaded? }
+      assert posts.all? { |post| post.association(:taggings).loaded? }
+    end
+
+    assert_operator pending_lengths.max || 0, :>=, 2
   end
 
   def test_synchronous_query_flushes_pending_pipeline
