@@ -63,23 +63,32 @@ module ActionView
     class DetailsKey # :nodoc:
       alias :eql? :equal?
 
-      @details_keys = Concurrent::Map.new
-      @digest_cache = Concurrent::Map.new
       @view_context_mutex = Mutex.new
 
+      # The details/digest caches hold values that are not Ractor-shareable
+      # (TemplateDetails::Requested instances and Concurrent::Maps), and a
+      # frozen Concurrent::Map is still not shareable, so a shared class-ivar
+      # map could not be read from a worker Ractor. They live in Ractor-local
+      # storage instead: each request-serving Ractor owns its copy, cold-filled
+      # once and reused across the requests that Ractor serves. (The
+      # view-context container below is the opposite case — it is a Class,
+      # which IS shareable, so it can be compiled once and shared by all.)
       def self.digest_cache(details)
-        @digest_cache[details_cache_key(details)] ||= Concurrent::Map.new
+        key = details_cache_key(details)
+        cache = (Ractor[:av_digest_cache] ||= {})
+        cache[key] ||= Concurrent::Map.new
       end
 
       def self.details_cache_key(details)
-        @details_keys.fetch(details) do
+        cache = (Ractor[:av_details_keys] ||= {})
+        cache.fetch(details) do
           if formats = details[:formats]
             unless Template::Types.valid_symbols?(formats)
               details = details.dup
               details[:formats] &= Template::Types.symbols
             end
           end
-          @details_keys[details] ||= TemplateDetails::Requested.new(**details)
+          cache[details] = TemplateDetails::Requested.new(**details)
         end
       end
 
@@ -87,15 +96,15 @@ module ActionView
         ActionView::PathRegistry.all_resolvers.each do |resolver|
           resolver.clear_cache
         end
+        Ractor[:av_details_keys] = {}
+        Ractor[:av_digest_cache] = {}
         ActiveSupport::Ractors.on_main(self) do
-          @view_context_class = nil
-          @details_keys.clear
-          @digest_cache.clear
+          @view_context_mutex.synchronize { @view_context_class = nil }
         end
       end
 
       def self.digest_caches
-        @digest_cache.values
+        (Ractor[:av_digest_cache] || {}).values
       end
 
       # The view-context class owns the compiled-method container that every
