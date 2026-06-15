@@ -1,9 +1,7 @@
 # frozen_string_literal: true
 
-require "active_support/logger"
-
 module ActiveSupport
-  class ShareableLogger
+  class ShareableLogger # :nodoc:
     class Writer # :nodoc:
       def self.spawn(...)
         new.spawn(...)
@@ -11,7 +9,7 @@ module ActiveSupport
 
       def initialize
         unless defined?(::Ractor::Port)
-          raise NotImplementedError, "ActiveSupport::ShareableLogger::Writer requires Ractor::Port support"
+          raise NotImplementedError, "ActiveSupport::ShareableLogger requires Ractor::Port support"
         end
 
         @port = ::Ractor::Port.new
@@ -98,10 +96,16 @@ module ActiveSupport
                 _, reply, operation, args = message
                 begin
                   case operation
-                  when :write    then logdev.write(args.first)
-                  when :flush    then flush_device(logdev)
-                  when :reopen   then logdev.reopen(args[0], **args[1])
-                  when :shutdown then flush_device(logdev); logdev.close; closed = true
+                  when :write
+                    logdev.write(args.first)
+                  when :flush
+                    flush_device(logdev)
+                  when :reopen
+                    logdev.reopen(args[0], **args[1])
+                  when :shutdown
+                    flush_device(logdev)
+                    logdev.close
+                    closed = true
                   end
                 rescue StandardError => error
                   warn_failure(error)

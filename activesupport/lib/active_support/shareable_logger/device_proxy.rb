@@ -3,7 +3,7 @@
 require "active_support/shareable_logger/writer"
 
 module ActiveSupport
-  class ShareableLogger
+  class ShareableLogger # :nodoc:
     class DeviceProxy # :nodoc:
       # +sync_threshold+: when set to a positive Integer, producers switch from async to a synchronous, blocking write
       # once the writer's in-flight count reaches it, bounding queue depth at the cost of producer latency. +nil+ (the

@@ -2047,7 +2047,6 @@ module ApplicationTests
       skip "Ractor::Port is unavailable" unless defined?(::Ractor::Port)
 
       add_to_config <<~RUBY
-        require "active_support/tagged_logging"
         config.logger = ActiveSupport::TaggedLogging.shareable_logger(Rails.root.join("log/ractor.log"))
       RUBY
 
