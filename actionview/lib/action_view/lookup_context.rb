@@ -23,6 +23,13 @@ module ActionView
     end
 
     def self.register_detail(name, &block)
+      # The detail block becomes a method on Accessors via define_method, so it
+      # is dispatched as a bmethod. For it to be callable from non-main Ractors
+      # the backing Proc must be Ractor-shareable. The detail blocks only read
+      # lexically-scoped constants (I18n, ActionView::Base, Template::Handlers)
+      # and never touch instance state, so detaching self via shareable_proc is
+      # safe. On Rubies without Ractor support this returns the block unchanged.
+      block = ActiveSupport::Ractors.shareable_proc(&block)
       self.default_procs = self.default_procs.merge(name => block).freeze
 
       Accessors.define_method(:"default_#{name}", &block)
@@ -80,18 +87,35 @@ module ActionView
         ActionView::PathRegistry.all_resolvers.each do |resolver|
           resolver.clear_cache
         end
-        @view_context_class = nil
-        @details_keys.clear
-        @digest_cache.clear
+        ActiveSupport::Ractors.on_main(self) do
+          @view_context_class = nil
+          @details_keys.clear
+          @digest_cache.clear
+        end
       end
 
       def self.digest_caches
         @digest_cache.values
       end
 
+      # The view-context class owns the compiled-method container that every
+      # template is compiled into. It is built once and shared with all
+      # request-serving Ractors, so templates compile a single time for the
+      # whole process.
+      #
+      # The leading read returns the memoized class with no lock and no Ractor
+      # hop (a Class is always Ractor-shareable, so the read is valid from any
+      # Ractor). Only the first, building call pays for the rest: the build is
+      # delegated to the main Ractor because it mutates shared state, and it is
+      # guarded by a mutex so that concurrent first callers — threads on a
+      # non-Ractor server, including runtimes without a GVL — don't each build
+      # and discard a container. The mutex is only ever taken on the main
+      # Ractor, so it never needs to be shareable.
       def self.view_context_class
-        @view_context_mutex.synchronize do
-          @view_context_class ||= ActionView::Base.with_empty_template_cache
+        @view_context_class || ActiveSupport::Ractors.on_main(self) do
+          @view_context_mutex.synchronize do
+            @view_context_class ||= ActionView::Base.with_empty_template_cache
+          end
         end
       end
     end
