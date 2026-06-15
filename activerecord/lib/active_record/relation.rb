@@ -1211,6 +1211,36 @@ module ActiveRecord
       self
     end
 
+    def load_pipeline(&block) # :nodoc:
+      if !loaded? || scheduled?
+        result = begin
+          exec_main_query(pipeline: true)
+        rescue ArgumentError => error
+          raise unless error.message == "Cannot pipeline this query"
+
+          records = records_from_rows(exec_main_query, &block)
+          @records = records
+          @loaded = true
+          return Promise::Complete.new(records)
+        end
+
+        promise = case result
+        when FutureResult, FutureResult::Complete, Promise
+          result.then { |rows| records_from_rows(rows, &block) }
+        else
+          Promise::Complete.new(records_from_rows(result, &block))
+        end
+
+        promise.then do |records|
+          @records = records
+          @loaded = true
+          records
+        end
+      else
+        Promise::Complete.new(@records)
+      end
+    end
+
     # Forces reloading of relation.
     def reload
       reset
@@ -1345,12 +1375,9 @@ module ActiveRecord
     end
 
     def preload_associations(records) # :nodoc:
-      preload = preload_values
-      preload += includes_values unless eager_loading?
+      preload = preload_values + (eager_loading? ? [] : includes_values)
       scope = strict_loading_value ? StrictLoadingScope : nil
-      preload.each do |associations|
-        ActiveRecord::Associations::Preloader.new(records: records, associations: associations, scope: scope).call
-      end
+      ActiveRecord::Associations::Preloader.new(records: records, associations: preload, scope: scope).call unless preload.empty?
     end
 
     protected
@@ -1440,19 +1467,13 @@ module ActiveRecord
             exec_main_query
           end
 
-          records = instantiate_records(rows, &block)
-          preload_associations(records) unless skip_preloading_value
-
-          records.each(&:readonly!) if readonly_value
-          records.each { |record| record.strict_loading!(strict_loading_value) } unless strict_loading_value.nil?
-
-          records
+          records_from_rows(rows, &block)
         end
       end
 
-      def exec_main_query(async: false)
+      def exec_main_query(async: false, pipeline: false)
         if @none
-          if async
+          if async || pipeline
             return FutureResult.wrap([])
           else
             return []
@@ -1470,16 +1491,26 @@ module ActiveRecord
                 else
                   relation = join_dependency.apply_column_aliases(relation)
                   @_join_dependency = join_dependency
-                  c.select_all(relation.arel, "#{model.name} Eager Load", async: async)
+                  c.select_all(relation.arel, "#{model.name} Eager Load", async: async, pipeline: pipeline)
                 end
               end
             end
           else
             model.with_connection do |c|
-              model._query_by_sql(c, arel, async: async)
+              model._query_by_sql(c, arel, async: async, pipeline: pipeline)
             end
           end
         end
+      end
+
+      def records_from_rows(rows, &block)
+        records = instantiate_records(rows, &block)
+        preload_associations(records) unless skip_preloading_value
+
+        records.each(&:readonly!) if readonly_value
+        records.each { |record| record.strict_loading!(strict_loading_value) } unless strict_loading_value.nil?
+
+        records
       end
 
       def instantiate_records(rows, &block)

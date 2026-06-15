@@ -24,7 +24,7 @@ module ActiveRecord
               target_loaders = loaders.reject { |l| future_tables.include?(l.table_name)  }
               target_loaders = loaders if target_loaders.empty?
 
-              group_and_load_similar(target_loaders)
+              group_and_load_similar(target_loaders).each(&:value)
               target_loaders.each(&:run)
             end
 
@@ -44,8 +44,8 @@ module ActiveRecord
               [loader.loader_query, loader.klass]
             end
 
-            grouped.each do |(query, _klass), similar_loaders|
-              query.load_records_in_batch(similar_loaders)
+            grouped.map do |(query, _klass), similar_loaders|
+              query.load_records_in_batch(similar_loaders, pipeline: true)
             end
           end
       end
