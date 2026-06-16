@@ -269,8 +269,13 @@ module ActiveRecord
           sql, binds, preparable, allow_retry = to_sql_and_binds(arel, binds, preparable, allow_retry)
 
           if async || pipeline
-            result = lookup_sql_cache(sql, name, binds) || super(sql, name, binds, preparable: preparable, async: async, allow_retry: allow_retry, pipeline: pipeline)
-            FutureResult.wrap(result)
+            if result = lookup_sql_cache(sql, name, binds)
+              FutureResult.wrap(result)
+            else
+              result = FutureResult.wrap(super(sql, name, binds, preparable: preparable, async: async, allow_retry: allow_retry, pipeline: pipeline))
+              result.add_result_callback { |resolved| cache_sql_result(sql, binds, resolved) } if pipeline
+              result
+            end
           else
             cache_sql(sql, name, binds) { super(sql, name, binds, preparable: preparable, async: async, allow_retry: allow_retry) }
           end
@@ -322,6 +327,14 @@ module ActiveRecord
           end
 
           result.dup
+        end
+
+        def cache_sql_result(sql, binds, result)
+          key = binds.empty? ? sql : [sql, binds]
+          @lock.synchronize do
+            query_cache.compute_if_absent(key) { result.dup }
+          end
+          result
         end
 
         def cache_notification_info_result(sql, name, binds, result)
