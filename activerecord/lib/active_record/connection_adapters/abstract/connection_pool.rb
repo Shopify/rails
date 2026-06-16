@@ -36,6 +36,7 @@ module ActiveRecord
       def checkin(_); end
       def remove(_); end
       def async_executor; end
+      def release_connection_if_unheld(_ = nil); false; end
 
       def db_config
         NULL_CONFIG

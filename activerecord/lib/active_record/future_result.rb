@@ -23,6 +23,11 @@ module ActiveRecord
       def then(&block)
         Promise::Complete.new(@result.then(&block))
       end
+
+      def add_result_callback
+        yield @result
+        self
+      end
     end
 
     Canceled = Class.new(ActiveRecordError)
@@ -54,7 +59,15 @@ module ActiveRecord
     def result
       raise Canceled if canceled?
 
-      @intent.cast_result
+      result = @intent.cast_result
+
+      if defined?(@result_callbacks) && @result_callbacks
+        callbacks = @result_callbacks
+        @result_callbacks = nil
+        callbacks.each { |callback| callback.call(result) }
+      end
+
+      result
     end
 
     def pending?
@@ -63,6 +76,11 @@ module ActiveRecord
 
     def canceled?
       @intent.canceled?
+    end
+
+    def add_result_callback(&block)
+      (@result_callbacks ||= []) << block
+      self
     end
   end
 end
