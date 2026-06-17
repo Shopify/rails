@@ -1294,6 +1294,9 @@ module ActiveRecord
       def initialize(reflection, association)
         @reflection = reflection
         @association = association
+        @foreign_keys = {}
+        @active_record_primary_keys = {}
+        @association_primary_keys = {}
         super(reflection)
       end
 
@@ -1302,39 +1305,62 @@ module ActiveRecord
       end
 
       def options
-        selected_variant_options
+        variant_options(selected_variant_name)
       end
 
       def foreign_key(infer_from_inverse_of: true)
-        if options[:foreign_key]
-          ActiveRecord::Key.for(options[:foreign_key]).name
-        elsif options[:query_constraints]
-          options[:query_constraints].map { |fk| -fk.to_s.freeze }.freeze
-        else
-          derived_fk = @reflection.send(:derive_foreign_key, infer_from_inverse_of: infer_from_inverse_of)
+        variant_name = selected_variant_name
 
-          if !derived_fk.is_a?(Array) && active_record.has_query_constraints?
-            derived_fk = @reflection.send(:derive_fk_query_constraints, derived_fk)
+        @foreign_keys.fetch(variant_name) do
+          selected_options = variant_options(variant_name)
+
+          @foreign_keys[variant_name] = if selected_options[:foreign_key]
+            ActiveRecord::Key.for(selected_options[:foreign_key]).name
+          elsif selected_options[:query_constraints]
+            selected_options[:query_constraints].map { |fk| -fk.to_s.freeze }.freeze
+          else
+            derived_fk = @reflection.send(:derive_foreign_key, infer_from_inverse_of: infer_from_inverse_of)
+
+            if !derived_fk.is_a?(Array) && active_record.has_query_constraints?
+              derived_fk = @reflection.send(:derive_fk_query_constraints, derived_fk)
+            end
+
+            ActiveRecord::Key.for(derived_fk).name
           end
-
-          ActiveRecord::Key.for(derived_fk).name
         end
       end
 
       def active_record_primary_key
-        if options[:primary_key]
-          ActiveRecord::Key.for(options[:primary_key]).name
-        else
-          derive_primary_key(active_record) { |model| model.query_constraints_list }
+        variant_name = selected_variant_name
+
+        @active_record_primary_keys.fetch(variant_name) do
+          selected_options = variant_options(variant_name)
+
+          @active_record_primary_keys[variant_name] = if selected_options[:primary_key]
+            ActiveRecord::Key.for(selected_options[:primary_key]).name
+          else
+            derive_primary_key(active_record, selected_options) { |model| model.query_constraints_list }
+          end
         end
       end
 
       def association_primary_key(klass = nil)
         if belongs_to?
-          if options[:primary_key]
-            ActiveRecord::Key.for(options[:primary_key]).name
+          variant_name = selected_variant_name
+          selected_options = variant_options(variant_name)
+
+          if selected_options[:primary_key]
+            @association_primary_keys.fetch(variant_name) do
+              @association_primary_keys[variant_name] =
+                ActiveRecord::Key.for(selected_options[:primary_key]).name
+            end
+          elsif klass || polymorphic?
+            derive_primary_key(klass || self.klass, selected_options) { |model| model.composite_query_constraints_list }
           else
-            derive_primary_key(klass || self.klass) { |model| model.composite_query_constraints_list }
+            @association_primary_keys.fetch(variant_name) do
+              @association_primary_keys[variant_name] =
+                derive_primary_key(self.klass, selected_options) { |model| model.composite_query_constraints_list }
+            end
           end
         else
           @reflection.association_primary_key(klass)
@@ -1379,22 +1405,24 @@ module ActiveRecord
       end
 
       private
-        def selected_variant_options
+        def selected_variant_name
           key = if @reflection.options[:association_variant_selector].arity == 0
             association.owner.instance_exec(&@reflection.options[:association_variant_selector])
           else
             @reflection.options[:association_variant_selector].call(association.owner)
           end
 
-          key = key.to_sym
+          key.to_sym
+        end
 
-          @reflection.options[:association_variants].fetch(key) do
-            raise ArgumentError, "Unknown association variant key: #{key.inspect}"
+        def variant_options(variant_name)
+          @reflection.options[:association_variants].fetch(variant_name) do
+            raise ArgumentError, "Unknown association variant key: #{variant_name.inspect}"
           end
         end
 
-        def derive_primary_key(model)
-          if model.has_query_constraints? || options[:query_constraints]
+        def derive_primary_key(model, variant_options)
+          if model.has_query_constraints? || variant_options[:query_constraints]
             yield model
           else
             model.primary_key_definition.inferred_id || primary_key(model).freeze

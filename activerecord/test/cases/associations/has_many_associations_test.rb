@@ -150,6 +150,50 @@ class HasManyAssociationsTestPrimaryKeys < ActiveRecord::TestCase
     assert_equal post.id, post.comments.build(body: "regular key").post_id
   end
 
+  def test_has_many_with_variants_memoizes_runtime_keys_by_variant
+    comments = Class.new(ActiveRecord::Base) do
+      self.table_name = "comments"
+      self.inheritance_column = "not_there"
+    end
+
+    posts = Class.new(ActiveRecord::Base) do
+      self.table_name = "posts"
+
+      attr_accessor :variant
+
+      has_many_with_variants :comments, anonymous_class: comments,
+        variants: {
+          default: { primary_key: [:id, :title], foreign_key: [:post_id, :body] },
+          title: { primary_key: [:title, :id], foreign_key: [:body, :post_id] }
+        } do
+          variant
+      end
+    end
+
+    post = posts.new(title: "dynamic key", body: "body")
+    post.variant = :default
+    reflection = post.association(:comments).reflection
+
+    default_foreign_key = reflection.foreign_key
+    default_primary_key = reflection.active_record_primary_key
+
+    assert_same default_foreign_key, reflection.foreign_key
+    assert_same default_primary_key, reflection.active_record_primary_key
+
+    post.variant = :title
+    title_foreign_key = reflection.foreign_key
+    title_primary_key = reflection.active_record_primary_key
+
+    assert_equal ["body", "post_id"], title_foreign_key
+    assert_equal ["title", "id"], title_primary_key
+    assert_same title_foreign_key, reflection.foreign_key
+    assert_same title_primary_key, reflection.active_record_primary_key
+
+    post.variant = :default
+    assert_same default_foreign_key, reflection.foreign_key
+    assert_same default_primary_key, reflection.active_record_primary_key
+  end
+
   def test_ids_on_unloaded_association_with_custom_primary_key
     david = people(:david)
     assert_equal Essay.where(writer_id: "David").pluck(:id), david.essay_ids
