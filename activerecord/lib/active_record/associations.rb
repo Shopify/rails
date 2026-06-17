@@ -1429,6 +1429,14 @@ module ActiveRecord
           Reflection.add_reflection(self, name, reflection)
         end
 
+        def has_many_with_variants(name, scope = nil, **options, &variant_options)
+          raise ArgumentError, "Variant associations require a block" unless variant_options
+
+          options[:variant_options] = variant_options
+          reflection = Builder::HasMany.build(self, name, scope, options)
+          Reflection.add_reflection(self, name, reflection)
+        end
+
         # Specifies a one-to-one association with another class. This method
         # should only be used if the other class contains the foreign key. If
         # the current class contains the foreign key, then you should use

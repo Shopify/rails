@@ -39,9 +39,11 @@ module ActiveRecord
       delegate :options, to: :reflection
 
       def initialize(owner, reflection)
+        @owner = owner
+        reflection = Reflection::AssociationVariantReflection.new(reflection, self) if reflection.has_variants?
         reflection.check_validity!
 
-        @owner, @reflection = owner, reflection
+        @reflection = reflection
         @disable_joins = @reflection.options[:disable_joins] || false
 
         reset
@@ -301,10 +303,14 @@ module ActiveRecord
         # actually gets built.
         def association_scope
           if klass
-            @association_scope ||= if disable_joins
-              DisableJoinsAssociationScope.scope(self)
+            if reflection.has_variants?
+              disable_joins ? DisableJoinsAssociationScope.scope(self) : AssociationScope.scope(self)
             else
-              AssociationScope.scope(self)
+              @association_scope ||= if disable_joins
+                DisableJoinsAssociationScope.scope(self)
+              else
+                AssociationScope.scope(self)
+              end
             end
           end
         end
@@ -391,7 +397,8 @@ module ActiveRecord
 
         # Returns true if statement cache should be skipped on the association reader.
         def skip_statement_cache?(scope)
-          reflection.has_scope? ||
+          reflection.has_variants? ||
+            reflection.has_scope? ||
             scope.eager_loading? ||
             klass.scope_attributes? ||
             reflection.source_reflection.active_record.default_scopes.any?

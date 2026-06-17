@@ -88,6 +88,68 @@ class HasManyAssociationsTestPrimaryKeys < ActiveRecord::TestCase
     assert_equal Essay.where(writer_id: "David"), david.essays
   end
 
+  def test_has_many_with_variants_resolves_primary_and_foreign_keys_at_runtime
+    comments = Class.new(ActiveRecord::Base) do
+      self.table_name = "comments"
+      self.inheritance_column = "not_there"
+    end
+
+    posts = Class.new(ActiveRecord::Base) do
+      self.table_name = "posts"
+
+      attr_accessor :use_title_key
+
+      has_many_with_variants :comments, anonymous_class: comments do
+        if use_title_key
+          { primary_key: :title, foreign_key: :body }
+        else
+          { foreign_key: :post_id }
+        end
+      end
+    end
+
+    post = posts.create!(title: "dynamic key", body: "body")
+    title_comment = comments.create!(post_id: 0, body: "dynamic key")
+    id_comment = comments.create!(post_id: post.id, body: "regular key")
+
+    post.use_title_key = true
+    assert_equal [title_comment], post.comments.to_a
+
+    post.association(:comments).reset
+    post.use_title_key = false
+    assert_equal [id_comment], post.comments.to_a
+  end
+
+  def test_has_many_with_variants_uses_runtime_keys_when_building_records
+    comments = Class.new(ActiveRecord::Base) do
+      self.table_name = "comments"
+      self.inheritance_column = "not_there"
+    end
+
+    posts = Class.new(ActiveRecord::Base) do
+      self.table_name = "posts"
+
+      attr_accessor :use_title_key
+
+      has_many_with_variants :comments, anonymous_class: comments do
+        if use_title_key
+          { primary_key: :title, foreign_key: :body }
+        else
+          { foreign_key: :post_id }
+        end
+      end
+    end
+
+    post = posts.create!(title: "dynamic key", body: "body")
+
+    post.use_title_key = true
+    assert_equal "dynamic key", post.comments.build.body
+
+    post.association(:comments).reset
+    post.use_title_key = false
+    assert_equal post.id, post.comments.build(body: "regular key").post_id
+  end
+
   def test_ids_on_unloaded_association_with_custom_primary_key
     david = people(:david)
     assert_equal Essay.where(writer_id: "David").pluck(:id), david.essay_ids

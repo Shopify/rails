@@ -173,6 +173,10 @@ module ActiveRecord
         false
       end
 
+      def has_variants?
+        false
+      end
+
       def table_name
         klass.table_name
       end
@@ -555,6 +559,10 @@ module ActiveRecord
         end
       end
 
+      def has_variants?
+        options[:variant_options]
+      end
+
       def join_table
         @join_table ||= -(options[:join_table]&.to_s || derive_join_table)
       end
@@ -798,6 +806,7 @@ module ActiveRecord
           reflection.options[:inverse_of] != false &&
             !reflection.options[:through] &&
             !reflection.options[:foreign_key] &&
+            !reflection.has_variants? &&
             scope_allows_automatic_inverse_of?(reflection, inverse_reflection)
         end
 
@@ -1276,6 +1285,129 @@ module ActiveRecord
           type = @previous_reflection.foreign_type
           source_type = @previous_reflection.options[:source_type]
           lambda { |object| where(type => source_type) }
+        end
+    end
+
+    class AssociationVariantReflection < SimpleDelegator # :nodoc:
+      attr_reader :association
+
+      def initialize(reflection, association)
+        @reflection = reflection
+        @association = association
+        super(reflection)
+      end
+
+      def has_variants?
+        true
+      end
+
+      def options
+        @reflection.options.merge(variant_options)
+      end
+
+      def foreign_key(infer_from_inverse_of: true)
+        if options[:foreign_key]
+          ActiveRecord::Key.for(options[:foreign_key]).name
+        elsif options[:query_constraints]
+          options[:query_constraints].map { |fk| -fk.to_s.freeze }.freeze
+        else
+          derived_fk = @reflection.send(:derive_foreign_key, infer_from_inverse_of: infer_from_inverse_of)
+
+          if !derived_fk.is_a?(Array) && active_record.has_query_constraints?
+            derived_fk = @reflection.send(:derive_fk_query_constraints, derived_fk)
+          end
+
+          ActiveRecord::Key.for(derived_fk).name
+        end
+      end
+
+      def active_record_primary_key
+        if options[:primary_key]
+          ActiveRecord::Key.for(options[:primary_key]).name
+        else
+          derive_primary_key(active_record) { |model| model.query_constraints_list }
+        end
+      end
+
+      def association_primary_key(klass = nil)
+        if belongs_to?
+          if options[:primary_key]
+            ActiveRecord::Key.for(options[:primary_key]).name
+          else
+            derive_primary_key(klass || self.klass) { |model| model.composite_query_constraints_list }
+          end
+        else
+          @reflection.association_primary_key(klass)
+        end
+      end
+
+      def join_primary_key(klass = nil)
+        if belongs_to?
+          polymorphic? ? association_primary_key(klass) : association_primary_key
+        else
+          foreign_key
+        end
+      end
+
+      def join_foreign_key
+        if belongs_to?
+          foreign_key
+        else
+          active_record_primary_key
+        end
+      end
+
+      def join_id_for(owner)
+        Array(join_foreign_key).map { |key| owner._read_attribute(key) }
+      end
+
+      def chain
+        chain = @reflection.chain
+        chain.first == @reflection ? [self, *chain.drop(1)] : chain
+      end
+
+      def check_validity!
+        @reflection.send(:check_validity_of_inverse!)
+
+        if !polymorphic? && (klass.composite_primary_key? || active_record.composite_primary_key?)
+          if (has_one? || collection?) && Array(active_record_primary_key).length != Array(foreign_key).length
+            raise CompositePrimaryKeyMismatchError.new(self)
+          elsif belongs_to? && Array(association_primary_key).length != Array(foreign_key).length
+            raise CompositePrimaryKeyMismatchError.new(self)
+          end
+        end
+      end
+
+      private
+        def variant_options
+          options = if @reflection.options[:variant_options].arity == 0
+            association.owner.instance_exec(&@reflection.options[:variant_options])
+          else
+            @reflection.options[:variant_options].call(association.owner)
+          end
+
+          unless options.respond_to?(:to_hash)
+            raise ArgumentError, "Association variant options must be a Hash"
+          end
+
+          options = options.to_hash.transform_keys(&:to_sym)
+          if options[:foreign_key].is_a?(Array)
+            options = options.dup
+            options[:query_constraints] = options.delete(:foreign_key)
+          end
+          options
+        end
+
+        def derive_primary_key(model)
+          if model.has_query_constraints? || options[:query_constraints]
+            yield model
+          else
+            model.primary_key_definition.inferred_id || primary_key(model).freeze
+          end
+        end
+
+        def primary_key(klass)
+          klass.primary_key || raise(UnknownPrimaryKey.new(klass))
         end
     end
 
