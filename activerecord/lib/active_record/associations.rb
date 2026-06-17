@@ -1429,13 +1429,38 @@ module ActiveRecord
           Reflection.add_reflection(self, name, reflection)
         end
 
-        def has_many_with_variants(name, scope = nil, **options, &variant_options)
-          raise ArgumentError, "Variant associations require a block" unless variant_options
+        def has_many_with_variants(name, scope = nil, variants:, **options, &variant_selector)
+          raise ArgumentError, "Variant associations require a block" unless variant_selector
 
-          options[:variant_options] = variant_options
+          options[:association_variants] = variants.transform_keys(&:to_sym).transform_values do |variant_options|
+            normalize_association_variant_options(options, variant_options)
+          end.freeze
+          options[:association_variant_selector] = variant_selector
           reflection = Builder::HasMany.build(self, name, scope, options)
           Reflection.add_reflection(self, name, reflection)
         end
+
+        def normalize_association_variant_options(base_options, variant_options)
+          variant_options = variant_options.to_hash.transform_keys(&:to_sym)
+          variant_options = variant_options.dup
+
+          if variant_options.key?(:fk)
+            raise ArgumentError, "Cannot specify both :fk and :foreign_key" if variant_options.key?(:foreign_key)
+            variant_options[:foreign_key] = variant_options.delete(:fk)
+          end
+
+          if variant_options.key?(:pk)
+            raise ArgumentError, "Cannot specify both :pk and :primary_key" if variant_options.key?(:primary_key)
+            variant_options[:primary_key] = variant_options.delete(:pk)
+          end
+
+          if variant_options[:foreign_key].is_a?(Array)
+            variant_options[:query_constraints] = variant_options.delete(:foreign_key)
+          end
+
+          base_options.merge(variant_options).freeze
+        end
+        private :normalize_association_variant_options
 
         # Specifies a one-to-one association with another class. This method
         # should only be used if the other class contains the foreign key. If

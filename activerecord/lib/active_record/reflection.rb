@@ -560,7 +560,7 @@ module ActiveRecord
       end
 
       def has_variants?
-        options[:variant_options]
+        options[:association_variants]
       end
 
       def join_table
@@ -1302,7 +1302,7 @@ module ActiveRecord
       end
 
       def options
-        @reflection.options.merge(variant_options)
+        selected_variant_options
       end
 
       def foreign_key(infer_from_inverse_of: true)
@@ -1379,23 +1379,18 @@ module ActiveRecord
       end
 
       private
-        def variant_options
-          options = if @reflection.options[:variant_options].arity == 0
-            association.owner.instance_exec(&@reflection.options[:variant_options])
+        def selected_variant_options
+          key = if @reflection.options[:association_variant_selector].arity == 0
+            association.owner.instance_exec(&@reflection.options[:association_variant_selector])
           else
-            @reflection.options[:variant_options].call(association.owner)
+            @reflection.options[:association_variant_selector].call(association.owner)
           end
 
-          unless options.respond_to?(:to_hash)
-            raise ArgumentError, "Association variant options must be a Hash"
-          end
+          key = key.to_sym
 
-          options = options.to_hash.transform_keys(&:to_sym)
-          if options[:foreign_key].is_a?(Array)
-            options = options.dup
-            options[:query_constraints] = options.delete(:foreign_key)
+          @reflection.options[:association_variants].fetch(key) do
+            raise ArgumentError, "Unknown association variant key: #{key.inspect}"
           end
-          options
         end
 
         def derive_primary_key(model)

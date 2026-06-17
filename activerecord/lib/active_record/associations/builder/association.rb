@@ -19,8 +19,7 @@ module ActiveRecord::Associations::Builder # :nodoc:
     self.extensions = []
 
     VALID_OPTIONS = [
-      :anonymous_class, :primary_key, :foreign_key, :dependent, :validate, :inverse_of, :strict_loading, :query_constraints, :deprecated,
-      :variant_options
+      :anonymous_class, :primary_key, :foreign_key, :dependent, :validate, :inverse_of, :strict_loading, :query_constraints, :deprecated
     ].freeze # :nodoc:
 
     def self.build(model, name, scope, options, &block)
@@ -64,7 +63,9 @@ module ActiveRecord::Associations::Builder # :nodoc:
     end
 
     def self.valid_options(options)
-      VALID_OPTIONS + Association.extensions.flat_map(&:valid_options)
+      valid = VALID_OPTIONS + Association.extensions.flat_map(&:valid_options)
+      valid += [:association_variants, :association_variant_selector] if options[:association_variants]
+      valid
     end
 
     def self.validate_options(options)

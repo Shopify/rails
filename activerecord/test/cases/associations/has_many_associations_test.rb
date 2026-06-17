@@ -99,12 +99,12 @@ class HasManyAssociationsTestPrimaryKeys < ActiveRecord::TestCase
 
       attr_accessor :use_title_key
 
-      has_many_with_variants :comments, anonymous_class: comments do
-        if use_title_key
-          { primary_key: :title, foreign_key: :body }
-        else
-          { foreign_key: :post_id }
-        end
+      has_many_with_variants :comments, anonymous_class: comments,
+        variants: {
+          default: { foreign_key: :post_id },
+          title: { pk: :title, fk: :body }
+        } do
+          use_title_key ? :title : :default
       end
     end
 
@@ -131,12 +131,12 @@ class HasManyAssociationsTestPrimaryKeys < ActiveRecord::TestCase
 
       attr_accessor :use_title_key
 
-      has_many_with_variants :comments, anonymous_class: comments do
-        if use_title_key
-          { primary_key: :title, foreign_key: :body }
-        else
-          { foreign_key: :post_id }
-        end
+      has_many_with_variants :comments, anonymous_class: comments,
+        variants: {
+          default: { foreign_key: :post_id },
+          title: { primary_key: :title, foreign_key: :body }
+        } do
+          use_title_key ? :title : :default
       end
     end
 
