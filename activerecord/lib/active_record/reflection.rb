@@ -748,6 +748,18 @@ module ActiveRecord
       end
 
       private
+        def variant(options)
+          variant_options = options.dup
+
+          if variant_options[:query_constraints]
+            variant_options[:foreign_key] = variant_options.delete(:query_constraints)
+          end
+
+          self.class.new(name, scope, variant_options, active_record).tap do |reflection|
+            reflection.define_singleton_method(:has_variants?) { true }
+          end
+        end
+
         # Attempts to find the inverse association name automatically.
         # If it cannot find a suitable inverse association name, it returns
         # +nil+.
@@ -1294,9 +1306,7 @@ module ActiveRecord
       def initialize(reflection, association)
         @reflection = reflection
         @association = association
-        @foreign_keys = {}
-        @active_record_primary_keys = {}
-        @association_primary_keys = {}
+        @variant_reflections = {}
         super(reflection)
       end
 
@@ -1305,86 +1315,125 @@ module ActiveRecord
       end
 
       def options
-        variant_options(selected_variant_name)
+        selected_variant_reflection.options
       end
 
-      def foreign_key(infer_from_inverse_of: true)
-        variant_name = selected_variant_name
+      def klass
+        selected_variant_reflection.klass
+      end
 
-        @foreign_keys.fetch(variant_name) do
-          selected_options = variant_options(variant_name)
+      def class_name
+        selected_variant_reflection.class_name
+      end
 
-          @foreign_keys[variant_name] = if selected_options[:foreign_key]
-            ActiveRecord::Key.for(selected_options[:foreign_key]).name
-          elsif selected_options[:query_constraints]
-            selected_options[:query_constraints].map { |fk| -fk.to_s.freeze }.freeze
-          else
-            derived_fk = @reflection.send(:derive_foreign_key, infer_from_inverse_of: infer_from_inverse_of)
-
-            if !derived_fk.is_a?(Array) && active_record.has_query_constraints?
-              derived_fk = @reflection.send(:derive_fk_query_constraints, derived_fk)
-            end
-
-            ActiveRecord::Key.for(derived_fk).name
-          end
+      def association_scope_cache(klass, owner, &block)
+        key = [self, selected_variant_name]
+        if polymorphic?
+          key = [key, owner._read_attribute(foreign_type)]
         end
+        klass.with_connection do |connection|
+          klass.cached_find_by_statement(connection, key, &block)
+        end
+      end
+
+      def foreign_key(...)
+        selected_variant_reflection.foreign_key(...)
+      end
+
+      def association_foreign_key
+        selected_variant_reflection.association_foreign_key
       end
 
       def active_record_primary_key
-        variant_name = selected_variant_name
-
-        @active_record_primary_keys.fetch(variant_name) do
-          selected_options = variant_options(variant_name)
-
-          @active_record_primary_keys[variant_name] = if selected_options[:primary_key]
-            ActiveRecord::Key.for(selected_options[:primary_key]).name
-          else
-            derive_primary_key(active_record, selected_options) { |model| model.query_constraints_list }
-          end
-        end
+        selected_variant_reflection.active_record_primary_key
       end
 
-      def association_primary_key(klass = nil)
-        if belongs_to?
-          variant_name = selected_variant_name
-          selected_options = variant_options(variant_name)
-
-          if selected_options[:primary_key]
-            @association_primary_keys.fetch(variant_name) do
-              @association_primary_keys[variant_name] =
-                ActiveRecord::Key.for(selected_options[:primary_key]).name
-            end
-          elsif klass || polymorphic?
-            derive_primary_key(klass || self.klass, selected_options) { |model| model.composite_query_constraints_list }
-          else
-            @association_primary_keys.fetch(variant_name) do
-              @association_primary_keys[variant_name] =
-                derive_primary_key(self.klass, selected_options) { |model| model.composite_query_constraints_list }
-            end
-          end
-        else
-          @reflection.association_primary_key(klass)
-        end
+      def association_primary_key(...)
+        selected_variant_reflection.association_primary_key(...)
       end
 
-      def join_primary_key(klass = nil)
-        if belongs_to?
-          polymorphic? ? association_primary_key(klass) : association_primary_key
-        else
-          foreign_key
-        end
+      def join_primary_key(...)
+        selected_variant_reflection.join_primary_key(...)
+      end
+
+      def join_primary_type
+        selected_variant_reflection.join_primary_type
       end
 
       def join_foreign_key
-        if belongs_to?
-          foreign_key
-        else
-          active_record_primary_key
-        end
+        selected_variant_reflection.join_foreign_key
+      end
+
+      def join_foreign_type
+        selected_variant_reflection.join_foreign_type
       end
 
       def join_id_for(owner)
         Array(join_foreign_key).map { |key| owner._read_attribute(key) }
+      end
+
+      def type
+        selected_variant_reflection.type
+      end
+
+      def foreign_type
+        selected_variant_reflection.foreign_type
+      end
+
+      def polymorphic?
+        selected_variant_reflection.polymorphic?
+      end
+
+      def extensions
+        selected_variant_reflection.extensions
+      end
+
+      def validate?
+        selected_variant_reflection.validate?
+      end
+
+      def strict_loading?
+        selected_variant_reflection.strict_loading?
+      end
+
+      def deprecated?
+        selected_variant_reflection.deprecated?
+      end
+
+      def counter_cache_column
+        selected_variant_reflection.counter_cache_column
+      end
+
+      def has_cached_counter?
+        selected_variant_reflection.has_cached_counter?
+      end
+
+      def has_active_cached_counter?
+        selected_variant_reflection.has_active_cached_counter?
+      end
+
+      def counter_must_be_updated_by_has_many?
+        selected_variant_reflection.counter_must_be_updated_by_has_many?
+      end
+
+      def inverse_of
+        selected_variant_reflection.inverse_of
+      end
+
+      def has_inverse?
+        selected_variant_reflection.has_inverse?
+      end
+
+      def polymorphic_inverse_of(associated_class)
+        selected_variant_reflection.polymorphic_inverse_of(associated_class)
+      end
+
+      def has_scope?
+        selected_variant_reflection.has_scope?
+      end
+
+      def nested?
+        selected_variant_reflection.nested?
       end
 
       def chain
@@ -1393,15 +1442,7 @@ module ActiveRecord
       end
 
       def check_validity!
-        @reflection.send(:check_validity_of_inverse!)
-
-        if !polymorphic? && (klass.composite_primary_key? || active_record.composite_primary_key?)
-          if (has_one? || collection?) && Array(active_record_primary_key).length != Array(foreign_key).length
-            raise CompositePrimaryKeyMismatchError.new(self)
-          elsif belongs_to? && Array(association_primary_key).length != Array(foreign_key).length
-            raise CompositePrimaryKeyMismatchError.new(self)
-          end
-        end
+        selected_variant_reflection.check_validity!
       end
 
       private
@@ -1421,16 +1462,12 @@ module ActiveRecord
           end
         end
 
-        def derive_primary_key(model, variant_options)
-          if model.has_query_constraints? || variant_options[:query_constraints]
-            yield model
-          else
-            model.primary_key_definition.inferred_id || primary_key(model).freeze
-          end
-        end
+        def selected_variant_reflection
+          variant_name = selected_variant_name
 
-        def primary_key(klass)
-          klass.primary_key || raise(UnknownPrimaryKey.new(klass))
+          @variant_reflections.fetch(variant_name) do
+            @variant_reflections[variant_name] = @reflection.send(:variant, variant_options(variant_name))
+          end
         end
     end
 

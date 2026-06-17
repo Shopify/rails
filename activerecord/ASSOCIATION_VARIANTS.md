@@ -126,23 +126,24 @@ the prototype predefines named variant option sets on the reflection, then wraps
 variant-enabled reflections in an owner-bound `AssociationVariantReflection`
 when an association instance is created.
 
-That wrapper delegates ordinary reflection behavior back to the original
-reflection, but asks the selector block for a variant key and uses the matching
-prebuilt option set. The base reflection stores the original declaration, the
-variant table, and the selector block.
+That wrapper is the public reflection identity for the association. It asks the
+selector block for a variant key, memoizes a concrete same-class reflection for
+that key, and uses that concrete reflection as an internal calculator for
+option-derived values such as `foreign_key`, `active_record_primary_key`, and
+`association_primary_key`.
 
-Variant associations bypass the memoized association scope and statement cache.
-The active key pair can change at runtime, so cached SQL built for one variant
-must not be reused for another variant.
+The important boundary is that the concrete variant reflections should not
+become the association identity. Callers that cache, compare, or walk the
+reflection chain should continue to see the wrapper as the abstract
+inter-relationship. Variant reflections exist to reuse the normal reflection
+initialization and memoization logic for a specific option set.
 
-Automatic inverse detection is disabled for variant associations because there
-is no single class-level foreign key to compare against a possible inverse.
+Variant associations can use the association statement cache when the cache key
+includes the selected variant key. SQL built for an `id`/`post_id` variant must
+not be reused for a `uuid`/`post_uuid` variant, but each variant can have its own
+cached statement.
 
 ## Statement Cache Refinement
-
-The current prototype disables the association statement cache for variant
-associations. That is conservative, but the keyed API gives us a cleaner final
-shape.
 
 Association statement caching is keyed by the value passed from
 `association_scope_cache` into `cached_find_by_statement`. For ordinary
@@ -183,6 +184,77 @@ The prototype resolves these pieces dynamically:
 * association scope construction for variant associations
 * statement-cache eligibility for association loads
 
+## Inverse Associations
+
+`inverse_of` is the hardest open design problem for association variants.
+Rails currently treats an inverse as a memoized relationship between concrete
+reflection objects. That assumption breaks down when the keys, options, and even
+possibly the target class can vary by runtime context.
+
+The target shape should split inverse identity from inverse compatibility:
+
+* The inverse identity is the logical association on the other model, such as
+  `Comment#post` for `Post#comments`. This should be represented by the
+  abstract reflection, not a selected concrete variant reflection.
+* Inverse compatibility is context-specific. The current selected variant on
+  each side must be checked to decide whether the two abstract associations are
+  valid inverses in that context.
+
+That means `AssociationVariantReflection#inverse_of` should not simply return
+the selected concrete variant reflection's memoized `inverse_of`. Doing so
+reintroduces the "separate reflections with matching names" problem: each
+variant can independently infer and cache an inverse, and Rails loses the fact
+that there is one abstract inter-relationship whose shape changes by context.
+
+A better internal model is:
+
+```ruby
+class AssociationVariantReflection
+  def inverse_of
+    inverse_for_selected_variant
+  end
+
+  private
+    def inverse_for_selected_variant
+      @inverse_by_variant.fetch(selected_variant_name) do
+        candidate = abstract_inverse_candidate
+
+        @inverse_by_variant[selected_variant_name] =
+          inverse_compatible_in_current_context?(candidate) ? candidate : false
+      end
+    end
+end
+```
+
+`abstract_inverse_candidate` would resolve either an explicit `inverse_of:` or
+an automatically inferred candidate to the other side's abstract reflection.
+`inverse_compatible_in_current_context?` would compare the selected variants'
+effective association shape rather than comparing globally memoized reflection
+methods.
+
+One useful way to make that comparison explicit is a small value object for the
+association shape in the current context. It could contain the pieces relevant
+to inverse matching, such as:
+
+* owner class and target class
+* macro direction
+* foreign key
+* association primary key
+* polymorphic type / foreign type, when applicable
+* options that disable automatic inverse inference
+
+The abstract reflection owns relationship identity and inverse semantics. The
+selected concrete variant reflection can still compute the current shape, but it
+should not be the object returned as the inverse.
+
+Automatic inverse inference should be conservative. If two associations are
+inverse-compatible in one variant but not another, either use the inverse only
+when the current variant pair is compatible, or decline automatic inverse
+inference unless compatibility holds for every declared variant. Explicit
+`inverse_of:` can be interpreted as naming the logical inverse association, but
+it should still be validated against the current context before Rails uses it
+for inverse assignment.
+
 ## Current Scope
 
 The exposed API is intentionally limited to `has_many_with_variants`.
@@ -205,3 +277,6 @@ the shared test schema.
 * Extend the public API beyond `has_many_with_variants` if this shape proves out.
 * Audit preload, eager loading, and through-association behavior once the API
   surface is broader than direct `has_many`.
+* Design and implement context-aware `inverse_of` so inverse identity belongs to
+  the abstract association while compatibility is checked against the selected
+  variant shape.
