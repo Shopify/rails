@@ -189,6 +189,16 @@ module ActionView
           const_set(:Types, implementation)
         end
       end
+
+      def validate_formats(formats)
+        return if Types.valid_symbols?(formats)
+        invalid = formats - Types.symbols
+        raise ArgumentError, "Invalid formats: #{invalid.map(&:inspect).join(", ")}"
+      end
+
+      def normalized_formats(formats)
+        Types.valid_symbols?(formats) ? formats : formats & Types.symbols
+      end
     end
 
     attr_reader :identifier, :handler
