@@ -80,7 +80,7 @@ module ActionView
         ActionView::PathRegistry.all_resolvers.each do |resolver|
           resolver.clear_cache
         end
-        ActionView::LookupContext.reset_view_context_class
+        ActionView::Base.clear_view_context_class
         @details_keys.clear
         @digest_cache.clear
       end
@@ -90,19 +90,7 @@ module ActionView
       end
     end
 
-    def self.reset_view_context_class
-      @view_context_mutex.synchronize { @view_context_class = nil }
-    end
-
-    def self.view_context_class
-      return @view_context_class if @view_context_class
-      base = ActionView::Base # prevent recursive locking
-      @view_context_mutex.synchronize do
-        @view_context_class = base.with_empty_template_cache
-      end
-    end
-    @view_context_mutex = Mutex.new
-    ActiveSupport.on_load(:action_view) { ActionView::LookupContext.view_context_class }
+    ActiveSupport.on_load(:action_view) { ActionView::Base.view_context_class }
 
     # Add caching behavior on top of Details.
     module DetailsCache

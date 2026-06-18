@@ -206,9 +206,9 @@ if RUBY_VERSION >= "4.0"
     test "view_context_class is Ractor-shareable" do
       @original_experimental_warning = Warning[:experimental]
       Warning[:experimental] = false
-      ActionView::LookupContext.view_context_class # needs to be eager-loaded to be ractor-shareable
+      ActionView::Base.view_context_class # needs to be eager-loaded to be ractor-shareable
       assert_nothing_raised do
-        Ractor.new { ActionView::LookupContext.view_context_class }.value
+        Ractor.new { ActionView::Base.view_context_class }.value
       end
     ensure
       Warning[:experimental] = @original_experimental_warning

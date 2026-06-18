@@ -186,8 +186,20 @@ module ActionView # :nodoc:
     # Configured via `config.action_view.remove_hidden_field_autocomplete`
     cattr_accessor :remove_hidden_field_autocomplete, default: false
 
+    @view_context_mutex = Mutex.new
+
     class << self
       delegate :erb_trim_mode=, to: "ActionView::Template::Handlers::ERB"
+
+      def view_context_class
+        @view_context_mutex.synchronize do
+          @view_context_class ||= with_empty_template_cache
+        end
+      end
+
+      def clear_view_context_class
+        @view_context_mutex.synchronize { @view_context_class = nil }
+      end
 
       def cache_template_loading
         ActionView::Resolver.caching?
