@@ -15,10 +15,6 @@ module ActionView
   class LookupContext # :nodoc:
     attr_accessor :prefixes
 
-    def self.registered_details
-      [:locale, :formats, :variants, :handlers]
-    end
-
     def self.clear
       ActionView::PathRegistry.all_resolvers.each(&:clear_cache)
       ActionView::Base.clear_view_context_class
@@ -172,30 +168,30 @@ module ActionView
     module ViewPaths
       attr_reader :view_paths
 
-      def find(name, prefixes = [], partial = false, keys = [], options = {})
+      def find(name, prefixes = [], partial = false, keys = [], options = nil)
         name, prefixes = normalize_name(name, prefixes)
-        @view_paths.find(name, prefixes, partial, detail_args_for(options), @cache, keys)
+        @view_paths.find(name, prefixes, partial, details_for(options), @cache, keys)
       end
 
-      def find!(name, prefixes = [], partial = false, keys = [], options = {})
+      def find!(name, prefixes = [], partial = false, keys = [], options = nil)
         name, prefixes = normalize_name(name, prefixes)
-        @view_paths.find!(name, prefixes, partial, detail_args_for(options), @cache, keys)
+        @view_paths.find!(name, prefixes, partial, details_for(options), @cache, keys)
       end
 
-      def find_all(name, prefixes = [], partial = false, keys = [], options = {})
+      def find_all(name, prefixes = [], partial = false, keys = [], options = nil)
         name, prefixes = normalize_name(name, prefixes)
-        @view_paths.find_all(name, prefixes, partial, detail_args_for(options), @cache, keys)
+        @view_paths.find_all(name, prefixes, partial, details_for(options), @cache, keys)
       end
 
       def exists?(name, prefixes = [], partial = false, keys = [], **options)
         name, prefixes = normalize_name(name, prefixes)
-        @view_paths.exists?(name, prefixes, partial, detail_args_for(options), @cache, keys)
+        @view_paths.exists?(name, prefixes, partial, details_for(options), @cache, keys)
       end
       alias :template_exists? :exists?
 
       def any?(name, prefixes = [], partial = false)
         name, prefixes = normalize_name(name, prefixes)
-        @view_paths.exists?(name, prefixes, partial, detail_args_for_any, @cache, [])
+        @view_paths.exists?(name, prefixes, partial, details_for_any, @cache, [])
       end
       alias :any_templates? :any?
 
@@ -211,6 +207,16 @@ module ActionView
         @view_paths = build_view_paths(paths + @view_paths.to_a)
       end
 
+      # Resolves the Details to look up with from the user options passed to
+      # #render (e.g. <tt>formats: :json</tt>): the context's own Details when
+      # there are none, an already-resolved Details (e.g. from a renderer) left
+      # untouched, or the context's Details with the overrides layered on.
+      def details_for(options)
+        return @details unless options
+        return options if Details === options
+        @details.merge(options)
+      end
+
     private
       # Whenever setting view paths, makes a copy so that we can manipulate them in
       # instance objects as we wish.
@@ -222,13 +228,8 @@ module ActionView
         end
       end
 
-      def detail_args_for(options) # :doc:
-        return @details if options.empty? # most common path.
-        @details.merge(options)
-      end
-
-      def detail_args_for_any
-        @detail_args_for_any ||= Details.new(variants: :any)
+      def details_for_any
+        @details_for_any ||= Details.new(variants: :any)
       end
 
       # Fix when prefix is specified as part of the template name
