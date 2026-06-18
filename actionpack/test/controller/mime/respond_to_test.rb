@@ -335,7 +335,7 @@ class RespondToControllerTest < ActionController::TestCase
     Mime::Type.register("text/x-mobile", :mobile)
     Mime::Type.register("application/fancy-xml", :fancy_xml)
     Mime::Type.register("text/html; fragment", :html_fragment)
-    ActionView::LookupContext::DetailsKey.clear
+    ActionView::LookupContext.clear
   end
 
   def teardown
@@ -344,7 +344,7 @@ class RespondToControllerTest < ActionController::TestCase
     Mime::Type.unregister(:mobile)
     Mime::Type.unregister(:fancy_xml)
     Mime::Type.unregister(:html_fragment)
-    ActionView::LookupContext::DetailsKey.clear
+    ActionView::LookupContext.clear
   end
 
   def test_html_fragment
