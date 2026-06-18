@@ -96,11 +96,12 @@ module ActionView
             raise ArgumentError, "Rendering layouts from an absolute path is not supported."
           end
 
-          template = @lookup_context.find(layout, nil, false, keys, @details.merge(formats: formats))
+          requested = @details.merge(formats: formats)
+          template = @lookup_context.find(layout, nil, false, keys, requested)
           return template if template
 
           return if @lookup_context.any_formats?(layout, nil, false, keys, @details)
-          @lookup_context.find!(layout, nil, false, keys, @details)
+          @lookup_context.find!(layout, nil, false, keys, requested)
         when Proc
           resolve_layout(layout.call(@lookup_context, formats, keys), keys, formats)
         else
