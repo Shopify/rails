@@ -15,50 +15,121 @@ module ActionView
   class LookupContext # :nodoc:
     attr_accessor :prefixes
 
-    singleton_class.attr_accessor :default_procs
-    self.default_procs = {}.freeze
-
     def self.registered_details
-      self.default_procs.keys
+      [:locale, :formats, :variants, :handlers]
     end
 
-    def self.register_detail(name, &block)
-      # The detail block becomes a method on Accessors via define_method, so it
-      # is dispatched as a bmethod. For it to be callable from non-main Ractors
-      # the backing Proc must be Ractor-shareable. The detail blocks only read
-      # lexically-scoped constants (I18n, ActionView::Base, Template::Handlers)
-      # and never touch instance state, so detaching self via shareable_proc is
-      # safe. On Rubies without Ractor support this returns the block unchanged.
-      block = ActiveSupport::Ractors.shareable_proc(&block)
-      self.default_procs = self.default_procs.merge(name => block).freeze
+    class Details
+      def initialize(locale: nil, formats: nil, variants: nil, handlers: nil)
+        @locale   = locale   && Array(locale)
+        @formats  = formats  && Array(formats)
+        @variants = variants == :any ? :any : variants && Array(variants)
+        @handlers = handlers && Array(handlers)
+      end
 
-      Accessors.define_method(:"default_#{name}", &block)
-      Accessors.module_eval <<-METHOD, __FILE__, __LINE__ + 1
-        def #{name}
-          @details[:#{name}] || []
+      attr_reader :html_fallback_for_js
+
+      def locale
+        @locale ||= default_locale
+      end
+
+      def locale=(value)
+        value = value.present? ? Array(value) : default_locale
+        return if value == @locale
+        @locale = value
+        @digest_cache = nil
+      end
+
+      def formats
+        @formats ||= default_formats
+      end
+
+      def formats=(values)
+        if values
+          values = values.dup
+          values.concat(default_formats) if values.delete "*/*"
+          values.uniq!
+
+          Template.validate_formats(values)
+
+          if (values.length == 1) && (values[0] == :js)
+            values << :html
+            @html_fallback_for_js = true
+          end
         end
 
-        def #{name}=(value)
-          value = value.present? ? Array(value) : default_#{name}
-          _set_detail(:#{name}, value) if value != @details[:#{name}]
+        values = values.presence || default_formats
+        return if values == @formats
+        @formats = values
+        @digest_cache = nil
+      end
+
+      def variants
+        @variants ||= default_variants
+      end
+
+      def variants=(value)
+        value = value.present? ? Array(value) : default_variants
+        return if value == @variants
+        @variants = value
+        @digest_cache = nil
+      end
+
+      def handlers
+        @handlers ||= default_handlers
+      end
+
+      def handlers=(value)
+        value = value.present? ? Array(value) : default_handlers
+        return if value == @handlers
+        @handlers = value
+        @digest_cache = nil
+      end
+
+      def default_locale
+        locales = [I18n.locale]
+        locales.concat(I18n.fallbacks[I18n.locale]) if I18n.respond_to? :fallbacks
+        locales << I18n.default_locale
+        locales.uniq!
+        locales
+      end
+
+      def default_formats
+        ActionView::Base.default_formats || [:html, :text, :js, :css, :xml, :json]
+      end
+
+      def default_variants
+        []
+      end
+
+      def default_handlers
+        Template::Handlers.extensions
+      end
+
+      def digest_cache
+        @digest_cache ||= DetailsKey.digest_cache(to_h)
+      end
+
+      def merge(options)
+        return self if [:locale, :formats, :variants, :handlers].freeze.none? { |key| options[key] }
+        self.class.new(
+          locale:   options[:locale]   || locale,
+          formats:  options[:formats]  || formats,
+          variants: options[:variants] || variants,
+          handlers: options[:handlers] || handlers,
+        )
+      end
+
+      def to_h
+        { locale: locale, formats: formats, variants: variants, handlers: handlers }
+      end
+
+      private
+        def initialize_copy(other)
+          @digest_cache = nil
+          super
         end
-      METHOD
     end
-
-    # Holds accessors for the registered details.
-    module Accessors # :nodoc:
-    end
-
-    register_detail(:locale) do
-      locales = [I18n.locale]
-      locales.concat(I18n.fallbacks[I18n.locale]) if I18n.respond_to? :fallbacks
-      locales << I18n.default_locale
-      locales.uniq!
-      locales
-    end
-    register_detail(:formats) { ActionView::Base.default_formats || [:html, :text, :js, :css,  :xml, :json] }
-    register_detail(:variants) { [] }
-    register_detail(:handlers) { Template::Handlers.extensions }
 
     class DetailsKey # :nodoc:
       alias :eql? :equal?
@@ -66,30 +137,19 @@ module ActionView
       @details_keys = Concurrent::Map.new
       @digest_cache = Concurrent::Map.new
 
-      # The details/digest caches hold values that are not Ractor-shareable
-      # (TemplateDetails::Requested instances and Concurrent::Maps), and a
-      # frozen Concurrent::Map is still not shareable, so a shared class-ivar
-      # map could not be read from a worker Ractor. They live in Ractor-local
-      # storage instead: each request-serving Ractor owns its copy, cold-filled
-      # once and reused across the requests that Ractor serves. (The
-      # view-context container below is the opposite case — it is a Class,
-      # which IS shareable, so it can be compiled once and shared by all.)
       def self.digest_cache(details)
-        key = details_cache_key(details)
-        cache = (Ractor[:av_digest_cache] ||= {})
-        cache[key] ||= Concurrent::Map.new
+        @digest_cache[details_cache_key(details)] ||= Concurrent::Map.new
       end
 
       def self.details_cache_key(details)
-        cache = (Ractor[:av_details_keys] ||= {})
-        cache.fetch(details) do
+        @details_keys.fetch(details) do
           if formats = details[:formats]
             if normalized = Template.normalized_formats(formats)
               details = details.dup
               details[:formats] = normalized
             end
           end
-          cache[details] = TemplateDetails::Requested.new(**details)
+          @details_keys[details] ||= TemplateDetails::Requested.new(**details)
         end
       end
 
@@ -103,7 +163,7 @@ module ActionView
       end
 
       def self.digest_caches
-        (Ractor[:av_digest_cache] || {}).values
+        @digest_cache.values
       end
     end
 
@@ -121,28 +181,9 @@ module ActionView
     @view_context_mutex = Mutex.new
     ActiveSupport.on_load(:action_view) { ActionView::LookupContext.view_context_class }
 
-    # Add caching behavior on top of Details.
-    module DetailsCache
-      attr_accessor :cache
-
-      def disable_cache
-        old_value, @cache = @cache, false
-        yield
-      ensure
-        @cache = old_value
-      end
-
-    private
-      def _set_detail(key, value) # :doc:
-        @details = @details.dup if @digest_cache
-        @digest_cache = nil
-        @details[key] = value
-      end
-    end
-
     # Helpers related to template lookup using the lookup context information.
     module ViewPaths
-      attr_reader :view_paths, :html_fallback_for_js
+      attr_reader :view_paths
 
       def find(name, prefixes = [], partial = false, keys = [], options = {})
         name, prefixes = normalize_name(name, prefixes)
@@ -196,24 +237,12 @@ module ActionView
 
       # Compute details hash and key according to user options (e.g. passed from #render).
       def detail_args_for(options) # :doc:
-        return @details if options.empty? # most common path.
-        @details.merge(options)
+        return @details.to_h if options.empty? # most common path.
+        @details.merge(options).to_h
       end
 
       def detail_args_for_any
-        @detail_args_for_any ||= begin
-          details = {}
-
-          LookupContext.registered_details.each do |k|
-            if k == :variants
-              details[k] = :any
-            else
-              details[k] = LookupContext.default_procs[k].call
-            end
-          end
-
-          details
-        end
+        @detail_args_for_any ||= Details.new(variants: :any).to_h
       end
 
       # Fix when prefix is specified as part of the template name
@@ -236,59 +265,48 @@ module ActionView
       end
     end
 
-    include Accessors
-    include DetailsCache
     include ViewPaths
 
+    attr_accessor :cache
+
     def initialize(view_paths, details = {}, prefixes = [])
-      @digest_cache = nil
       @cache = true
       @prefixes = prefixes
 
-      @details = initialize_details({}, details)
+      @details = if details.is_a?(Details)
+        details
+      else
+        Details.new(
+          locale:   details[:locale],
+          formats:  details[:formats],
+          variants: details[:variants],
+          handlers: details[:handlers],
+        )
+      end
+
       @view_paths = build_view_paths(view_paths)
     end
 
-    def digest_cache
-      @digest_cache ||= DetailsKey.digest_cache(@details)
+    delegate :formats, :formats=, :variants, :variants=, :handlers, :handlers=,
+             :html_fallback_for_js, :default_formats, :digest_cache, to: :@details
+
+    def disable_cache
+      old_value, @cache = @cache, false
+      yield
+    ensure
+      @cache = old_value
     end
 
     def with_prepended_formats(formats)
       details = @details.dup
-      details[:formats] = formats
+      details.formats = formats
 
       self.class.new(@view_paths, details, @prefixes)
     end
 
-    def initialize_details(target, details)
-      LookupContext.registered_details.each do |k|
-        target[k] = details[k] || LookupContext.default_procs[k].call
-      end
-      target
-    end
-    private :initialize_details
-
-    # Override formats= to expand ["*/*"] values and automatically
-    # add :html as fallback to :js.
-    def formats=(values)
-      if values
-        values = values.dup
-        values.concat(default_formats) if values.delete "*/*"
-        values.uniq!
-
-        Template.validate_formats(values)
-
-        if (values.length == 1) && (values[0] == :js)
-          values << :html
-          @html_fallback_for_js = true
-        end
-      end
-      super(values)
-    end
-
     # Override locale to return a symbol instead of array.
     def locale
-      @details[:locale].first
+      @details.locale.first
     end
 
     # Overload locale= to also set the I18n.locale. If the current I18n.config object responds
@@ -300,7 +318,7 @@ module ActionView
         config.locale = value
       end
 
-      super(default_locale)
+      @details.locale = @details.default_locale
     end
   end
 end
