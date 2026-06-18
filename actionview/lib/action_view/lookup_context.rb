@@ -65,8 +65,9 @@ module ActionView
 
       def self.details_cache_key(details)
         @details_keys.fetch(details) do
-          if formats = details[:formats]
-            if normalized = Template.normalized_formats(formats)
+          if (formats = details[:formats])
+            normalized = Template.normalized_formats(formats)
+            unless normalized.equal?(formats)
               details = details.dup
               details[:formats] = normalized
             end
@@ -189,7 +190,6 @@ module ActionView
         end
       end
 
-      # Compute details hash and key according to user options (e.g. passed from #render).
       def detail_args_for(options) # :doc:
         return @details, details_key if options.empty? # most common path.
         user_details = @details.merge(options)

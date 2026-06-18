@@ -208,7 +208,7 @@ module ActionView
       end
 
       def normalized_formats(formats)
-        formats & Types.symbols unless Types.valid_symbols?(formats)
+        Types.valid_symbols?(formats) ? formats : formats & Types.symbols
       end
     end
 
