@@ -107,6 +107,8 @@ module AdapterHelper
   # know how to detect this.
   def raw_transaction_open?(connection)
     if current_adapter?(:PostgreSQLAdapter)
+      # Exit pipeline mode to ensure transaction_status is accurate
+      connection.exit_pipeline_mode if connection.pipeline_active?
       connection.instance_variable_get(:@raw_connection).transaction_status == ::PG::PQTRANS_INTRANS
     elsif current_adapter?(:Mysql2Adapter, :TrilogyAdapter)
       begin
@@ -136,11 +138,13 @@ module AdapterHelper
     if current_adapter?(:PostgreSQLAdapter)
       # Connection was left in a bad state, need to reconnect to simulate fresh disconnect
       connection.verify! if connection.instance_variable_get(:@raw_connection).status == ::PG::CONNECTION_BAD
+      # Exit pipeline mode before using raw connection directly
+      connection.exit_pipeline_mode if connection.pipeline_active?
       unless connection.instance_variable_get(:@raw_connection).transaction_status == ::PG::PQTRANS_INTRANS
         connection.instance_variable_get(:@raw_connection).async_exec("begin")
       end
       connection.instance_variable_get(:@raw_connection).async_exec("set idle_in_transaction_session_timeout = '10ms'")
-      sleep 0.05
+      sleep 0.2
     elsif current_adapter?(:Mysql2Adapter, :TrilogyAdapter)
       connection.query_command("set @@wait_timeout=1", materialize_transactions: false)
       sleep 1.2

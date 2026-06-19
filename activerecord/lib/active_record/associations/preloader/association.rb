@@ -25,23 +25,26 @@ module ActiveRecord
             [association_key_name, scope.model.table_name, scope.model.connection_specification_name, scope.values_for_queries].hash
           end
 
-          def records_for(loaders)
-            LoaderRecords.new(loaders, self).records
+          def records_for(loaders, pipeline: false)
+            LoaderRecords.new(loaders, self).records(pipeline: pipeline)
           end
 
-          def load_records_in_batch(loaders)
-            raw_records = records_for(loaders)
-
-            loaders.each do |loader|
-              loader.load_records(raw_records)
-              loader.run
+          def load_records_in_batch(loaders, pipeline: false)
+            if pipeline
+              records_for(loaders, pipeline: true).then do |raw_records|
+                load_records_in_loaders(loaders, raw_records)
+              end
+            else
+              load_records_in_loaders(loaders, records_for(loaders))
             end
           end
 
-          def load_records_for_keys(keys, &block)
-            return [] if keys.empty?
+          def load_records_for_keys(keys, pipeline: false, &block)
+            if keys.empty?
+              return pipeline ? ActiveRecord::Promise::Complete.new([]) : []
+            end
 
-            if association_key_name.is_a?(Array)
+            relation = if association_key_name.is_a?(Array)
               query_constraints = Hash.new { |hsh, key| hsh[key] = Set.new }
 
               keys.each_with_object(query_constraints) do |values_set, constraints|
@@ -53,8 +56,22 @@ module ActiveRecord
               scope.where(query_constraints)
             else
               scope.where(association_key_name => keys)
-            end.load(&block)
+            end
+
+            if pipeline
+              relation.load_pipeline(&block)
+            else
+              relation.load(&block)
+            end
           end
+
+          private
+            def load_records_in_loaders(loaders, raw_records)
+              loaders.each do |loader|
+                loader.load_records(raw_records)
+                loader.run
+              end
+            end
         end
 
         class LoaderRecords
@@ -67,8 +84,14 @@ module ActiveRecord
             populate_keys_to_load_and_already_loaded_records
           end
 
-          def records
-            load_records + already_loaded_records
+          def records(pipeline: false)
+            if pipeline
+              load_records(pipeline: true).then do |records|
+                records + already_loaded_records
+              end
+            else
+              load_records + already_loaded_records
+            end
           end
 
           private
@@ -88,8 +111,8 @@ module ActiveRecord
               @keys_to_load.subtract(already_loaded_records_by_key.keys)
             end
 
-            def load_records
-              loader_query.load_records_for_keys(keys_to_load) do |record|
+            def load_records(pipeline: false)
+              loader_query.load_records_for_keys(keys_to_load, pipeline: pipeline) do |record|
                 loaders.each { |l| l.set_inverse(record) }
               end
             end
