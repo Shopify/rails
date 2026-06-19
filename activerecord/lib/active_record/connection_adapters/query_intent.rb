@@ -91,6 +91,9 @@ module ActiveRecord
         @notification_payload = nil
         @raw_result = nil
         @raw_result_available = false
+        @warnings = nil
+        @warnings_handled = false
+        @warning_error = nil
         @executed = false
         @write_query = nil
 
@@ -238,11 +241,12 @@ module ActiveRecord
         end
       end
 
-      def deliver_result(value)
+      def deliver_result(value, warnings: nil)
         raise FinalizedError, "delivering result to a finalized intent" if @finalized
 
         adapter.lock.synchronize do
           @raw_result = value
+          @warnings = warnings
           @error = nil
 
           adapter.send(:dirty_current_transaction) if @materialize_transactions
@@ -253,11 +257,12 @@ module ActiveRecord
         finish_log
       end
 
-      def deliver_failure(exception)
+      def deliver_failure(exception, warnings: nil)
         raise FinalizedError, "delivering failure to a finalized intent" if @finalized
 
         adapter.lock.synchronize do
           @error = exception
+          @warnings = warnings
 
           adapter.send(:downgrade_connection_after_error, exception)
           adapter.send(:dirty_current_transaction) if @materialize_transactions
@@ -295,6 +300,9 @@ module ActiveRecord
 
         @raw_result = nil
         @raw_result_available = false
+        @warnings = nil
+        @warnings_handled = false
+        @warning_error = nil
         @error = nil
       end
 
@@ -341,9 +349,18 @@ module ActiveRecord
         end
 
         if @error
+          handle_warnings(query_completed: false)
           finish_log(exception: @error)
           @event_buffer&.flush
           raise @error
+        end
+
+        begin
+          handle_warnings(query_completed: true)
+        rescue => warning_error
+          finish_log(exception: warning_error) unless finalized?
+          @event_buffer&.flush
+          raise
         end
 
         @event_buffer&.flush
@@ -371,6 +388,19 @@ module ActiveRecord
 
           @finalized = true
           adapter.finish_intent_log(self, exception: exception)
+        end
+
+        def handle_warnings(query_completed:)
+          raise @warning_error if query_completed && @warning_error
+          return if @warnings_handled
+
+          @warnings_handled = true
+          adapter.send(:handle_warnings, self, @warnings)
+        rescue => error
+          if query_completed
+            @warning_error = error
+            raise
+          end
         end
 
         def async_schedule!(session)
