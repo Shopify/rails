@@ -652,30 +652,25 @@ module ActiveRecord
       end
 
       def perform_sync_attempt(intent) # :nodoc:
-        result =
-          begin
-            result = perform_query(@raw_connection, intent)
-            query_completed = true
-            result
-          rescue ::RangeError
-            raise
-          rescue => error
-            translated = translate_exception_with_cause(error, intent.processed_sql, intent.binds)
-            invalidate_transaction(translated)
-            intent.deliver_failure(translated)
-            return
-          ensure
-            begin
-              handle_warnings(result, intent.processed_sql)
-            rescue
-              raise if query_completed
+        begin
+          result = perform_query(@raw_connection, intent)
+        rescue ::RangeError
+          raise
+        rescue => error
+          translated = translate_exception_with_cause(error, intent.processed_sql, intent.binds)
+          invalidate_transaction(translated)
 
-              # The query failed, so we need to swallow this exception
-              # from handle_warnings to avoid masking the original.
-            end
+          begin
+            warnings = collect_warnings(result)
+          rescue
+            # The query failed, so we need to swallow this exception
+            # from warning collection to avoid masking the original.
           end
 
-        intent.deliver_result(result)
+          intent.deliver_failure(translated, warnings: warnings)
+        else
+          intent.deliver_result(result, warnings: collect_warnings(result))
+        end
       end
 
       def start_intent_log(intent) # :nodoc:
@@ -756,7 +751,19 @@ module ActiveRecord
           raise NotImplementedError
         end
 
-        def handle_warnings(raw_result, sql)
+        def collect_warnings(raw_result)
+          []
+        end
+
+        def handle_warnings(intent, warnings)
+          return unless action = ActiveRecord.db_warnings_action
+
+          warnings&.each do |warning|
+            next if warning_ignored?(warning)
+
+            warning.sql = intent.processed_sql
+            action.call(warning)
+          end
         end
 
         # Receive a native adapter result object and returns an ActiveRecord::Result object.
