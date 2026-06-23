@@ -199,6 +199,23 @@ class LookupContextTest < ActiveSupport::TestCase
   end
 end
 
+if RUBY_VERSION >= "4.0"
+  class LookupContextRactorTest < ActiveSupport::TestCase
+    include ActiveSupport::Testing::Isolation
+
+    test "view_context_class is Ractor-shareable" do
+      @original_experimental_warning = Warning[:experimental]
+      Warning[:experimental] = false
+      ActionView::LookupContext.view_context_class # needs to be eager-loaded to be ractor-shareable
+      assert_nothing_raised do
+        Ractor.new { ActionView::LookupContext.view_context_class }.value
+      end
+    ensure
+      Warning[:experimental] = @original_experimental_warning
+    end
+  end
+end
+
 class TestMissingTemplate < ActiveSupport::TestCase
   def setup
     @lookup_context = ActionView::LookupContext.new("/Path/to/views", {})
