@@ -18,6 +18,19 @@ module Mime
       @symbols_set = Set.new
     end
 
+    def initialize_copy(_other)
+      @mimes = @mimes.dup
+      @symbols = @symbols.dup
+      @symbols_set = @symbols_set.dup
+    end
+
+    def freeze
+      @mimes.freeze
+      @symbols.freeze
+      @symbols_set.freeze
+      super
+    end
+
     def each(&block)
       @mimes.each(&block)
     end
@@ -83,6 +96,37 @@ module Mime
     def fetch(type, &block)
       return type if type.is_a?(Type)
       LOOKUP_BY_EXTENSION.fetch(type.to_s, &block)
+    end
+
+    def soft_freeze # :nodoc:
+      REGISTRY.freeze
+      LOOKUP_BY_STRING.freeze
+      LOOKUP_BY_EXTENSION.freeze
+    end
+
+    def update_registries # :nodoc:
+      if REGISTRY.frozen?
+        ActionDispatch.deprecator.warn(
+          "Registering or unregistering a MIME type after the application has " \
+          "been initialized is deprecated. Register custom MIME types from an " \
+          "initializer instead (e.g. config/initializers/mime_types.rb)."
+        )
+        registry, string_lookup, extension_lookup = REGISTRY.dup, LOOKUP_BY_STRING.dup, LOOKUP_BY_EXTENSION.dup
+        yield registry, string_lookup, extension_lookup
+        remove_const(:REGISTRY)
+        const_set(:REGISTRY, registry.freeze)
+        remove_const(:LOOKUP_BY_STRING)
+        const_set(:LOOKUP_BY_STRING, string_lookup.freeze)
+        remove_const(:LOOKUP_BY_EXTENSION)
+        const_set(:LOOKUP_BY_EXTENSION, extension_lookup.freeze)
+        private_constant :REGISTRY, :LOOKUP_BY_STRING, :LOOKUP_BY_EXTENSION
+
+        SET.target = REGISTRY
+        LOOKUP.target = LOOKUP_BY_STRING
+        EXTENSION_LOOKUP.target = LOOKUP_BY_EXTENSION
+      else
+        yield REGISTRY, LOOKUP_BY_STRING, LOOKUP_BY_EXTENSION
+      end
     end
   end
 
@@ -205,9 +249,11 @@ module Mime
       def register(string, symbol, mime_type_synonyms = [], extension_synonyms = [], skip_lookup = false)
         new_mime = Type.new(string, symbol, mime_type_synonyms)
 
-        REGISTRY << new_mime
-        ([string] + mime_type_synonyms).each { |str| LOOKUP_BY_STRING[str] = new_mime } unless skip_lookup
-        ([symbol] + extension_synonyms).each { |ext| LOOKUP_BY_EXTENSION[ext.to_s] = new_mime }
+        Mime.update_registries do |registry, string_lookup, extension_lookup|
+          registry << new_mime
+          ([string] + mime_type_synonyms).each { |str| string_lookup[-str] = new_mime } unless skip_lookup
+          ([symbol] + extension_synonyms).each { |ext| extension_lookup[-ext.to_s] = new_mime }
+        end
 
         @register_callbacks.each do |callback|
           callback.call(new_mime)
@@ -263,9 +309,11 @@ module Mime
       def unregister(symbol)
         symbol = symbol.downcase
         if mime = Mime[symbol]
-          REGISTRY.delete_if { |v| v.eql?(mime) }
-          LOOKUP_BY_STRING.delete_if { |_, v| v.eql?(mime) }
-          LOOKUP_BY_EXTENSION.delete_if { |_, v| v.eql?(mime) }
+          Mime.update_registries do |registry, string_lookup, extension_lookup|
+            registry.delete_if { |v| v.eql?(mime) }
+            string_lookup.delete_if { |_, v| v.eql?(mime) }
+            extension_lookup.delete_if { |_, v| v.eql?(mime) }
+          end
         end
       end
     end
@@ -279,13 +327,19 @@ module Mime
 
     class InvalidMimeType < StandardError; end
 
-    def initialize(string, symbol = nil, synonyms = [])
+    def initialize(string, symbol = nil, synonyms = nil)
       unless MIME_REGEXP.match?(string)
         raise InvalidMimeType, "#{string.inspect} is not a valid MIME type"
       end
-      @symbol, @synonyms = symbol, synonyms
-      @string = string
+      @symbol = symbol
+      @synonyms = if synonyms&.any?
+        synonyms.map { |synonym| synonym.dup.freeze }.freeze
+      else
+        [].freeze
+      end
+      @string = string.dup.freeze
       @hash = [@string, @synonyms, @symbol].hash
+      freeze
     end
 
     def to_s
