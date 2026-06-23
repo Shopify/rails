@@ -3,6 +3,8 @@
 # :markup: markdown
 
 require "singleton"
+require "active_support/deprecation"
+require "action_dispatch/deprecator"
 
 module Mime
   class Mimes
@@ -43,9 +45,26 @@ module Mime
     end
   end
 
-  SET              = Mimes.new
-  EXTENSION_LOOKUP = {} # rubocop:disable Style/MutableConstant
-  LOOKUP           = {} # rubocop:disable Style/MutableConstant
+  REGISTRY            = Mimes.new
+  LOOKUP_BY_STRING    = {} # rubocop:disable Style/MutableConstant
+  LOOKUP_BY_EXTENSION = {} # rubocop:disable Style/MutableConstant
+  private_constant :REGISTRY, :LOOKUP_BY_STRING, :LOOKUP_BY_EXTENSION
+
+  SET = ActiveSupport::Deprecation::DeprecatedObjectProxy.new( # :nodoc:
+    REGISTRY,
+    "Mime::SET is deprecated. Use Mime.symbols to enumerate registered types, or Mime[...] / Mime::Type.lookup to look one up.",
+    ActionDispatch.deprecator,
+  )
+  LOOKUP = ActiveSupport::Deprecation::DeprecatedObjectProxy.new( # :nodoc:
+    LOOKUP_BY_STRING,
+    "Mime::LOOKUP is deprecated. Use Mime::Type.lookup instead.",
+    ActionDispatch.deprecator,
+  )
+  EXTENSION_LOOKUP = ActiveSupport::Deprecation::DeprecatedObjectProxy.new( # :nodoc:
+    LOOKUP_BY_EXTENSION,
+    "Mime::EXTENSION_LOOKUP is deprecated. Use Mime::Type.lookup_by_extension or Mime[...] instead.",
+    ActionDispatch.deprecator,
+  )
 
   class << self
     def [](type)
@@ -54,16 +73,16 @@ module Mime
     end
 
     def symbols
-      SET.symbols
+      REGISTRY.symbols
     end
 
     def valid_symbols?(symbols) # :nodoc:
-      SET.valid_symbols?(symbols)
+      REGISTRY.valid_symbols?(symbols)
     end
 
     def fetch(type, &block)
       return type if type.is_a?(Type)
-      EXTENSION_LOOKUP.fetch(type.to_s, &block)
+      LOOKUP_BY_EXTENSION.fetch(type.to_s, &block)
     end
   end
 
@@ -165,15 +184,15 @@ module Mime
       end
 
       def lookup(string)
-        return LOOKUP[string] if LOOKUP.key?(string)
+        return LOOKUP_BY_STRING[string] if LOOKUP_BY_STRING.key?(string)
 
         # fallback to the media-type without parameters if it was not found
         string = string.split(";", 2)[0]&.rstrip
-        LOOKUP[string] || Type.new(string)
+        LOOKUP_BY_STRING[string] || Type.new(string)
       end
 
       def lookup_by_extension(extension)
-        EXTENSION_LOOKUP[extension.to_s]
+        LOOKUP_BY_EXTENSION[extension.to_s]
       end
 
       # Registers an alias that's not used on MIME type lookup, but can be referenced
@@ -186,10 +205,9 @@ module Mime
       def register(string, symbol, mime_type_synonyms = [], extension_synonyms = [], skip_lookup = false)
         new_mime = Type.new(string, symbol, mime_type_synonyms)
 
-        SET << new_mime
-
-        ([string] + mime_type_synonyms).each { |str| LOOKUP[str] = new_mime } unless skip_lookup
-        ([symbol] + extension_synonyms).each { |ext| EXTENSION_LOOKUP[ext.to_s] = new_mime }
+        REGISTRY << new_mime
+        ([string] + mime_type_synonyms).each { |str| LOOKUP_BY_STRING[str] = new_mime } unless skip_lookup
+        ([symbol] + extension_synonyms).each { |ext| LOOKUP_BY_EXTENSION[ext.to_s] = new_mime }
 
         @register_callbacks.each do |callback|
           callback.call(new_mime)
@@ -234,7 +252,7 @@ module Mime
       # For an input of `'application'`, returns `[Mime[:html], Mime[:js], Mime[:xml],
       # Mime[:yaml], Mime[:atom], Mime[:json], Mime[:rss], Mime[:url_encoded_form]]`.
       def parse_data_with_trailing_star(type)
-        Mime::SET.select { |m| m.match?(type) }
+        REGISTRY.select { |m| m.match?(type) }
       end
 
       # This method is opposite of register method.
@@ -245,9 +263,9 @@ module Mime
       def unregister(symbol)
         symbol = symbol.downcase
         if mime = Mime[symbol]
-          SET.delete_if { |v| v.eql?(mime) }
-          LOOKUP.delete_if { |_, v| v.eql?(mime) }
-          EXTENSION_LOOKUP.delete_if { |_, v| v.eql?(mime) }
+          REGISTRY.delete_if { |v| v.eql?(mime) }
+          LOOKUP_BY_STRING.delete_if { |_, v| v.eql?(mime) }
+          LOOKUP_BY_EXTENSION.delete_if { |_, v| v.eql?(mime) }
         end
       end
     end
