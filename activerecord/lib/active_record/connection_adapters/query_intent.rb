@@ -307,7 +307,7 @@ module ActiveRecord
       end
 
       def retriable?
-        @allow_retry && @retries_remaining && @retries_remaining > 0 && !retry_deadline_exceeded?
+        allow_retry && @retries_remaining && @retries_remaining > 0 && !retry_deadline_exceeded?
       end
 
       def reset_for_retry
