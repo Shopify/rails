@@ -1388,7 +1388,9 @@ module ActiveRecord
     def preload_associations(records) # :nodoc:
       preload = preload_values + (eager_loading? ? [] : includes_values)
       scope = strict_loading_value ? StrictLoadingScope : nil
-      ActiveRecord::Associations::Preloader.new(records: records, associations: preload, scope: scope).call unless preload.empty?
+      preload.each do |associations|
+        ActiveRecord::Associations::Preloader.new(records: records, associations: associations, scope: scope).call
+      end
     end
 
     protected
