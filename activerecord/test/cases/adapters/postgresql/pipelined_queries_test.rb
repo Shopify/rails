@@ -2,11 +2,13 @@
 
 require "cases/helper"
 require "models/post"
+require "models/category"
+require "models/author"
 
 class PipelinedQueriesTest < ActiveRecord::PostgreSQLTestCase
   self.use_transactional_tests = false
 
-  fixtures :posts, :comments, :tags, :taggings
+  fixtures :posts, :comments, :tags, :taggings, :categories, :categories_posts, :authors
 
   def setup
     super
@@ -128,20 +130,56 @@ class PipelinedQueriesTest < ActiveRecord::PostgreSQLTestCase
   end
 
   def test_relation_preload_queries_batch_together
-    pending_lengths = []
-    original_flush = @connection.method(:flush_pipeline)
-
-    @connection.stub(:flush_pipeline, -> {
-      pending_lengths << Array(@connection.instance_variable_get(:@pending_intents)).length
-      original_flush.call
-    }) do
-      posts = Post.includes(:comments, :taggings).where(id: [posts(:welcome).id, posts(:thinking).id]).to_a
+    pending_lengths = capture_pipeline_flush_lengths do
+      categories = Category.includes(posts: [:comments, :taggings]).where(id: [categories(:general).id, categories(:technology).id]).to_a
+      posts = categories.flat_map(&:posts)
 
       assert posts.all? { |post| post.association(:comments).loaded? }
       assert posts.all? { |post| post.association(:taggings).loaded? }
     end
 
     assert_operator pending_lengths.max || 0, :>=, 2
+  end
+
+  def test_top_level_preloads_are_not_aggregated
+    post_loads = []
+    subscriber = lambda do |_name, _start, _finish, _id, payload|
+      post_loads << payload[:sql] if payload[:name] == "Post Load"
+    end
+
+    pending_lengths = capture_pipeline_flush_lengths do
+      ActiveSupport::Notifications.subscribed(subscriber, "sql.active_record") do
+        Author.where(id: [authors(:david).id, authors(:mary).id]).preload(
+          :posts,
+          :other_posts,
+        ).to_a
+      end
+    end
+
+    assert_equal 2, post_loads.size
+    assert_operator pending_lengths.max || 0, :>=, 2
+  end
+
+  def test_overlapping_direct_and_through_preloads_do_not_duplicate_loads
+    comment_loads = []
+    subscriber = lambda do |_name, _start, _finish, _id, payload|
+      comment_loads << payload[:sql] if payload[:name] == "Comment Load"
+    end
+
+    categories = ActiveSupport::Notifications.subscribed(subscriber, "sql.active_record") do
+      Category.where(id: [categories(:general).id, categories(:technology).id]).preload(
+        { posts: :comments },
+        :ordered_post_comments,
+      ).to_a
+    end
+
+    assert_equal 1, comment_loads.size
+    assert_no_queries do
+      categories.each do |category|
+        category.posts.each(&:comments)
+        category.ordered_post_comments.to_a
+      end
+    end
   end
 
   def test_synchronous_query_flushes_pending_pipeline
@@ -240,4 +278,17 @@ class PipelinedQueriesTest < ActiveRecord::PostgreSQLTestCase
       @connection.select_all("SELECT 1; SELECT 2", "TEST", pipeline: true)
     end
   end
+
+  private
+    def capture_pipeline_flush_lengths
+      pending_lengths = []
+      original_flush = @connection.method(:flush_pipeline)
+
+      @connection.stub(:flush_pipeline, -> {
+        pending_lengths << Array(@connection.instance_variable_get(:@pending_intents)).length
+        original_flush.call
+      }) { yield }
+
+      pending_lengths
+    end
 end

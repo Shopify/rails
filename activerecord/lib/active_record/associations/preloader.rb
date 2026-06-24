@@ -53,7 +53,7 @@ module ActiveRecord
         autoload :ThroughAssociation, "active_record/associations/preloader/through_association"
       end
 
-      attr_reader :records, :associations, :scope, :associate_by_default
+      attr_reader :records, :associations, :scope, :associate_by_default, :branch_groups
 
       # Eager loads the named associations for the given Active Record record(s).
       #
@@ -96,21 +96,22 @@ module ActiveRecord
       # associations before querying the database. This can save database
       # queries by reusing in-memory objects. The optimization is only applied
       # to single associations (i.e. :belongs_to, :has_one) with no scopes.
-      def initialize(records:, associations:, scope: nil, available_records: [], associate_by_default: true)
+      def initialize(records:, associations:, scope: nil, available_records: [], associate_by_default: true, merge_top_level: true)
         @records = records
         @associations = associations
         @scope = scope
         @available_records = available_records || []
         @associate_by_default = associate_by_default
 
-        @tree = Branch.new(
-          parent: nil,
-          association: nil,
-          children: @associations,
-          associate_by_default: @associate_by_default,
-          scope: @scope
-        )
-        @tree.preloaded_records = @records
+        @branch_groups = (merge_top_level ? [@associations] : Array.wrap(@associations)).map do |association|
+          Branch.new(
+            parent: nil,
+            association: nil,
+            children: association,
+            associate_by_default: @associate_by_default,
+            scope: @scope
+          ).tap { |tree| tree.preloaded_records = @records }.children
+        end
       end
 
       def empty?
@@ -124,7 +125,7 @@ module ActiveRecord
       end
 
       def branches
-        @tree.children
+        branch_groups.flatten
       end
 
       def loaders

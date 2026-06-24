@@ -25,18 +25,8 @@ module ActiveRecord
             [association_key_name, scope.model.table_name, scope.model.connection_specification_name, scope.values_for_queries].hash
           end
 
-          def records_for(loaders, pipeline: false)
-            LoaderRecords.new(loaders, self).records(pipeline: pipeline)
-          end
-
-          def load_records_in_batch(loaders, pipeline: false)
-            if pipeline
-              records_for(loaders, pipeline: true).then do |raw_records|
-                load_records_in_loaders(loaders, raw_records)
-              end
-            else
-              load_records_in_loaders(loaders, records_for(loaders))
-            end
+          def loader_records(loaders)
+            LoaderRecords.new(loaders, self)
           end
 
           def load_records_for_keys(keys, pipeline: false, &block)
@@ -64,27 +54,37 @@ module ActiveRecord
               relation.load(&block)
             end
           end
-
-          private
-            def load_records_in_loaders(loaders, raw_records)
-              loaders.each do |loader|
-                loader.load_records(raw_records)
-                loader.run
-              end
-            end
         end
 
         class LoaderRecords
           def initialize(loaders, loader_query)
             @loader_query = loader_query
             @loaders = loaders
-            @keys_to_load = Set.new
-            @already_loaded_records_by_key = {}
+          end
 
-            populate_keys_to_load_and_already_loaded_records
+          def read_keys
+            @read_keys ||= loaders.flat_map(&:association_cache_keys)
+          end
+
+          def write_keys
+            @write_keys ||= loaders.select(&:writes_to_association_cache?).flat_map(&:association_cache_keys)
+          end
+
+          def load(pipeline: false)
+            raw_records = records(pipeline: pipeline)
+
+            if pipeline
+              raw_records.then do |records|
+                load_records_in_loaders(records)
+              end
+            else
+              load_records_in_loaders(raw_records)
+            end
           end
 
           def records(pipeline: false)
+            populate_keys_to_load_and_already_loaded_records
+
             if pipeline
               load_records(pipeline: true).then do |records|
                 records + already_loaded_records
@@ -98,6 +98,11 @@ module ActiveRecord
             attr_reader :loader_query, :loaders, :keys_to_load, :already_loaded_records_by_key
 
             def populate_keys_to_load_and_already_loaded_records
+              return if defined?(@keys_to_load)
+
+              @keys_to_load = Set.new
+              @already_loaded_records_by_key = {}
+
               loaders.each do |loader|
                 loader.owners_by_key.each do |key, owners|
                   if loaded_owner = owners.find { |owner| loader.loaded?(owner) }
@@ -109,6 +114,13 @@ module ActiveRecord
               end
 
               @keys_to_load.subtract(already_loaded_records_by_key.keys)
+            end
+
+            def load_records_in_loaders(raw_records)
+              loaders.each do |loader|
+                loader.load_records(raw_records)
+                loader.run
+              end
             end
 
             def load_records(pipeline: false)
@@ -189,6 +201,14 @@ module ActiveRecord
           LoaderQuery.new(scope, association_key_name)
         end
 
+        def association_cache_keys
+          @association_cache_keys ||= owners.map { |owner| owner.association(reflection.name) }
+        end
+
+        def writes_to_association_cache?
+          @associate
+        end
+
         def owners_by_key
           @owners_by_key ||= owners.each_with_object({}) do |owner, result|
             key = derive_key(owner, owner_key_name)
@@ -221,7 +241,7 @@ module ActiveRecord
           # owners can be duplicated when a relation has a collection association join
           # #compare_by_identity makes such owners different hash keys
           @records_by_owner = {}.compare_by_identity
-          raw_records ||= loader_query.records_for([self])
+          raw_records ||= loader_query.loader_records([self]).records
           @preloaded_records = raw_records.select do |record|
             assignments = false
 
