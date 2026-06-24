@@ -2,11 +2,12 @@
 
 require "cases/helper"
 require "models/post"
+require "models/category"
 
 class PipelinedQueriesTest < ActiveRecord::PostgreSQLTestCase
   self.use_transactional_tests = false
 
-  fixtures :posts, :comments, :tags, :taggings
+  fixtures :posts, :comments, :tags, :taggings, :categories, :categories_posts
 
   def setup
     super
@@ -142,6 +143,28 @@ class PipelinedQueriesTest < ActiveRecord::PostgreSQLTestCase
     end
 
     assert_operator pending_lengths.max || 0, :>=, 2
+  end
+
+  def test_overlapping_direct_and_through_preloads_do_not_duplicate_loads
+    comment_loads = []
+    subscriber = lambda do |_name, _start, _finish, _id, payload|
+      comment_loads << payload[:sql] if payload[:name] == "Comment Load"
+    end
+
+    categories = ActiveSupport::Notifications.subscribed(subscriber, "sql.active_record") do
+      Category.where(id: [categories(:general).id, categories(:technology).id]).preload(
+        { posts: :comments },
+        :ordered_post_comments,
+      ).to_a
+    end
+
+    assert_equal 1, comment_loads.size
+    assert_no_queries do
+      categories.each do |category|
+        category.posts.each(&:comments)
+        category.ordered_post_comments.to_a
+      end
+    end
   end
 
   def test_synchronous_query_flushes_pending_pipeline

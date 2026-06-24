@@ -35,18 +35,33 @@ module ActiveRecord
         end
 
         private
-          attr_reader :loaders
-
           def group_and_load_similar(loaders)
-            non_through = loaders.grep_v(ThroughAssociation)
+            promises_by_key = {}
 
-            grouped = non_through.group_by do |loader|
+            loader_records(loaders).map do |record_load|
+              dependencies = record_load.read_keys.filter_map { |key| promises_by_key[key] }
+              promise = if dependency = dependencies.find(&:pending?)
+                dependency.then do
+                  record_load.load(pipeline: true).value
+                end
+              else
+                record_load.load(pipeline: true)
+              end
+
+              record_load.write_keys.each { |key| promises_by_key[key] = promise }
+              promise
+            end
+          end
+
+          def loader_records(loaders)
+            record_loads = loaders.grep_v(ThroughAssociation).group_by do |loader|
               [loader.loader_query, loader.klass]
+            end.map do |(query, _klass), similar_loaders|
+              query.loader_records(similar_loaders)
             end
 
-            grouped.map do |(query, _klass), similar_loaders|
-              query.load_records_in_batch(similar_loaders, pipeline: true)
-            end
+            writers, readers = record_loads.partition { |record_load| record_load.write_keys.any? }
+            writers + readers
           end
       end
     end
