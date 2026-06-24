@@ -1,4 +1,10 @@
 *   Add `ActiveSupport::Ractors.on_main` and `ActiveSupport::Ractors.main?` for delegating work to the main Ractor.
+  
+*   Freeze Active Support configuration when `config.freeze_configuration` is enabled.
+
+    After the application has finished initializing, the relevant Active Support
+    configuration values are made `Ractor`-shareable so they can no longer be
+    mutated at runtime.
 
     *Gannon McGibbon*
 
