@@ -10,43 +10,65 @@ module ActiveRecord
         end
 
         def call
-          branches = @preloaders.flat_map(&:branches)
-          until branches.empty?
-            loaders = branches.flat_map(&:runnable_loaders)
+          branch_groups = @preloaders.flat_map(&:branch_groups)
 
-            loaders.each { |loader| loader.associate_records_from_unscoped(@available_records[loader.klass.base_class]) }
+          until branch_groups.empty?
+            target_loaders = branch_groups.map { |branches| runnable_loaders_for(branches) }
 
-            if loaders.any?
-              future_tables = branches.flat_map do |branch|
-                branch.future_classes - branch.runnable_loaders.map(&:klass)
-              end.map(&:table_name).uniq
+            load_records(target_loaders.flat_map { |loaders| loader_records(loaders) }).each(&:value)
+            target_loaders.flatten.each(&:run)
 
-              target_loaders = loaders.reject { |l| future_tables.include?(l.table_name)  }
-              target_loaders = loaders if target_loaders.empty?
-
-              group_and_load_similar(target_loaders).each(&:value)
-              target_loaders.each(&:run)
+            branch_groups = branch_groups.filter_map do |branches|
+              finished, in_progress = branches.partition(&:done?)
+              branches = in_progress + finished.flat_map(&:children)
+              branches if branches.any?
             end
-
-            finished, in_progress = branches.partition(&:done?)
-
-            branches = in_progress + finished.flat_map(&:children)
           end
         end
 
         private
-          attr_reader :loaders
+          def runnable_loaders_for(branches)
+            loaders = branches.flat_map(&:runnable_loaders)
 
-          def group_and_load_similar(loaders)
-            non_through = loaders.grep_v(ThroughAssociation)
+            loaders.each { |loader| loader.associate_records_from_unscoped(@available_records[loader.klass.base_class]) }
 
-            grouped = non_through.group_by do |loader|
+            return [] if loaders.empty?
+
+            future_tables = branches.flat_map do |branch|
+              branch.future_classes - branch.runnable_loaders.map(&:klass)
+            end.map(&:table_name).uniq
+
+            target_loaders = loaders.reject { |l| future_tables.include?(l.table_name)  }
+            target_loaders.presence || loaders
+          end
+
+          def load_records(record_loads)
+            promises_by_key = {}
+
+            record_loads.map do |record_load|
+              dependencies = record_load.read_keys.filter_map { |key| promises_by_key[key] }
+              promise = if dependency = dependencies.find(&:pending?)
+                dependency.then do
+                  record_load.load(pipeline: true).value
+                end
+              else
+                record_load.load(pipeline: true)
+              end
+
+              record_load.write_keys.each { |key| promises_by_key[key] = promise }
+              promise
+            end
+          end
+
+          def loader_records(loaders)
+            record_loads = loaders.grep_v(ThroughAssociation).group_by do |loader|
               [loader.loader_query, loader.klass]
+            end.map do |(query, _klass), similar_loaders|
+              query.loader_records(similar_loaders)
             end
 
-            grouped.map do |(query, _klass), similar_loaders|
-              query.load_records_in_batch(similar_loaders, pipeline: true)
-            end
+            writers, readers = record_loads.partition { |record_load| record_load.write_keys.any? }
+            writers + readers
           end
       end
     end
