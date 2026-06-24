@@ -24,6 +24,16 @@ module ActiveRecord
       end
     end
 
+    test "retriable uses allow_retry reader" do
+      connection = Post.lease_connection
+      intent = build_intent(connection, allow_retry: false)
+      intent.define_singleton_method(:allow_retry) { true }
+
+      intent.initialize_retry_state(retries: 1, deadline: nil, reconnectable: true)
+
+      assert_predicate intent, :retriable?
+    end
+
     test "retry re-enters execute_intent" do
       connection = Post.lease_connection
       intent = build_intent(connection, allow_retry: true)
