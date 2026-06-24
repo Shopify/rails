@@ -25,6 +25,15 @@
     ```
 
     *Edouard Chin*
+  
+* Freeze Action Pack configuration when `config.freeze_configuration` is enabled.
+
+    After the application has finished initializing, the relevant Action Pack
+    configuration values are made `Ractor`-shareable so they can no longer be
+    mutated at runtime.
+
+    *Gannon McGibbon*
+>>>>>>> 26a018d7f9 (Freeze Action Pack configuration with config.freeze_configuration)
 
 *   Add `config.action_dispatch.strict_accept_header` to stop forcing an
     HTML response when the `Accept` header contains the `*/*` wildcard.
