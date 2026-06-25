@@ -939,6 +939,35 @@ class PreloaderTest < ActiveRecord::TestCase
     end
   end
 
+  def test_preload_preserves_ordered_overlap_visibility
+    category = Category.create!(name: "Preloader overlap")
+    post = Post.create!(author: authors(:david), title: "test post", body: "hello")
+    post.comments.create!(body: "hello")
+    category.posts << post
+    category.reload
+
+    comment_loads = []
+    subscriber = lambda do |_name, _start, _finish, _id, payload|
+      comment_loads << payload[:sql] if payload[:name] == "Comment Load"
+    end
+
+    ActiveSupport::Notifications.subscribed(subscriber, "sql.active_record") do
+      ActiveRecord::Associations::Preloader.new(
+        records: [category],
+        associations: [
+          { ordered_post_comments: :post },
+          { posts: [{ comments: :post }] },
+        ],
+      ).call
+    end
+
+    assert_equal 2, comment_loads.size
+    assert_no_queries do
+      category.ordered_post_comments.to_a
+      category.posts.each(&:comments)
+    end
+  end
+
   def test_preload_grouped_queries_of_through_records
     organization = organizations(:nsa)
 

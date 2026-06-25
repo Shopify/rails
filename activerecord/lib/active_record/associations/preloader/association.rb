@@ -25,13 +25,8 @@ module ActiveRecord
             [association_key_name, scope.model.table_name, scope.model.connection_specification_name, scope.values_for_queries].hash
           end
 
-          def loader_records(loaders, preload_index: nil, preload_writes: nil)
-            LoaderRecords.new(
-              loaders,
-              self,
-              preload_index: preload_index,
-              preload_writes: preload_writes
-            )
+          def loader_records(loaders, preload_writes: nil)
+            LoaderRecords.new(loaders, self, preload_writes: preload_writes)
           end
 
           def load_records_for_keys(keys, pipeline: false, &block)
@@ -62,12 +57,9 @@ module ActiveRecord
         end
 
         class LoaderRecords
-          attr_reader :preload_index
-
-          def initialize(loaders, loader_query, preload_index: nil, preload_writes: nil)
+          def initialize(loaders, loader_query, preload_writes: nil)
             @loader_query = loader_query
             @loaders = loaders
-            @preload_index = preload_index || 0
             @preload_writes = preload_writes
           end
 
@@ -77,6 +69,18 @@ module ActiveRecord
 
           def write_keys
             @write_keys ||= loaders.select(&:writes_to_association_cache?).flat_map(&:association_cache_keys)
+          end
+
+          def read_keys_with_preload_index
+            @read_keys_with_preload_index ||= loaders.flat_map do |loader|
+              loader.association_cache_keys.map { |key| [key, loader.preload_index] }
+            end
+          end
+
+          def write_keys_with_preload_index
+            @write_keys_with_preload_index ||= loaders.select(&:writes_to_association_cache?).flat_map do |loader|
+              loader.association_cache_keys.map { |key| [key, loader.preload_index] }
+            end
           end
 
           def load(pipeline: false)
@@ -129,7 +133,7 @@ module ActiveRecord
               return false unless loader.loaded?(owner)
 
               index = preload_writes&.[](loader.association_cache_key(owner))
-              index.nil? || index <= preload_index
+              index.nil? || index <= loader.preload_index
             end
 
             def load_records_in_loaders(raw_records)
@@ -280,6 +284,10 @@ module ActiveRecord
 
         def preload_context=(context)
           @preload_group_index, @preload_writes = context
+        end
+
+        def preload_index
+          @preload_group_index || 0
         end
 
         def associate_records_from_unscoped(unscoped_records)

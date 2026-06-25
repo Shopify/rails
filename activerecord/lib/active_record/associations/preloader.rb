@@ -103,14 +103,18 @@ module ActiveRecord
         @available_records = available_records || []
         @associate_by_default = associate_by_default
 
-        @branch_groups = (merge_top_level ? [@associations] : Array.wrap(@associations)).map do |association|
+        @branch_groups = (merge_top_level ? [@associations] : Array.wrap(@associations)).map.with_index do |association, index|
           Branch.new(
             parent: nil,
             association: nil,
             children: association,
             associate_by_default: @associate_by_default,
             scope: @scope
-          ).tap { |tree| tree.preloaded_records = @records }.children
+          ).tap { |tree| tree.preloaded_records = @records }.children.tap do |branches|
+            branches.each_with_index do |branch, child_index|
+              branch.preload_index = merge_top_level ? child_index : index
+            end
+          end
         end
       end
 
