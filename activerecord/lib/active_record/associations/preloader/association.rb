@@ -25,8 +25,13 @@ module ActiveRecord
             [association_key_name, scope.model.table_name, scope.model.connection_specification_name, scope.values_for_queries].hash
           end
 
-          def loader_records(loaders)
-            LoaderRecords.new(loaders, self)
+          def loader_records(loaders, preload_index: nil, preload_writes: nil)
+            LoaderRecords.new(
+              loaders,
+              self,
+              preload_index: preload_index,
+              preload_writes: preload_writes
+            )
           end
 
           def load_records_for_keys(keys, pipeline: false, &block)
@@ -57,9 +62,13 @@ module ActiveRecord
         end
 
         class LoaderRecords
-          def initialize(loaders, loader_query)
+          attr_reader :preload_index
+
+          def initialize(loaders, loader_query, preload_index: nil, preload_writes: nil)
             @loader_query = loader_query
             @loaders = loaders
+            @preload_index = preload_index || 0
+            @preload_writes = preload_writes
           end
 
           def read_keys
@@ -95,7 +104,7 @@ module ActiveRecord
           end
 
           private
-            attr_reader :loader_query, :loaders, :keys_to_load, :already_loaded_records_by_key
+            attr_reader :loader_query, :loaders, :keys_to_load, :already_loaded_records_by_key, :preload_writes
 
             def populate_keys_to_load_and_already_loaded_records
               return if defined?(@keys_to_load)
@@ -105,7 +114,7 @@ module ActiveRecord
 
               loaders.each do |loader|
                 loader.owners_by_key.each do |key, owners|
-                  if loaded_owner = owners.find { |owner| loader.loaded?(owner) }
+                  if loaded_owner = owners.find { |owner| loaded_for_preload?(loader, owner) }
                     already_loaded_records_by_key[key] = loader.target_for(loaded_owner)
                   else
                     keys_to_load << key
@@ -114,6 +123,13 @@ module ActiveRecord
               end
 
               @keys_to_load.subtract(already_loaded_records_by_key.keys)
+            end
+
+            def loaded_for_preload?(loader, owner)
+              return false unless loader.loaded?(owner)
+
+              index = preload_writes&.[](loader.association_cache_key(owner))
+              index.nil? || index <= preload_index
             end
 
             def load_records_in_loaders(raw_records)
@@ -202,7 +218,11 @@ module ActiveRecord
         end
 
         def association_cache_keys
-          @association_cache_keys ||= owners.map { |owner| owner.association(reflection.name) }
+          @association_cache_keys ||= owners.map { |owner| association_cache_key(owner) }
+        end
+
+        def association_cache_key(owner)
+          owner.association(reflection.name)
         end
 
         def writes_to_association_cache?
@@ -258,6 +278,10 @@ module ActiveRecord
           end
         end
 
+        def preload_context=(context)
+          @preload_group_index, @preload_writes = context
+        end
+
         def associate_records_from_unscoped(unscoped_records)
           return if unscoped_records.nil? || unscoped_records.empty?
           return if !reflection_scope.empty_scope?
@@ -269,6 +293,7 @@ module ActiveRecord
             owners&.each_with_index do |owner, i|
               association = owner.association(reflection.name)
               association.target = record
+              mark_preload_write(association)
 
               if i == 0 # Set inverse on first owner
                 association.set_inverse_instance(record)
@@ -296,6 +321,12 @@ module ActiveRecord
             else
               association.target = records.first
             end
+
+            mark_preload_write(association)
+          end
+
+          def mark_preload_write(association)
+            @preload_writes[association] = @preload_group_index if @preload_writes
           end
 
           def key_conversion_required?
