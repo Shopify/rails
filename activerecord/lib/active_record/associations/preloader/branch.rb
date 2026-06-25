@@ -61,6 +61,15 @@ module ActiveRecord
           parent.nil?
         end
 
+        def preload_index=(index)
+          @preload_index = index
+          children.each { |child| child.preload_index = index }
+        end
+
+        def preload_index
+          @preload_index || 0
+        end
+
         def source_records
           @parent.preloaded_records
         end
