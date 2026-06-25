@@ -4,11 +4,16 @@ require "cases/helper"
 require "models/post"
 require "models/category"
 require "models/author"
+require "models/sharded/blog"
+require "models/sharded/blog_post"
+require "models/sharded/blog_post_tag"
+require "models/sharded/tag"
 
 class PipelinedQueriesTest < ActiveRecord::PostgreSQLTestCase
   self.use_transactional_tests = false
 
-  fixtures :posts, :comments, :tags, :taggings, :categories, :categories_posts, :authors
+  fixtures :posts, :comments, :tags, :taggings, :categories, :categories_posts, :authors,
+    :sharded_blogs, :sharded_blog_posts, :sharded_blog_posts_tags, :sharded_tags
 
   def setup
     super
@@ -213,6 +218,31 @@ class PipelinedQueriesTest < ActiveRecord::PostgreSQLTestCase
       categories.each do |category|
         category.ordered_post_comments.to_a
         category.posts.each(&:comments)
+      end
+    end
+  end
+
+  def test_query_constrained_through_preload_keeps_source_load_visible
+    tag_loads = []
+    subscriber = lambda do |_name, _start, _finish, _id, payload|
+      tag_loads << payload[:sql] if payload[:name] == "Sharded::Tag Load"
+    end
+
+    posts = ActiveSupport::Notifications.subscribed(subscriber, "sql.active_record") do
+      Sharded::BlogPost.where(id: [
+        sharded_blog_posts(:great_post_blog_one).id,
+        sharded_blog_posts(:second_post_blog_one).id,
+      ]).preload(
+        :tags,
+        blog_post_tags: :tag,
+      ).to_a
+    end
+
+    assert_equal 1, tag_loads.size
+    assert_no_queries do
+      posts.each do |post|
+        post.tags.to_a
+        post.blog_post_tags.each(&:tag)
       end
     end
   end

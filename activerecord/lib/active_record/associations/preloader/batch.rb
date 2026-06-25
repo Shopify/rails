@@ -11,23 +11,53 @@ module ActiveRecord
         end
 
         def call
-          branch_groups = @preloaders.flat_map(&:branch_groups)
+          branch_groups = @preloaders.flat_map(&:branch_groups).map.with_index do |branches, index|
+            [branches, index]
+          end
+          dependencies = top_level_dependencies(branch_groups.map(&:first))
 
           until branch_groups.empty?
-            target_loaders = branch_groups.map { |branches| runnable_loaders_for(branches) }
+            unfinished = branch_groups.map(&:last)
+            active, waiting = branch_groups.partition do |_branches, index|
+              (dependencies[index] & unfinished).empty?
+            end
+            target_loaders = active.map { |branches, _index| runnable_loaders_for(branches) }
 
             load_records(target_loaders.flat_map { |loaders| loader_records(loaders) }).each(&:value)
             target_loaders.flatten.each(&:run)
 
-            branch_groups = branch_groups.filter_map do |branches|
+            branch_groups = (waiting + active.filter_map do |branches, index|
               finished, in_progress = branches.partition(&:done?)
               branches = in_progress + finished.flat_map(&:children)
-              branches if branches.any?
-            end
+              [branches, index] if branches.any?
+            end).sort_by(&:last)
           end
         end
 
         private
+          def top_level_dependencies(branch_groups)
+            dependencies = Array.new(branch_groups.length) { [] }
+            through_dependencies = branch_groups.map { |branches| branches.flat_map { |branch| through_dependencies_for(branch) } }
+
+            branch_groups.each_with_index do |branches, index|
+              associations = branches.map(&:association)
+              through_dependencies.each_with_index do |dependencies_for_group, dependency_index|
+                next unless dependency_index < index
+
+                dependencies[index] << dependency_index if (dependencies_for_group & associations).any?
+              end
+            end
+
+            dependencies
+          end
+
+          def through_dependencies_for(branch)
+            branch.source_records.filter_map do |record|
+              reflection = record.class._reflect_on_association(branch.association)
+              reflection.through_reflection.name if reflection&.options&.[](:through)
+            end.uniq
+          end
+
           def runnable_loaders_for(branches)
             loaders = branches.flat_map do |branch|
               branch.runnable_loaders.each do |loader|
