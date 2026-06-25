@@ -1,3 +1,11 @@
+*   Encapsulate model schema-derived state in a schema context object.
+
+    Active Record models now keep their schema-derived caches, such as columns,
+    defaults, attribute types, and content columns, behind a single per-model
+    schema context object.
+
+    *Adrianna Chang*
+
 *   Support polymorphic associations with custom primary keys through `:inverse_of`.
 
     When using polymorphic associations with `:inverse_of`, ActiveRecord now respects

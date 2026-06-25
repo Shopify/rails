@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "monitor"
+require "active_record/model_schema/schema_context"
 
 module ActiveRecord
   module ModelSchema
@@ -183,6 +184,7 @@ module ActiveRecord
 
       delegate :type_for_attribute, :column_for_attribute, to: :class
 
+      initialize_schema_context
       initialize_load_schema_monitor
     end
 
@@ -199,6 +201,18 @@ module ActiveRecord
     end
 
     module ClassMethods
+      def schema_context # :nodoc:
+        @schema_context ||= build_schema_context("default")
+      end
+
+      def build_schema_context(context_key) # :nodoc:
+        ActiveRecord::ModelSchema::SchemaContext.new(self, context_key)
+      end
+
+      def initialize_schema_context # :nodoc:
+        @schema_context = build_schema_context("default")
+      end
+
       # Guesses the table name (in forced lower-case) based on the name of the class in the
       # inheritance hierarchy descending directly from ActiveRecord::Base. So if the hierarchy
       # looks like: Reply < Message < ActiveRecord::Base, then Message is used
@@ -448,27 +462,19 @@ module ActiveRecord
       end
 
       def attributes_builder # :nodoc:
-        defaults = _default_attributes.except(*(column_names - Array(primary_key)))
-        ActiveModel::AttributeSet::Builder.new(attribute_types, defaults)
+        @schema_context.attributes_builder
       end
 
       def columns_hash # :nodoc:
-        load_schema unless @columns_hash
-        @columns_hash
+        @schema_context.columns_hash
       end
 
       def columns
-        @columns ||= columns_hash.values.freeze
+        @schema_context.columns
       end
 
       def _returning_columns_for_insert(connection) # :nodoc:
-        @_returning_columns_for_insert ||= begin
-          auto_populated_columns = columns.filter_map do |c|
-            c.name if connection.return_value_after_insert?(c)
-          end
-
-          auto_populated_columns.empty? ? Array(primary_key) : auto_populated_columns
-        end
+        @schema_context._returning_columns_for_insert(connection)
       end
 
       def _returning_columns_for_update(connection)
@@ -500,28 +506,22 @@ module ActiveRecord
       # Returns a hash where the keys are column names and the values are
       # default values when instantiating the Active Record object for this table.
       def column_defaults
-        load_schema
-        @column_defaults ||= _default_attributes.deep_dup.to_hash.freeze
+        @schema_context.column_defaults
       end
 
       # Returns an array of column names as strings.
       def column_names
-        columns.map(&:name).freeze
+        @schema_context.column_names
       end
 
       def symbol_column_to_string(name_symbol) # :nodoc:
-        @symbol_column_to_string_name_hash ||= column_names.index_by(&:to_sym)
-        @symbol_column_to_string_name_hash[name_symbol]
+        @schema_context.symbol_column_to_string(name_symbol)
       end
 
       # Returns an array of column objects where the primary id, all columns ending in "_id" or "_count",
       # and columns used for single table inheritance have been removed.
       def content_columns
-        @content_columns ||= columns.reject do |c|
-          Array(primary_key).include?(c.name) ||
-          c.name == inheritance_column ||
-          c.name.end_with?("_id", "_count")
-        end.freeze
+        @schema_context.content_columns
       end
 
       # Resets all the cached information about columns, which will cause them
@@ -566,9 +566,13 @@ module ActiveRecord
         @load_schema_monitor.synchronize do
           return if schema_loaded?
 
-          load_schema!
+          schema_context.load_schema!
 
-          @schema_loaded = true
+          unless @schema_hooks_loaded
+            load_schema!
+            @schema_hooks_loaded = true
+          end
+
         rescue
           reload_schema_from_cache # If the schema loading failed half way through, we must reset the state.
           raise
@@ -581,16 +585,11 @@ module ActiveRecord
         end
 
         def reload_schema_from_cache(recursive = true)
-          @_returning_columns_for_insert = nil
           @_returning_columns_for_update = nil
           @arel_table = Arel::Table.new(klass: self)
-          @symbol_column_to_string_name_hash = nil
-          @content_columns = nil
-          @column_defaults = nil
-          @columns = nil
-          @columns_hash = nil
-          @schema_loaded = false
+          @schema_hooks_loaded = false
           @attribute_names = nil
+          reload_schema_contexts_from_cache
           if recursive
             subclasses.each do |descendant|
               descendant.send(:reload_schema_from_cache)
@@ -598,9 +597,14 @@ module ActiveRecord
           end
         end
 
+        def reload_schema_contexts_from_cache
+          @schema_context&.reload_schema_from_cache
+        end
+
       private
         def inherited(child_class)
           super
+          child_class.initialize_schema_context
           child_class.initialize_load_schema_monitor
           child_class.reload_schema_from_cache(false)
           child_class.class_eval do
@@ -610,23 +614,13 @@ module ActiveRecord
         end
 
         def schema_loaded?
-          @schema_loaded
+          @schema_context.schema_loaded?
         end
 
         def load_schema!
-          unless table_name
-            raise ActiveRecord::TableNotSpecified, "#{self} has no table configured. Set one with #{self}.table_name="
-          end
-
-          columns_hash = schema_cache.columns_hash(table_name)
-          if only_columns.present?
-            columns_hash = columns_hash.slice(*only_columns)
-          elsif ignored_columns.present?
-            columns_hash = columns_hash.except(*ignored_columns)
-          end
-          @columns_hash = columns_hash.freeze
-
-          _default_attributes # Precompute to cache DB-dependent attribute types
+          # The default schema load is handled by the current schema context.
+          # This method remains as the model-level hook for modules that derive
+          # class state from the loaded schema.
         end
 
         # Guesses the table name, but does not decorate it with prefix and suffix information.
