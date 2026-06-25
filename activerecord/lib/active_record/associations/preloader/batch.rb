@@ -7,28 +7,34 @@ module ActiveRecord
         def initialize(preloaders, available_records:)
           @preloaders = preloaders.reject(&:empty?)
           @available_records = available_records.flatten.group_by { |r| r.class.base_class }
+          @preload_writes = {}.compare_by_identity
         end
 
         def call
-          branch_groups = @preloaders.flat_map(&:branch_groups)
+          branch_groups = @preloaders.flat_map(&:branch_groups).map.with_index do |branches, index|
+            [branches, index]
+          end
 
           until branch_groups.empty?
-            target_loaders = branch_groups.map { |branches| runnable_loaders_for(branches) }
+            target_loaders = branch_groups.map do |branches, index|
+              [runnable_loaders_for(branches, index), index]
+            end
 
-            load_records(target_loaders.flat_map { |loaders| loader_records(loaders) }).each(&:value)
-            target_loaders.flatten.each(&:run)
+            load_records(target_loaders.flat_map { |loaders, index| loader_records(loaders, index) }).each(&:value)
+            target_loaders.each { |loaders, _index| loaders.each(&:run) }
 
-            branch_groups = branch_groups.filter_map do |branches|
+            branch_groups = branch_groups.filter_map do |branches, index|
               finished, in_progress = branches.partition(&:done?)
               branches = in_progress + finished.flat_map(&:children)
-              branches if branches.any?
+              [branches, index] if branches.any?
             end
           end
         end
 
         private
-          def runnable_loaders_for(branches)
+          def runnable_loaders_for(branches, index)
             loaders = branches.flat_map(&:runnable_loaders)
+            loaders.each { |loader| loader.preload_context = [index, @preload_writes] }
 
             loaders.each { |loader| loader.associate_records_from_unscoped(@available_records[loader.klass.base_class]) }
 
@@ -43,10 +49,15 @@ module ActiveRecord
           end
 
           def load_records(record_loads)
-            promises_by_key = {}
+            promises_by_key = Hash.new { |hash, key| hash[key] = [] }
+            writers, readers = record_loads.partition { |record_load| record_load.write_keys.any? }
 
-            record_loads.map do |record_load|
-              dependencies = record_load.read_keys.filter_map { |key| promises_by_key[key] }
+            (writers + readers).map do |record_load|
+              dependencies = record_load.read_keys.filter_map do |key|
+                promises_by_key[key].reverse_each.find do |index, _promise|
+                  index <= record_load.preload_index
+                end&.last
+              end
               promise = if dependency = dependencies.find(&:pending?)
                 dependency.then do
                   record_load.load(pipeline: true).value
@@ -55,16 +66,22 @@ module ActiveRecord
                 record_load.load(pipeline: true)
               end
 
-              record_load.write_keys.each { |key| promises_by_key[key] = promise }
+              record_load.write_keys.each do |key|
+                promises_by_key[key] << [record_load.preload_index, promise]
+              end
               promise
             end
           end
 
-          def loader_records(loaders)
+          def loader_records(loaders, index)
             loaders.grep_v(ThroughAssociation).group_by do |loader|
               [loader.loader_query, loader.klass]
             end.map do |(query, _klass), similar_loaders|
-              query.loader_records(similar_loaders)
+              query.loader_records(
+                similar_loaders,
+                preload_index: index,
+                preload_writes: @preload_writes
+              )
             end
           end
       end
