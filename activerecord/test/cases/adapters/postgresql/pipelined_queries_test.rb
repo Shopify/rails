@@ -182,6 +182,28 @@ class PipelinedQueriesTest < ActiveRecord::PostgreSQLTestCase
     end
   end
 
+  def test_overlapping_through_and_direct_preloads_preserve_ordered_loads
+    comment_loads = []
+    subscriber = lambda do |_name, _start, _finish, _id, payload|
+      comment_loads << payload[:sql] if payload[:name] == "Comment Load"
+    end
+
+    categories = ActiveSupport::Notifications.subscribed(subscriber, "sql.active_record") do
+      Category.where(id: [categories(:general).id, categories(:technology).id]).preload(
+        :ordered_post_comments,
+        { posts: :comments },
+      ).to_a
+    end
+
+    assert_equal 2, comment_loads.size
+    assert_no_queries do
+      categories.each do |category|
+        category.ordered_post_comments.to_a
+        category.posts.each(&:comments)
+      end
+    end
+  end
+
   def test_synchronous_query_flushes_pending_pipeline
     future1 = @connection.select_all("SELECT 1 AS n", "TEST", pipeline: true)
     future2 = @connection.select_all("SELECT 2 AS n", "TEST", pipeline: true)

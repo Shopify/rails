@@ -61,14 +61,11 @@ module ActiveRecord
           end
 
           def loader_records(loaders)
-            record_loads = loaders.grep_v(ThroughAssociation).group_by do |loader|
+            loaders.grep_v(ThroughAssociation).group_by do |loader|
               [loader.loader_query, loader.klass]
             end.map do |(query, _klass), similar_loaders|
               query.loader_records(similar_loaders)
             end
-
-            writers, readers = record_loads.partition { |record_load| record_load.write_keys.any? }
-            writers + readers
           end
       end
     end
