@@ -272,8 +272,9 @@ module ActiveRecord
             if result = lookup_sql_cache(sql, name, binds)
               FutureResult.wrap(result)
             else
+              cache = query_cache
               result = FutureResult.wrap(super(sql, name, binds, preparable: preparable, async: async, allow_retry: allow_retry, pipeline: pipeline))
-              result.add_result_callback { |resolved| cache_sql_result(sql, binds, resolved) } if pipeline
+              result.add_result_callback { |resolved| cache_sql_result(cache, sql, binds, resolved) } if pipeline
               result
             end
           else
@@ -329,10 +330,10 @@ module ActiveRecord
           result.dup
         end
 
-        def cache_sql_result(sql, binds, result)
+        def cache_sql_result(cache, sql, binds, result)
           key = binds.empty? ? sql : [sql, binds]
           @lock.synchronize do
-            query_cache.compute_if_absent(key) { result.dup }
+            cache.compute_if_absent(key) { result.dup } if query_cache.equal?(cache)
           end
           result
         end

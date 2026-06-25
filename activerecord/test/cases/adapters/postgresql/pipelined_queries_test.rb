@@ -104,6 +104,19 @@ class PipelinedQueriesTest < ActiveRecord::PostgreSQLTestCase
     @connection.disable_query_cache!
   end
 
+  def test_query_cache_callback_ignores_unset_cache
+    @connection.enable_query_cache!
+    cache = @connection.query_cache
+
+    future = @connection.select_all("SELECT 1 AS n", "TEST", pipeline: true)
+    @connection.send(:unset_query_cache!)
+
+    assert_equal [{ "n" => 1 }], future.result.to_a
+  ensure
+    @connection.query_cache = cache if cache
+    @connection.disable_query_cache! if cache
+  end
+
   def test_mixed_select_methods_batch_together
     future = @connection.select_all("SELECT 1 AS n", "TEST", pipeline: true)
     value  = @connection.select_value("SELECT 2", "TEST", pipeline: true)
