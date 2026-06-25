@@ -12,6 +12,7 @@ require "models/post"
 require "models/author"
 require "models/book"
 require "models/comment"
+require "models/rating"
 require "models/tag"
 require "models/tagging"
 require "models/person"
@@ -965,6 +966,29 @@ class PreloaderTest < ActiveRecord::TestCase
     assert_no_queries do
       category.ordered_post_comments.to_a
       category.posts.each(&:comments)
+    end
+  end
+
+  def test_preload_uses_associated_records_for_overlapping_child_preloads
+    author = Author.create!(name: "Preloader identity")
+    post = author.posts.create!(title: "test post", body: "hello")
+    comment = post.comments.create!(body: "hello")
+    rating = comment.ratings.create!(value: 10)
+    author.reload
+
+    ActiveRecord::Associations::Preloader.new(
+      records: [author],
+      associations: [
+        { comments: :ratings },
+        { posts: [{ comments: :ratings }] },
+      ],
+    ).call
+
+    assert_same author.comments.first, author.posts.first.comments.first
+    assert_equal [rating], author.posts.first.comments.first.ratings.to_a
+    assert_no_queries do
+      author.comments.to_a
+      author.posts.each { |preloaded_post| preloaded_post.comments.each(&:ratings) }
     end
   end
 
