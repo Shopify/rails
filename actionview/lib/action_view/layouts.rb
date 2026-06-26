@@ -209,7 +209,7 @@ module ActionView
 
     included do
       class_attribute :_layout, instance_accessor: false
-      class_attribute :_layout_conditions, instance_accessor: false, instance_reader: true, default: {}
+      class_attribute :_layout_conditions, instance_accessor: false, instance_reader: true, default: {}.freeze
 
       _write_layout_method
     end
@@ -269,10 +269,10 @@ module ActionView
       def layout(layout, conditions = {})
         include LayoutConditions unless conditions.empty?
 
-        conditions.each { |k, v| conditions[k] = Array(v).map(&:to_s) }
-        self._layout_conditions = conditions
+        conditions.each { |k, v| conditions[k] = Array(v).map(&:to_s).freeze }
+        self._layout_conditions = conditions.freeze
 
-        self._layout = layout
+        self._layout = layout.is_a?(Proc) ? ActiveSupport::Ractors.try_shareable_proc(layout) : layout
         _write_layout_method
       end
 
@@ -308,7 +308,7 @@ module ActionView
               end
             RUBY
           when Proc
-            define_method :_layout_from_proc, &_layout
+            define_method :_layout_from_proc, &ActiveSupport::Ractors.try_shareable_proc(_layout)
             private :_layout_from_proc
             <<-RUBY
               result = _layout_from_proc(#{_layout.arity == 0 ? '' : 'self'})
