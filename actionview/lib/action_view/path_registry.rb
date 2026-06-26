@@ -3,6 +3,7 @@
 module ActionView # :nodoc:
   module PathRegistry # :nodoc:
     @view_paths_by_class = {}
+    @shareable_view_paths_by_class = {}.freeze
     @file_system_resolvers = {}
     @file_system_resolver_mutex = Mutex.new
     @file_system_resolver_hooks = []
@@ -12,11 +13,18 @@ module ActionView # :nodoc:
     end
 
     def self.get_view_paths(klass)
-      @view_paths_by_class[klass] || get_view_paths(klass.superclass)
+      if ActiveSupport::Ractors.main?
+        @view_paths_by_class[klass] || get_view_paths(klass.superclass)
+      elsif descriptors = @shareable_view_paths_by_class[klass]
+        PathSet.new(descriptors)
+      else
+        get_view_paths(klass.superclass)
+      end
     end
 
     def self.set_view_paths(klass, paths)
-      @view_paths_by_class[klass] = paths
+      @view_paths_by_class[klass] = paths.freeze
+      @shareable_view_paths_by_class = @shareable_view_paths_by_class.merge(klass => shareable_view_paths(paths)).freeze
     end
 
     def self.cast_file_system_resolvers(paths)
@@ -43,6 +51,11 @@ module ActionView # :nodoc:
 
       paths
     end
+
+    def self.shareable_view_paths(paths)
+      paths.map { |path| -path.to_path.to_s }.freeze
+    end
+    private_class_method :shareable_view_paths
 
     def self.all_resolvers
       resolvers = [all_file_system_resolvers]
