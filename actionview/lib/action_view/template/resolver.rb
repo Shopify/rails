@@ -12,6 +12,11 @@ module ActionView
     class PathParser # :nodoc:
       ParsedPath = Struct.new(:path, :details)
 
+      def initialize
+        @regex = ActiveSupport::Ractors.make_shareable(build_path_regex)
+        freeze
+      end
+
       def build_path_regex
         handlers = Regexp.union(Template::Handlers.extensions.map(&:to_s))
         formats = Regexp.union(Template::Types.symbols.map(&:to_s))
@@ -34,7 +39,6 @@ module ActionView
       end
 
       def parse(path)
-        @regex ||= build_path_regex
         match = @regex.match(path)
         path = TemplatePath.build(match[:action], match[:prefix] || "", !!match[:partial])
         details = TemplateDetails.new(
@@ -151,9 +155,11 @@ module ActionView
       end
 
       def unbound_templates_for(name, prefix, partial, cache)
-        store = cache ? @unbound_templates : Concurrent::Map.new
-        store.compute_if_absent(TemplatePath.virtual(name, prefix, partial)) do
-          unbound_templates_from_path(TemplatePath.build(name, prefix, partial))
+        path = TemplatePath.build(name, prefix, partial)
+        return unbound_templates_from_path(path) unless cache && ActiveSupport::Ractors.main?
+
+        @unbound_templates.compute_if_absent(path.virtual) do
+          unbound_templates_from_path(path)
         end
       end
 
