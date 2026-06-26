@@ -12,32 +12,23 @@ module Mime
 
     include Enumerable
 
-    def initialize
-      @mimes = []
-      @symbols = []
-      @symbols_set = Set.new
+    def initialize(mimes = [])
+      @mimes = mimes.freeze
+      @symbols = @mimes.map(&:to_sym).freeze
+      @symbols_set = @symbols.to_set.freeze
+      freeze
     end
 
     def each(&block)
       @mimes.each(&block)
     end
 
-    def <<(type)
-      @mimes << type
-      sym_type = type.to_sym
-      @symbols << sym_type
-      @symbols_set << sym_type
+    def add(type)
+      self.class.new(@mimes + [type])
     end
 
-    def delete_if
-      @mimes.delete_if do |x|
-        if yield x
-          sym_type = x.to_sym
-          @symbols.delete(sym_type)
-          @symbols_set.delete(sym_type)
-          true
-        end
-      end
+    def reject(&block)
+      self.class.new(@mimes.reject(&block))
     end
 
     def valid_symbols?(symbols) # :nodoc
@@ -89,6 +80,12 @@ module Mime
       remove_const(name)
       const_set(name, value.freeze)
       private_constant(name)
+    end
+
+    def replace_registry(value) # :nodoc:
+      remove_const(:REGISTRY)
+      const_set(:REGISTRY, value)
+      private_constant(:REGISTRY)
     end
   end
 
@@ -211,7 +208,7 @@ module Mime
       def register(string, symbol, mime_type_synonyms = [], extension_synonyms = [], skip_lookup = false)
         new_mime = Type.new(string, symbol, mime_type_synonyms).freeze
 
-        REGISTRY << new_mime
+        Mime.replace_registry(REGISTRY.add(new_mime))
         unless skip_lookup
           additions = ([string] + mime_type_synonyms).to_h { |str| [-str.to_s, new_mime] }
           Mime.replace_lookup(:LOOKUP_BY_STRING, LOOKUP_BY_STRING.merge(additions))
@@ -273,7 +270,7 @@ module Mime
       def unregister(symbol)
         symbol = symbol.downcase
         if mime = Mime[symbol]
-          REGISTRY.delete_if { |v| v.eql?(mime) }
+          Mime.replace_registry(REGISTRY.reject { |v| v.eql?(mime) })
           Mime.replace_lookup(:LOOKUP_BY_STRING, LOOKUP_BY_STRING.reject { |_, v| v.eql?(mime) })
           Mime.replace_lookup(:LOOKUP_BY_EXTENSION, LOOKUP_BY_EXTENSION.reject { |_, v| v.eql?(mime) })
         end
