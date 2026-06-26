@@ -108,12 +108,20 @@ module ActiveModel
       # Provide a class level cache for #to_partial_path. This is an
       # internal method and should not be accessed directly.
       def _to_partial_path # :nodoc:
-        @_to_partial_path ||= if respond_to?(:model_name)
+        return @_to_partial_path if @_to_partial_path
+
+        partial_path = if respond_to?(:model_name)
           "#{model_name.collection}/#{model_name.element}"
         else
           element = ActiveSupport::Inflector.underscore(ActiveSupport::Inflector.demodulize(name))
           collection = ActiveSupport::Inflector.tableize(name)
           "#{collection}/#{element}"
+        end
+
+        if ActiveSupport::Ractors.main?
+          @_to_partial_path = -partial_path
+        else
+          -partial_path
         end
       end
     end

@@ -267,12 +267,15 @@ module ActiveModel
     #   Person.model_name.singular # => "person"
     #   Person.model_name.plural   # => "people"
     def model_name
-      @_model_name ||= begin
+      return @_model_name if @_model_name
+      return ActiveSupport::Ractors.on_main(self) { model_name } unless ActiveSupport::Ractors.main?
+
+      @_model_name = ActiveSupport::Ractors.make_shareable(begin
         namespace = module_parents.detect do |n|
           n.respond_to?(:use_relative_model_naming?) && n.use_relative_model_naming?
         end
         ActiveModel::Name.new(self, namespace)
-      end
+      end)
     end
 
     # Returns the plural class name of a record or class.
