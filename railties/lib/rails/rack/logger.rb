@@ -33,6 +33,7 @@ module Rails
         def call_app(request, env) # :doc:
           logger_tag_pop_count = env["rails.rack_logger_tag_count"]
 
+          handle = nil
           instrumenter = ActiveSupport::Notifications.instrumenter
           handle = instrumenter.build_handle("request.action_dispatch", { request: request })
           handle.start
@@ -79,7 +80,7 @@ module Rails
         end
 
         def finish_request_instrumentation(handle, logger_tag_pop_count)
-          handle.finish
+          handle&.finish
           logger.pop_tags(logger_tag_pop_count) if logger.respond_to?(:pop_tags) && logger_tag_pop_count > 0
           ActiveSupport::LogSubscriber.flush_all!
         end
