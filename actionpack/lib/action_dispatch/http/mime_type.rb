@@ -203,7 +203,7 @@ module Mime
       end
 
       def register(string, symbol, mime_type_synonyms = [], extension_synonyms = [], skip_lookup = false)
-        new_mime = Type.new(string, symbol, mime_type_synonyms)
+        new_mime = Type.new(string, symbol, mime_type_synonyms).freeze
 
         REGISTRY << new_mime
         ([string] + mime_type_synonyms).each { |str| LOOKUP_BY_STRING[str] = new_mime } unless skip_lookup
@@ -283,8 +283,9 @@ module Mime
       unless MIME_REGEXP.match?(string)
         raise InvalidMimeType, "#{string.inspect} is not a valid MIME type"
       end
-      @symbol, @synonyms = symbol, synonyms
-      @string = string
+      @symbol = symbol
+      @synonyms = synonyms.map { |synonym| -synonym.to_s }.freeze
+      @string = -string.to_s
       @hash = [@string, @synonyms, @symbol].hash
     end
 
@@ -378,7 +379,7 @@ module Mime
   # ALL isn't a real MIME type, so we don't register it for lookup with the other
   # concrete types. It's a wildcard match that we use for `respond_to` negotiation
   # internals.
-  ALL = AllType.instance
+  ALL = AllType.instance.freeze
 
   class NullType
     include Singleton
