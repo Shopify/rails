@@ -14,31 +14,38 @@ module ActionView # :nodoc:
         base.register_template_handler :erb, ERB.new
         base.register_template_handler :html, Html.new
         base.register_template_handler :builder, Builder.new
-        base.register_template_handler :ruby, lambda { |_, source| source }
+        base.register_template_handler :ruby, ActiveSupport::Ractors.shareable_lambda { |_, source| source }
       end
 
-      @@template_handlers = {}
+      @@template_handlers = {}.freeze
+      @@template_extensions = [].freeze
       @@default_template_handlers = nil
 
       def self.extensions
-        @@template_extensions ||= @@template_handlers.keys
+        @@template_extensions
       end
 
       def register_template_handler(*extensions, handler)
         raise(ArgumentError, "Extension is required") if extensions.empty?
+        handler = ActiveSupport::Ractors.make_shareable(handler)
+        handlers = @@template_handlers
         extensions.each do |extension|
-          @@template_handlers[extension.to_sym] = handler
+          handlers = handlers.merge(extension.to_sym => handler)
         end
-        @@template_extensions = nil
+        @@template_handlers = handlers.freeze
+        @@template_extensions = @@template_handlers.keys.freeze
       end
 
       # Opposite to register_template_handler.
       def unregister_template_handler(*extensions)
+        handlers = @@template_handlers
         extensions.each do |extension|
-          handler = @@template_handlers.delete extension.to_sym
+          handler = handlers[extension.to_sym]
+          handlers = handlers.except(extension.to_sym)
           @@default_template_handlers = nil if @@default_template_handlers == handler
         end
-        @@template_extensions = nil
+        @@template_handlers = handlers.freeze
+        @@template_extensions = @@template_handlers.keys.freeze
       end
 
       def template_handler_extensions
@@ -51,7 +58,7 @@ module ActionView # :nodoc:
 
       def register_default_template_handler(extension, klass)
         register_template_handler(extension, klass)
-        @@default_template_handlers = klass
+        @@default_template_handlers = registered_template_handler(extension)
       end
 
       def handler_for_extension(extension)
