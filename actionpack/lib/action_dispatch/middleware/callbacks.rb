@@ -10,6 +10,7 @@ module ActionDispatch
     include ActiveSupport::Callbacks
 
     define_callbacks :call
+    self.__callbacks = __callbacks.transform_values(&:freeze).freeze
 
     class << self
       def before(*args, &block)
