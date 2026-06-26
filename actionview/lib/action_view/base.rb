@@ -223,8 +223,9 @@ module ActionView # :nodoc:
           # We can't implement these as self.class because subclasses will
           # share the same template cache as superclasses, so "changed?" won't work
           # correctly.
-          define_method(:compiled_method_container)           { subclass }
-          define_singleton_method(:compiled_method_container) { subclass }
+          compiled_method_container = ActiveSupport::Ractors.shareable_proc { subclass }
+          define_method(:compiled_method_container, &compiled_method_container)
+          define_singleton_method(:compiled_method_container, &compiled_method_container)
 
           def inspect
             "#<ActionView::Base:#{'%#016x' % (object_id << 1)}>"
