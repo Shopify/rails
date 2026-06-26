@@ -462,19 +462,27 @@ module ActiveRecord
       end
 
       def _returning_columns_for_insert(connection) # :nodoc:
-        @_returning_columns_for_insert ||= begin
+        return @_returning_columns_for_insert if @_returning_columns_for_insert
+
+        returning_columns = begin
           auto_populated_columns = columns.filter_map do |c|
             c.name if connection.return_value_after_insert?(c)
           end
 
           auto_populated_columns.empty? ? Array(primary_key) : auto_populated_columns
-        end
+        end.freeze
+
+        ActiveSupport::Ractors.main? ? (@_returning_columns_for_insert = returning_columns) : returning_columns
       end
 
       def _returning_columns_for_update(connection)
-        @_returning_columns_for_update ||= columns.filter_map do |c|
+        return @_returning_columns_for_update if @_returning_columns_for_update
+
+        returning_columns = columns.filter_map do |c|
           c.name if connection.return_value_after_update?(c)
-        end
+        end.freeze
+
+        ActiveSupport::Ractors.main? ? (@_returning_columns_for_update = returning_columns) : returning_columns
       end
 
       # Returns the column object for the named attribute.
