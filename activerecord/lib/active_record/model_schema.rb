@@ -510,8 +510,14 @@ module ActiveRecord
       end
 
       def symbol_column_to_string(name_symbol) # :nodoc:
-        @symbol_column_to_string_name_hash ||= column_names.index_by(&:to_sym)
-        @symbol_column_to_string_name_hash[name_symbol]
+        if @symbol_column_to_string_name_hash
+          @symbol_column_to_string_name_hash[name_symbol]
+        elsif ActiveSupport::Ractors.main?
+          @symbol_column_to_string_name_hash = ActiveSupport::Ractors.make_shareable(column_names.index_by(&:to_sym))
+          @symbol_column_to_string_name_hash[name_symbol]
+        else
+          column_names.index_by(&:to_sym)[name_symbol]
+        end
       end
 
       # Returns an array of column objects where the primary id, all columns ending in "_id" or "_count",
