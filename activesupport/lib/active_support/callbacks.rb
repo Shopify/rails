@@ -1009,7 +1009,11 @@ module ActiveSupport
               end
 
               def _#{name}_callbacks
-                __callbacks[#{name.inspect}]
+                if !::ActiveSupport::Ractors.main? && defined?(::ActiveRecord::Base) && self.class <= ::ActiveRecord::Base
+                  ::ActiveSupport::Ractors.on_main(self.class) { __callbacks.transform_values(&:freeze).freeze[#{name.inspect}] }
+                else
+                  __callbacks[#{name.inspect}]
+                end
               end
             RUBY
 
