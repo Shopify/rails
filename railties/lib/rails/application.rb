@@ -234,6 +234,11 @@ module Rails
           end
         end
       end
+      if defined?(::ActionController::Base)
+        ([::ActionController::Base] + ::ActionController::Base.descendants).each do |controller|
+          controller.ractor_share_wrapper_options! if controller.respond_to?(:ractor_share_wrapper_options!)
+        end
+      end
       ::ActiveSupport::Notifications.notifier.make_shareable! if defined?(::ActiveSupport::Notifications)
       ractor_make_shareable(::ActiveSupport.error_reporter) if defined?(::ActiveSupport.error_reporter)
       ractor_make_shareable(::ActiveSupport.event_reporter) if defined?(::ActiveSupport.event_reporter)

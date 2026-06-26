@@ -4,6 +4,7 @@
 
 require "active_support/core_ext/hash/slice"
 require "active_support/core_ext/hash/except"
+require "active_support/core_ext/kernel/ractor_shareability"
 require "active_support/core_ext/module/anonymous"
 require "action_dispatch/http/mime_type"
 
@@ -154,6 +155,23 @@ module ActionController
         end
       end
 
+      def make_shareable! # :nodoc:
+        return self if ractor_shareable?(self)
+
+        if klass
+          name
+          include
+        end
+
+        self.format = ractor_make_shareable(format) if format
+        self.include = ractor_make_shareable(self[:include]) if self[:include]
+        self.exclude = ractor_make_shareable(exclude) if exclude
+        self.name = ractor_make_shareable(self[:name]) if self[:name]
+        @mutex = nil
+
+        ractor_make_shareable(self)
+      end
+
       private
         # Determine the wrapper model from the controller's name. By convention, this
         # could be done by trying to find the defined model that has the same singular
@@ -248,6 +266,19 @@ module ActionController
           klass._wrapper_options = params
         end
         super
+      end
+
+      def ractor_share_wrapper_options! # :nodoc:
+        options = _wrapper_options
+        return unless options
+
+        unless options.klass
+          options = options.dup
+          options.klass = self
+          self._wrapper_options = options
+        end
+
+        options.make_shareable!
       end
     end
 
