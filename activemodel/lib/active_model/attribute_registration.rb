@@ -34,15 +34,21 @@ module ActiveModel
       end
 
       def _default_attributes # :nodoc:
-        @default_attributes ||= AttributeSet.new({}).tap do |attribute_set|
+        return @default_attributes if @default_attributes
+        return ActiveSupport::Ractors.on_main(self) { _default_attributes } unless ActiveSupport::Ractors.main?
+
+        @default_attributes = ActiveSupport::Ractors.make_shareable(AttributeSet.new({}).tap do |attribute_set|
           apply_pending_attribute_modifications(attribute_set)
-        end
+        end)
       end
 
       def attribute_types # :nodoc:
-        @attribute_types ||= _default_attributes.cast_types.tap do |hash|
+        return @attribute_types if @attribute_types
+        return ActiveSupport::Ractors.on_main(self) { attribute_types } unless ActiveSupport::Ractors.main?
+
+        @attribute_types = ActiveSupport::Ractors.make_shareable(_default_attributes.cast_types.tap do |hash|
           hash.default = Type.default_value
-        end
+        end)
       end
 
       def type_for_attribute(attribute_name, &block)

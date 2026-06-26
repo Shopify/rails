@@ -251,7 +251,10 @@ module ActiveRecord
       end
 
       def _default_attributes # :nodoc:
-        @default_attributes ||= begin
+        return @default_attributes if @default_attributes
+        return ActiveSupport::Ractors.on_main(self) { _default_attributes } unless ActiveSupport::Ractors.main?
+
+        @default_attributes = ActiveSupport::Ractors.make_shareable(begin
           attributes_hash = columns_hash.transform_values do |column|
             ActiveModel::Attribute.from_database(column.name, column.default, type_for_column(column))
           end
@@ -259,7 +262,7 @@ module ActiveRecord
           attribute_set = ActiveModel::AttributeSet.new(attributes_hash)
           apply_pending_attribute_modifications(attribute_set)
           attribute_set
-        end
+        end)
       end
 
       ##
