@@ -683,10 +683,17 @@ module Rails
       Ractor.make_shareable(Rails.backtrace_cleaner)
       Ractor.make_shareable(Rails.event)
       Ractor.make_shareable(Rails.error)
-      if defined?(I18n) && I18n.respond_to?(:fallbacks)
-        fallbacks = I18n.fallbacks
-        ([I18n.locale, I18n.default_locale] + I18n.available_locales).uniq.each { |locale| fallbacks[locale] }
-        Ractor.make_shareable(fallbacks)
+      if defined?(I18n)
+        available_locales = I18n.available_locales
+        I18n.available_locales = available_locales
+        Ractor.make_shareable(I18n.available_locales)
+        Ractor.make_shareable(I18n.config.available_locales_set)
+
+        if I18n.respond_to?(:fallbacks)
+          fallbacks = I18n.fallbacks
+          ([I18n.locale, I18n.default_locale] + I18n.available_locales).uniq.each { |locale| fallbacks[locale] }
+          Ractor.make_shareable(fallbacks)
+        end
       end
 
       @autoloaders, @reloaders, @routes_reloader = nil, nil, nil
