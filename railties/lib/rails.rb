@@ -72,14 +72,16 @@ module Rails
     #   Rails.env.production? # => false
     #   Rails.env.local? # => true              true for "development" and "test", false for anything else
     def env
-      @_env ||= ActiveSupport::EnvironmentInquirer.new(ENV["RAILS_ENV"].presence || ENV["RACK_ENV"].presence || "development")
+      @_env ||= ActiveSupport::Ractors.make_shareable(
+        ActiveSupport::EnvironmentInquirer.new(ENV["RAILS_ENV"].presence || ENV["RACK_ENV"].presence || "development")
+      )
     end
 
     # Sets the \Rails environment.
     #
     #   Rails.env = "staging" # => "staging"
     def env=(environment)
-      @_env = ActiveSupport::EnvironmentInquirer.new(environment)
+      @_env = ActiveSupport::Ractors.make_shareable(ActiveSupport::EnvironmentInquirer.new(environment))
     end
 
     # Returns the ActiveSupport::ErrorReporter instance used for reporting
