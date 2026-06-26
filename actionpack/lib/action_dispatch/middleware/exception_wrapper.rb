@@ -258,6 +258,8 @@ module ActionDispatch
       attr_reader :backtrace
 
       def build_backtrace
+        return @exception.backtrace_locations || [] unless ActiveSupport::Ractors.main?
+
         built_methods = {}
 
         ActionView::PathRegistry.all_resolvers.each do |resolver|
