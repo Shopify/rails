@@ -613,9 +613,9 @@ module ActionMailer
       end
 
       def action_methods
-        methods = super
+        methods = super.dup
         methods.add("mail") if self == ActionMailer::Base
-        methods
+        methods.freeze
       end
 
     private
