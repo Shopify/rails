@@ -249,8 +249,8 @@ module ActiveSupport
           @name            = name
           @kind            = kind
           @shareable       = shareable
-          @original_filter = filter
           @filter          = shareable ? try_shareable_proc(filter) : filter
+          @original_filter = shareable && filter.is_a?(Proc) ? filter.object_id : @filter
           @if              = check_conditionals(options[:if])
           @unless          = check_conditionals(options[:unless])
 
@@ -690,9 +690,10 @@ module ActiveSupport
         def freeze
           return self if frozen?
 
+          @config.each_value(&:freeze)
           @chain.each(&:freeze)
-          compile(nil)
-          CALLBACK_FILTER_TYPES.each { |type| compile(type) }
+          compile(nil).freeze
+          CALLBACK_FILTER_TYPES.each { |type| compile(type).freeze }
           @chain.freeze
           @config.freeze
           @single_callbacks.freeze
@@ -1009,12 +1010,6 @@ module ActiveSupport
             __callbacks[name.to_sym]
           end
 
-          def freeze # :nodoc:
-            descendants.prepend(self).each do |target|
-              target.__callbacks = Ractors.make_shareable(target.__callbacks)
-            end
-          end
-
           def set_callbacks(name, callbacks) # :nodoc:
             name = name.to_sym
             callback_sets = __callbacks.dup
@@ -1023,9 +1018,16 @@ module ActiveSupport
               alias_method("_run_#{name}_callbacks", "_run_#{name}_callbacks!")
             end
             callback_sets[name] = callbacks
-            ractor_shareable = !__callbacks.empty? && Ractors.shareable?(__callbacks)
+            ractor_shareable =
+              (!__callbacks.empty? && Ractors.shareable?(__callbacks)) ||
+              (defined?(ActiveSupport::ExecutionWrapper) &&
+                ActiveSupport::ExecutionWrapper.respond_to?(:ractor_shareable_callbacks?) &&
+                self <= ActiveSupport::ExecutionWrapper &&
+                ractor_shareable_callbacks?)
+
             self.__callbacks = if ractor_shareable
-              Ractors.make_shareable(callback_sets)
+              callback_sets.each_value(&:freeze)
+              callback_sets.freeze
             else
               callback_sets
             end

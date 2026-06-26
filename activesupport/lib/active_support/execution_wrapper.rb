@@ -15,25 +15,37 @@ module ActiveSupport
     define_callbacks :complete
 
     def self.to_run(*args, &block)
+      block = Ractors.shareable_proc(&block) if block && ractor_shareable_callbacks?
       set_callback(:run, *args, &block)
     end
 
     def self.to_complete(*args, &block)
+      block = Ractors.shareable_proc(&block) if block && ractor_shareable_callbacks?
       set_callback(:complete, *args, &block)
     end
 
-    RunHook = Struct.new(:hook) do # :nodoc:
+    class RunHook # :nodoc:
+      def initialize(hook)
+        @hook = hook
+        freeze
+      end
+
       def before(target)
         hook_state = target.send(:hook_state)
-        hook_state[hook] = hook.run
+        hook_state[@hook] = @hook.run
       end
     end
 
-    CompleteHook = Struct.new(:hook) do # :nodoc:
+    class CompleteHook # :nodoc:
+      def initialize(hook)
+        @hook = hook
+        freeze
+      end
+
       def before(target)
         hook_state = target.send(:hook_state)
-        if hook_state.key?(hook)
-          hook.complete hook_state[hook]
+        if hook_state.key?(@hook)
+          @hook.complete hook_state[@hook]
         end
       end
       alias after before
@@ -48,8 +60,8 @@ module ActiveSupport
     # a preceding +to_run+ block; all ordinary +to_complete+ blocks are
     # invoked in that situation.)
     def self.register_hook(hook, outer: false)
-      run_hook = RunHook.new(hook).freeze
-      complete_hook = CompleteHook.new(hook).freeze
+      run_hook = RunHook.new(hook)
+      complete_hook = CompleteHook.new(hook)
 
       if outer
         to_run run_hook, prepend: true
@@ -143,6 +155,12 @@ module ActiveSupport
 
     def complete # :nodoc:
       run_callbacks(:complete)
+    end
+
+    def self.ractor_shareable_callbacks? # :nodoc:
+      Ractors.unshareable_proc_action &&
+        defined?(ActiveSupport::Executor) && self <= ActiveSupport::Executor &&
+        !(defined?(ActiveSupport::Reloader) && self < ActiveSupport::Reloader)
     end
 
     private
