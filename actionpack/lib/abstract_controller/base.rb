@@ -117,7 +117,7 @@ module AbstractController
       #     MyApp::MyPostsController.controller_path # => "my_app/my_posts"
       #
       def controller_path
-        @controller_path ||= name.delete_suffix("Controller").underscore unless anonymous?
+        -name.delete_suffix("Controller").underscore unless anonymous?
       end
 
       def configure # :nodoc:
