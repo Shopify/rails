@@ -70,7 +70,7 @@ module ActiveModel
     included do
       @attribute_method_patterns_cache = Concurrent::Map.new(initial_capacity: 4)
       class_attribute :attribute_aliases, instance_writer: false, default: {}.freeze
-      class_attribute :attribute_method_patterns, instance_writer: false, default: [ ClassMethods::AttributeMethodPattern.new ]
+      class_attribute :attribute_method_patterns, instance_writer: false, default: [ ClassMethods::AttributeMethodPattern.new ].freeze
     end
 
     module ClassMethods
@@ -105,7 +105,7 @@ module ActiveModel
       #   person.clear_name
       #   person.name          # => nil
       def attribute_method_prefix(*prefixes, parameters: nil)
-        self.attribute_method_patterns += prefixes.map! { |prefix| AttributeMethodPattern.new(prefix: prefix, parameters: parameters) }
+        self.attribute_method_patterns = (attribute_method_patterns + prefixes.map! { |prefix| AttributeMethodPattern.new(prefix: prefix, parameters: parameters) }).freeze
         undefine_attribute_methods
       end
 
@@ -139,7 +139,7 @@ module ActiveModel
       #   person.name          # => "Bob"
       #   person.name_short?   # => true
       def attribute_method_suffix(*suffixes, parameters: nil)
-        self.attribute_method_patterns += suffixes.map! { |suffix| AttributeMethodPattern.new(suffix: suffix, parameters: parameters) }
+        self.attribute_method_patterns = (attribute_method_patterns + suffixes.map! { |suffix| AttributeMethodPattern.new(suffix: suffix, parameters: parameters) }).freeze
         undefine_attribute_methods
       end
 
@@ -174,7 +174,7 @@ module ActiveModel
       #   person.reset_name_to_default!
       #   person.name                         # => 'Default Name'
       def attribute_method_affix(*affixes)
-        self.attribute_method_patterns += affixes.map! { |affix| AttributeMethodPattern.new(**affix) }
+        self.attribute_method_patterns = (attribute_method_patterns + affixes.map! { |affix| AttributeMethodPattern.new(**affix) }).freeze
         undefine_attribute_methods
       end
 
@@ -407,6 +407,8 @@ module ActiveModel
         end
 
         def attribute_method_patterns_matching(method_name)
+          return attribute_method_patterns.filter_map { |pattern| pattern.match(method_name) } unless ActiveSupport::Ractors.main?
+
           @attribute_method_patterns_cache.compute_if_absent(method_name) do
             attribute_method_patterns.filter_map { |pattern| pattern.match(method_name) }
           end
@@ -462,12 +464,13 @@ module ActiveModel
           AttributeMethod = Struct.new(:proxy_target, :attr_name)
 
           def initialize(prefix: "", suffix: "", parameters: nil)
-            @prefix = prefix
-            @suffix = suffix
-            @parameters = parameters.nil? ? "..." : parameters
+            @prefix = -prefix.to_s
+            @suffix = -suffix.to_s
+            @parameters = parameters.nil? ? "..." : (parameters == false ? false : -parameters.to_s)
             @regex = /\A(?:#{Regexp.escape(@prefix)})(.*)(?:#{Regexp.escape(@suffix)})\z/
-            @proxy_target = "#{@prefix}attribute#{@suffix}"
-            @method_name = "#{prefix}%s#{suffix}"
+            @proxy_target = -"#{@prefix}attribute#{@suffix}"
+            @method_name = -"#{prefix}%s#{suffix}"
+            freeze
           end
 
           def match(method_name)
