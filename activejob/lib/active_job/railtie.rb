@@ -86,13 +86,13 @@ module ActiveJob
       end
     end
 
-    initializer "active_job.set_reloader_hook" do |app|
+    initializer "active_job.set_reloader_hook" do |_app|
       ActiveSupport.on_load(:active_job) do
-        ActiveJob::Callbacks.singleton_class.set_callback(:execute, :around, prepend: true) do |_, inner|
-          app.reloader.wrap do
+        ActiveJob::Callbacks.singleton_class.set_callback(:execute, :around, ActiveSupport::Ractors.shareable_proc { |_, inner|
+          Rails.application.reloader.wrap do
             inner.call
           end
-        end
+        }, prepend: true)
       end
     end
 

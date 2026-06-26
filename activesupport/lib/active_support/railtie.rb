@@ -49,21 +49,21 @@ module ActiveSupport
     end
 
     initializer "active_support.reset_execution_context" do |app|
-      app.reloader.before_class_unload do
+      app.reloader.before_class_unload(&ActiveSupport::Ractors.shareable_proc do
         ActiveSupport::CurrentAttributes.clear_all
         ActiveSupport::ExecutionContext.flush
         ActiveSupport.event_reporter.clear_context
-      end
+      end)
 
-      app.executor.to_run do
+      app.executor.to_run(&ActiveSupport::Ractors.shareable_proc do
         ActiveSupport::ExecutionContext.push
-      end
+      end)
 
-      app.executor.to_complete do
+      app.executor.to_complete(&ActiveSupport::Ractors.shareable_proc do
         ActiveSupport::CurrentAttributes.clear_all
         ActiveSupport::ExecutionContext.pop
         ActiveSupport.event_reporter.clear_context
-      end
+      end)
 
       ActiveSupport.on_load(:active_support_test_case) do
         if app.config.active_support.executor_around_test_case

@@ -238,18 +238,19 @@ module ActiveSupport
             MSG
           end
 
-          new chain.name, filter, kind, options, chain.config
+          new chain.name, filter, kind, options, chain.config, Ractors.shareable?(chain)
         end
 
         attr_accessor :kind, :name
         attr_reader :chain_config, :filter
 
-        def initialize(name, filter, kind, options, chain_config)
+        def initialize(name, filter, kind, options, chain_config, shareable = false)
           @chain_config = chain_config
           @name            = name
           @kind            = kind
+          @shareable       = shareable
           @original_filter = filter
-          @filter          = try_shareable_proc(filter)
+          @filter          = shareable ? try_shareable_proc(filter) : filter
           @if              = check_conditionals(options[:if])
           @unless          = check_conditionals(options[:unless])
 
@@ -289,9 +290,9 @@ module ActiveSupport
 
               case kind
               when :before
-                Filters::Before.new(user_callback.make_lambda, user_conditions, chain_config, @filter, name)
+                Filters::Before.new(user_callback.make_lambda(shareable: @shareable), user_conditions, chain_config, @filter, name)
               when :after
-                Filters::After.new(user_callback.make_lambda, user_conditions, chain_config)
+                Filters::After.new(user_callback.make_lambda(shareable: @shareable), user_conditions, chain_config)
               when :around
                 Filters::Around.new(user_callback, user_conditions)
               end
@@ -301,6 +302,8 @@ module ActiveSupport
         def freeze # :nodoc:
           return self if frozen?
 
+          @shareable = true
+          @filter = try_shareable_proc(@filter)
           @filter = Ractors.make_shareable(@filter)
           @if = make_conditionals_ractor_shareable(@if)
           @unless = make_conditionals_ractor_shareable(@unless)
@@ -336,13 +339,13 @@ module ActiveSupport
               MSG
             end
 
-            conditionals.map! { |conditional| try_shareable_proc(conditional) }
+            conditionals.map! { |conditional| @shareable ? try_shareable_proc(conditional) : conditional }
           end
 
           def conditions_lambdas
             conditions =
-              @if.map { |c| CallTemplate.build(c, self).make_lambda } +
-              @unless.map { |c| CallTemplate.build(c, self).inverted_lambda }
+              @if.map { |c| CallTemplate.build(c, self).make_lambda(shareable: @shareable) } +
+              @unless.map { |c| CallTemplate.build(c, self).inverted_lambda(shareable: @shareable) }
             conditions.empty? ? EMPTY_ARRAY : conditions.freeze
           end
 
@@ -353,7 +356,7 @@ module ActiveSupport
           def make_conditionals_ractor_shareable(conditionals)
             return conditionals if conditionals.empty?
 
-            Ractors.make_shareable(conditionals)
+            Ractors.make_shareable(conditionals.map { |conditional| try_shareable_proc(conditional) })
           end
       end
 
@@ -382,16 +385,16 @@ module ActiveSupport
             [target, block, @method_name]
           end
 
-          def make_lambda
+          def make_lambda(shareable: false)
             method_name = @method_name
-            Ractors.shareable_proc do |target, value, &block|
+            CallTemplate.build_lambda(shareable) do |target, value, &block|
               target.send(method_name, &block)
             end
           end
 
-          def inverted_lambda
+          def inverted_lambda(shareable: false)
             method_name = @method_name
-            Ractors.shareable_proc do |target, value, &block|
+            CallTemplate.build_lambda(shareable) do |target, value, &block|
               !target.send(method_name, &block)
             end
           end
@@ -407,18 +410,18 @@ module ActiveSupport
             [@override_target || target, block, @method_name, target]
           end
 
-          def make_lambda
+          def make_lambda(shareable: false)
             override_target = @override_target
             method_name = @method_name
-            Ractors.try_shareable_proc do |target, value, &block|
+            CallTemplate.build_lambda(shareable) do |target, value, &block|
               (override_target || target).send(method_name, target, &block)
             end
           end
 
-          def inverted_lambda
+          def inverted_lambda(shareable: false)
             override_target = @override_target
             method_name = @method_name
-            Ractors.try_shareable_proc do |target, value, &block|
+            CallTemplate.build_lambda(shareable) do |target, value, &block|
               !(override_target || target).send(method_name, target, &block)
             end
           end
@@ -433,16 +436,16 @@ module ActiveSupport
             [target, @override_block, :instance_exec]
           end
 
-          def make_lambda
+          def make_lambda(shareable: false)
             override_block = @override_block
-            Ractors.try_shareable_proc do |target, value, &block|
+            CallTemplate.build_lambda(shareable) do |target, value, &block|
               target.instance_exec(&override_block)
             end
           end
 
-          def inverted_lambda
+          def inverted_lambda(shareable: false)
             override_block = @override_block
-            Ractors.try_shareable_proc do |target, value, &block|
+            CallTemplate.build_lambda(shareable) do |target, value, &block|
               !target.instance_exec(&override_block)
             end
           end
@@ -457,16 +460,16 @@ module ActiveSupport
             [target, @override_block, :instance_exec, target]
           end
 
-          def make_lambda
+          def make_lambda(shareable: false)
             override_block = @override_block
-            Ractors.try_shareable_proc do |target, value, &block|
+            CallTemplate.build_lambda(shareable) do |target, value, &block|
               target.instance_exec(target, &override_block)
             end
           end
 
-          def inverted_lambda
+          def inverted_lambda(shareable: false)
             override_block = @override_block
-            Ractors.try_shareable_proc do |target, value, &block|
+            CallTemplate.build_lambda(shareable) do |target, value, &block|
               !target.instance_exec(target, &override_block)
             end
           end
@@ -482,17 +485,17 @@ module ActiveSupport
             [target, @override_block || block, :instance_exec, target, block]
           end
 
-          def make_lambda
+          def make_lambda(shareable: false)
             override_block = @override_block
-            Ractors.try_shareable_proc do |target, value, &block|
+            CallTemplate.build_lambda(shareable) do |target, value, &block|
               raise ArgumentError unless block
               target.instance_exec(target, block, &override_block)
             end
           end
 
-          def inverted_lambda
+          def inverted_lambda(shareable: false)
             override_block = @override_block
-            Ractors.try_shareable_proc do |target, value, &block|
+            CallTemplate.build_lambda(shareable) do |target, value, &block|
               raise ArgumentError unless block
               !target.instance_exec(target, block, &override_block)
             end
@@ -508,19 +511,23 @@ module ActiveSupport
             [@override_target || target, block, :call, target, value]
           end
 
-          def make_lambda
+          def make_lambda(shareable: false)
             override_target = @override_target
-            Ractors.shareable_proc do |target, value, &block|
+            CallTemplate.build_lambda(shareable) do |target, value, &block|
               (override_target || target).call(target, value, &block)
             end
           end
 
-          def inverted_lambda
+          def inverted_lambda(shareable: false)
             override_target = @override_target
-            Ractors.shareable_proc do |target, value, &block|
+            CallTemplate.build_lambda(shareable) do |target, value, &block|
               !(override_target || target).call(target, value, &block)
             end
           end
+        end
+
+        def self.build_lambda(shareable, &block)
+          shareable ? Ractors.try_shareable_proc(&block) : block
         end
 
         # Filters support:
@@ -1016,8 +1023,7 @@ module ActiveSupport
               alias_method("_run_#{name}_callbacks", "_run_#{name}_callbacks!")
             end
             callback_sets[name] = callbacks
-            ractor_shareable = Ractors.unshareable_proc_action == :raise ||
-              (!__callbacks.empty? && Ractors.shareable?(__callbacks))
+            ractor_shareable = !__callbacks.empty? && Ractors.shareable?(__callbacks)
             self.__callbacks = if ractor_shareable
               Ractors.make_shareable(callback_sets)
             else

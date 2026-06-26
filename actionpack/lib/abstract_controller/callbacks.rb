@@ -40,9 +40,10 @@ module AbstractController
 
     class ActionFilter # :nodoc:
       def initialize(filters, conditional_key, actions)
-        @filters = filters.to_a
+        @filters = filters.to_a.freeze
         @conditional_key = conditional_key
-        @actions = Array(actions).map(&:to_s).to_set
+        @actions = Array(actions).map { |action| -action.to_s }.to_set.freeze
+        freeze
       end
 
       def match?(controller)

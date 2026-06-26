@@ -48,12 +48,15 @@ module ActiveSupport
     # a preceding +to_run+ block; all ordinary +to_complete+ blocks are
     # invoked in that situation.)
     def self.register_hook(hook, outer: false)
+      run_hook = RunHook.new(hook).freeze
+      complete_hook = CompleteHook.new(hook).freeze
+
       if outer
-        to_run RunHook.new(hook), prepend: true
-        to_complete :after, CompleteHook.new(hook)
+        to_run run_hook, prepend: true
+        to_complete :after, complete_hook
       else
-        to_run RunHook.new(hook)
-        to_complete CompleteHook.new(hook)
+        to_run run_hook
+        to_complete complete_hook
       end
     end
 

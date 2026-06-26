@@ -671,10 +671,10 @@ module Rails
       end
     end
 
-    initializer :wrap_reloader_around_load_seed do |app|
-      self.class.set_callback(:load_seed, :around) do |engine, seeds_block|
-        app.reloader.wrap(&seeds_block)
-      end
+    initializer :wrap_reloader_around_load_seed do |_app|
+      self.class.set_callback(:load_seed, :around, ActiveSupport::Ractors.shareable_proc { |_engine, seeds_block|
+        Rails.application.reloader.wrap(&seeds_block)
+      })
     end
 
     initializer :engines_blank_point do
