@@ -22,8 +22,10 @@ module ActiveRecord
         self.class == other.class && value == other.value && name == other.name
       end
 
+      EMPTY = new(nil, nil).freeze
+
       def self.empty
-        @empty ||= new(nil, nil).freeze
+        EMPTY
       end
     end
   end
