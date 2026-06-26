@@ -422,6 +422,8 @@ module ActiveRecord
       end
 
       def cached_find_by_statement(connection, key, &block) # :nodoc:
+        return StatementCache.create(connection, &block) unless ActiveSupport::Ractors.main?
+
         cache = @find_by_statement_cache[connection.prepared_statements]
         cache.compute_if_absent(key) { StatementCache.create(connection, &block) }
       end
