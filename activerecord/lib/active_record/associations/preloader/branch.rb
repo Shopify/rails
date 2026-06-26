@@ -165,6 +165,8 @@ module ActiveRecord
             end
             return records if associated_records.empty?
 
+            return associated_records if associated_records.any?(&:new_record?)
+
             associated_records_by_key = associated_records.index_by { |record| [record.class.base_class, record.id] }
             records.map do |record|
               associated_records_by_key.fetch([record.class.base_class, record.id], record)
