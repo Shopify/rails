@@ -174,10 +174,15 @@ module Rails
         assets.resolver if assets.respond_to?(:resolver)
         assets.prefix if assets.respond_to?(:prefix)
         if assets.respond_to?(:load_path)
-          assets.load_path.assets if assets.load_path.respond_to?(:assets)
-          if assets.load_path.respond_to?(:find)
-            assets.load_path.find("app.css")
-            assets.load_path.find("application.css")
+          load_path = assets.load_path
+          load_path.assets if load_path.respond_to?(:assets)
+          if load_path.respond_to?(:find)
+            load_path.find("app.css")
+            load_path.find("application.css")
+          end
+          load_path.asset_paths_by_type("css") if load_path.respond_to?(:asset_paths_by_type)
+          if load_path.respond_to?(:asset_paths_by_glob)
+            load_path.asset_paths_by_glob("#{root.join("app/assets")}/**/*.css")
           end
         end
       end
