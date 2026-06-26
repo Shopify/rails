@@ -29,7 +29,7 @@ module ActiveSupport
     # singularization rules that is runs. This guarantees that your rules run
     # before any of the rules that may already have been loaded.
     class Inflections
-      @__instance__ = Concurrent::Map.new
+      @__instance__ = {}.freeze
       @__en_instance__ = nil
 
       class Uncountables # :nodoc:
@@ -39,6 +39,11 @@ module ActiveSupport
 
         def initialize
           @members = []
+          @pattern = nil
+        end
+
+        def initialize_dup(other)
+          @members = other.instance_variable_get(:@members).dup
           @pattern = nil
         end
 
@@ -68,16 +73,25 @@ module ActiveSupport
         def uncountable?(str)
           if @pattern.nil?
             members_pattern = Regexp.union(@members.map { |w| /#{Regexp.escape(w)}/i })
-            @pattern = /\b#{members_pattern}\Z/i
+            @pattern = /\b#{members_pattern}\Z/i.freeze
           end
           @pattern.match?(str)
+        end
+
+        def freeze
+          return self if frozen?
+
+          uncountable?("") unless @members.empty?
+          @members.each(&:freeze)
+          @members.freeze
+          super
         end
       end
 
       def self.instance(locale = :en)
-        return @__en_instance__ ||= new if locale == :en
+        return @__en_instance__ ||= new.freeze if locale == :en
 
-        @__instance__[locale] ||= new
+        @__instance__[locale] || store(locale, new)
       end
 
       def self.instance_or_fallback(locale)
@@ -89,6 +103,23 @@ module ActiveSupport
         end
         instance(locale)
       end
+
+      def self.update(locale = :en)
+        inflections = instance(locale).dup
+        yield inflections
+        store(locale, inflections)
+      end
+
+      def self.store(locale, inflections)
+        inflections.freeze
+
+        if locale == :en
+          @__en_instance__ = inflections
+        else
+          @__instance__ = @__instance__.merge(locale => inflections).freeze
+        end
+      end
+      private_class_method :store
 
       attr_reader :plurals, :singulars, :uncountables, :humans, :acronyms
 
@@ -105,6 +136,24 @@ module ActiveSupport
           instance_variable_set("@#{scope}", orig.public_send(scope).dup)
         end
         define_acronym_regex_patterns
+      end
+
+      def freeze
+        return self if frozen?
+
+        @plurals.each { |pair| pair.each(&:freeze).freeze }
+        @singulars.each { |pair| pair.each(&:freeze).freeze }
+        @humans.each { |pair| pair.each(&:freeze).freeze }
+        @acronyms.each { |key, value| key.freeze; value.freeze }
+        @plurals.freeze
+        @singulars.freeze
+        @uncountables.freeze
+        @humans.freeze
+        @acronyms.freeze
+        @acronym_regex.freeze
+        @acronyms_camelize_regex.freeze
+        @acronyms_underscore_regex.freeze
+        super
       end
 
       # Specifies a new acronym. An acronym must be specified as it will appear
@@ -266,9 +315,9 @@ module ActiveSupport
       private
         def define_acronym_regex_patterns
           sorted_acronyms = @acronyms.empty? ? [] : @acronyms.values.sort_by { |a| -a.length }
-          @acronym_regex             = sorted_acronyms.empty? ? /(?=a)b/ : /#{sorted_acronyms.join("|")}/
-          @acronyms_camelize_regex   = /^(?:#{@acronym_regex}(?=\b|[A-Z_])|\w)/
-          @acronyms_underscore_regex = /(?:(?<=([A-Za-z\d]))|\b)(#{@acronym_regex})(?=\b|[^a-z])/
+          @acronym_regex             = (sorted_acronyms.empty? ? /(?=a)b/ : /#{sorted_acronyms.join("|")}/).freeze
+          @acronyms_camelize_regex   = /^(?:#{@acronym_regex}(?=\b|[A-Z_])|\w)/.freeze
+          @acronyms_underscore_regex = /(?:(?<=([A-Za-z\d]))|\b)(#{@acronym_regex})(?=\b|[^a-z])/.freeze
         end
     end
 
@@ -282,7 +331,7 @@ module ActiveSupport
     #   end
     def inflections(locale = :en)
       if block_given?
-        yield Inflections.instance(locale)
+        Inflections.update(locale) { |inflect| yield inflect }
       else
         Inflections.instance_or_fallback(locale)
       end
