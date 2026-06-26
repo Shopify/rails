@@ -45,6 +45,8 @@ module ActionDispatch
         #     ActionDispatch::Request.parameter_parsers = new_parsers
         def parameter_parsers=(parsers)
           @parameter_parsers = parsers.transform_keys { |key| key.respond_to?(:symbol) ? key.symbol : key }
+            .transform_values { |parser| parser.is_a?(Proc) ? ActiveSupport::Ractors.try_shareable_proc(parser) : parser }
+            .freeze
         end
       end
 
