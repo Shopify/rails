@@ -79,8 +79,22 @@ module ActionController # :nodoc:
     included do
       # Sets the token parameter name for RequestForgery. Calling
       # `protect_from_forgery` sets it to `:authenticity_token` by default.
-      singleton_class.delegate :request_forgery_protection_token, :request_forgery_protection_token=, to: :config
-      delegate :request_forgery_protection_token, :request_forgery_protection_token=, to: :config
+      def self.request_forgery_protection_token
+        ActiveSupport::Ractors.main? ? config.request_forgery_protection_token : :authenticity_token
+      end
+
+      def self.request_forgery_protection_token=(value)
+        config.request_forgery_protection_token = value
+      end
+
+      def request_forgery_protection_token
+        ActiveSupport::Ractors.main? ? config.request_forgery_protection_token : :authenticity_token
+      end
+
+      def request_forgery_protection_token=(value)
+        config.request_forgery_protection_token = value
+      end
+
       self.request_forgery_protection_token ||= :authenticity_token
 
       # Holds the class which implements the request forgery protection.
@@ -90,8 +104,22 @@ module ActionController # :nodoc:
 
       # Controls whether request forgery protection is turned on or not. Turned off by
       # default only in test mode.
-      singleton_class.delegate :allow_forgery_protection, :allow_forgery_protection=, to: :config
-      delegate :allow_forgery_protection, :allow_forgery_protection=, to: :config
+      def self.allow_forgery_protection
+        ActiveSupport::Ractors.main? ? config.allow_forgery_protection : true
+      end
+
+      def self.allow_forgery_protection=(value)
+        config.allow_forgery_protection = value
+      end
+
+      def allow_forgery_protection
+        ActiveSupport::Ractors.main? ? config.allow_forgery_protection : true
+      end
+
+      def allow_forgery_protection=(value)
+        config.allow_forgery_protection = value
+      end
+
       self.allow_forgery_protection = true if allow_forgery_protection.nil?
 
       # Controls whether a CSRF failure logs a warning. On by default.
@@ -105,13 +133,41 @@ module ActionController # :nodoc:
       self.forgery_protection_origin_check = false
 
       # Controls whether form-action/method specific CSRF tokens are used.
-      singleton_class.delegate :per_form_csrf_tokens, :per_form_csrf_tokens=, to: :config
-      delegate :per_form_csrf_tokens, :per_form_csrf_tokens=, to: :config
+      def self.per_form_csrf_tokens
+        ActiveSupport::Ractors.main? ? config.per_form_csrf_tokens : false
+      end
+
+      def self.per_form_csrf_tokens=(value)
+        config.per_form_csrf_tokens = value
+      end
+
+      def per_form_csrf_tokens
+        ActiveSupport::Ractors.main? ? config.per_form_csrf_tokens : false
+      end
+
+      def per_form_csrf_tokens=(value)
+        config.per_form_csrf_tokens = value
+      end
+
       self.per_form_csrf_tokens = false
 
       # The strategy to use for storing and retrieving CSRF tokens.
-      singleton_class.delegate :csrf_token_storage_strategy, :csrf_token_storage_strategy=, to: :config
-      delegate :csrf_token_storage_strategy, :csrf_token_storage_strategy=, to: :config
+      def self.csrf_token_storage_strategy
+        ActiveSupport::Ractors.main? ? config.csrf_token_storage_strategy : SessionStore.new.freeze
+      end
+
+      def self.csrf_token_storage_strategy=(value)
+        config.csrf_token_storage_strategy = value
+      end
+
+      def csrf_token_storage_strategy
+        ActiveSupport::Ractors.main? ? config.csrf_token_storage_strategy : SessionStore.new.freeze
+      end
+
+      def csrf_token_storage_strategy=(value)
+        config.csrf_token_storage_strategy = value
+      end
+
       self.csrf_token_storage_strategy = SessionStore.new
 
       # The strategy to use for verifying requests. Options are:
