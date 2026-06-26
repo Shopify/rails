@@ -237,6 +237,8 @@ module Rails
         ::I18n.fallbacks[::I18n.default_locale]
         ractor_make_shareable(::I18n.fallbacks)
         ::I18n.default_separator if ::I18n.respond_to?(:default_separator)
+        ractor_make_shareable(::I18n::RESERVED_KEYS) if defined?(::I18n::RESERVED_KEYS)
+        ractor_make_shareable(::I18n.reserved_keys_pattern) if ::I18n.respond_to?(:reserved_keys_pattern)
         if ::I18n.respond_to?(:backend)
           ::I18n.backend.eager_load! if ::I18n.backend.respond_to?(:eager_load!)
           ractor_make_shareable(::I18n.backend)
