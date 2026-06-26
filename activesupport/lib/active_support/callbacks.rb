@@ -95,7 +95,11 @@ module ActiveSupport
     # smoothly through and into the supplied block, we want as little evidence
     # as possible that we were here.
     def run_callbacks(kind, type = nil)
-      callbacks = __callbacks[kind.to_sym]
+      callbacks = if !Ractors.main? && defined?(ActiveRecord::Base) && self.class <= ActiveRecord::Base
+        Ractors.on_main(self.class) { __callbacks.transform_values(&:freeze).freeze[kind.to_sym] }
+      else
+        __callbacks[kind.to_sym]
+      end
 
       if callbacks.empty?
         yield if block_given?
