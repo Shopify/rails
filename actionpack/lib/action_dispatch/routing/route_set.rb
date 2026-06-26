@@ -390,7 +390,7 @@ module ActionDispatch
       def initialize(config = DEFAULT_CONFIG.dup)
         self.named_routes = NamedRouteCollection.new
         self.resources_path_names = self.class.default_resources_path_names
-        self.default_url_options = {}
+        self.default_url_options = {}.freeze
         self.draw_paths = []
 
         @config                     = config
