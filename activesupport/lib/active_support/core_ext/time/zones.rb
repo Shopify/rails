@@ -7,7 +7,11 @@ require "active_support/core_ext/date_and_time/zones"
 class Time
   include DateAndTime::Zones
   class << self
-    attr_accessor :zone_default
+    attr_reader :zone_default
+
+    def zone_default=(zone)
+      @zone_default = ActiveSupport::Ractors.make_shareable(zone)
+    end
 
     # Returns the TimeZone for the current request, if this has been set (via Time.zone=).
     # If <tt>Time.zone</tt> has not been set for the current request, returns the TimeZone specified in <tt>config.time_zone</tt>.
