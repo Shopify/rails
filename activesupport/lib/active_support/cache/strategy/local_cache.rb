@@ -229,8 +229,9 @@ module ActiveSupport
             end
           end
 
+
           def local_cache_key
-            @local_cache_key ||= "#{self.class.name.underscore}_local_cache_#{object_id}".gsub(/[\/-]/, "_").to_sym
+            "#{self.class.name.underscore}_local_cache_#{object_id}".gsub(/[\/-]/, "_").to_sym
           end
 
           def bypass_local_cache(&block)
