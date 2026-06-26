@@ -683,6 +683,10 @@ module Rails
       Ractor.make_shareable(Rails.backtrace_cleaner)
       Ractor.make_shareable(Rails.event)
       Ractor.make_shareable(Rails.error)
+      if defined?(ActiveRecord::ConnectionAdapters::RactorConnectionHandler)
+        ActiveRecord::ConnectionAdapters::RactorConnectionHandler.capture_main_pool_specs!
+      end
+
       if defined?(I18n)
         available_locales = I18n.available_locales
         I18n.available_locales = available_locales

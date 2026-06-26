@@ -43,13 +43,20 @@ module ActiveRecord
       class << self
         def checkout_main_connection(connection_name, role, shard)
           shareable_connection_name = shareable_copy(connection_name.to_s)
-          Ractor::Dispatch.main.run do
-            pool = RactorConnectionProxy.main_pool(shareable_connection_name, role, shard)
-            connection = pool.checkout
-            connection_token = RactorConnectionProxy.next_token
-            MAIN_CONNECTIONS[connection_token] = [pool, connection]
-            connection_token
+          outcome = Ractor::Dispatch.main.run do
+            begin
+              pool = RactorConnectionProxy.main_pool(shareable_connection_name, role, shard)
+              connection = pool.checkout
+              connection_token = RactorConnectionProxy.next_token
+              MAIN_CONNECTIONS[connection_token] = [pool, connection]
+              connection_token
+            rescue => e
+              RactorConnectionProxy.serialized_error(e)
+            end
           end
+          raise RuntimeError, "#{outcome[1]}: #{outcome[2]}" if outcome.is_a?(Array) && outcome[0] == :error
+
+          outcome
         end
 
         def next_token
@@ -77,15 +84,22 @@ module ActiveRecord
 
         def main_pool_spec(connection_name, role, shard, strict)
           shareable_connection_name = shareable_copy(connection_name.to_s)
-          Ractor::Dispatch.main.run do
-            pool = RactorConnectionProxy.main_connection_handler.retrieve_connection_pool(
-              shareable_connection_name,
-              role: role,
-              shard: shard,
-              strict: strict,
-            )
-            pool && RactorConnectionPool.spec_for(pool)
+          outcome = Ractor::Dispatch.main.run do
+            begin
+              pool = RactorConnectionProxy.main_connection_handler.retrieve_connection_pool(
+                shareable_connection_name,
+                role: role,
+                shard: shard,
+                strict: strict,
+              )
+              pool && RactorConnectionPool.spec_for(pool)
+            rescue => e
+              RactorConnectionProxy.serialized_error(e)
+            end
           end
+          raise RuntimeError, "#{outcome[1]}: #{outcome[2]}" if outcome.is_a?(Array) && outcome[0] == :error
+
+          outcome
         end
 
         def dispatch_to_main_pool(connection_name, role, shard, method_name, args, kwargs)
@@ -139,6 +153,15 @@ module ActiveRecord
           raise RuntimeError, outcome[2] if outcome.is_a?(Array) && outcome[0] == :error
 
           outcome
+        end
+
+        def serialized_error(error)
+          Ractor.make_shareable([
+            :error,
+            error.class.name.to_s.dup,
+            "#{error.message}".dup,
+            Array(error.backtrace).first(10).map { |line| line.to_s.dup }
+          ])
         end
 
         def shareable_copy(value)
@@ -229,9 +252,9 @@ module ActiveRecord
       DELEGATED_METHODS.each do |method_name|
         delegated_method_name = method_name
         define_method(delegated_method_name,
-          ->(*args, **kwargs) {
+          ActiveSupport::Ractors.shareable_proc { |*args, **kwargs|
             self.class.dispatch_to_main_connection(@main_connection_token, delegated_method_name, args, kwargs)
-          }.make_shareable!)
+          })
       end
 
       def initialize(pool, main_connection_token, config)

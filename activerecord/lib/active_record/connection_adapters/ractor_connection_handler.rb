@@ -7,8 +7,29 @@ module ActiveRecord
     class RactorConnectionHandler # :nodoc:
       include Singleton
 
+      @pool_specs = {}.freeze
+
+      class << self
+        attr_reader :pool_specs
+
+        def capture_main_pool_specs!
+          specs = {}
+          ActiveRecord::Base.connection_handler.connection_pool_list.each do |pool|
+            spec = RactorConnectionPool.spec_for(pool)
+            specs[[spec.fetch(:connection_name), spec.fetch(:role), spec.fetch(:shard)].freeze] = spec
+          end
+          @pool_specs = Ractor.make_shareable(specs)
+        end
+      end
+
       def connection_pool_list(role = nil)
-        RactorConnectionProxy.main_pool_specs(role).map { |pool_spec| RactorConnectionPool.new(pool_spec) }
+        if !ActiveSupport::Ractors.main? && self.class.pool_specs.any?
+          specs = self.class.pool_specs.values
+          specs = specs.select { |spec| spec.fetch(:role) == role } if role
+          specs.map { |pool_spec| RactorConnectionPool.new(pool_spec) }
+        else
+          RactorConnectionProxy.main_pool_specs(role).map { |pool_spec| RactorConnectionPool.new(pool_spec) }
+        end
       end
       alias :connection_pools :connection_pool_list
 
@@ -23,8 +44,18 @@ module ActiveRecord
       end
 
       def retrieve_connection_pool(connection_name, role: ActiveRecord::Base.current_role, shard: ActiveRecord::Base.current_shard, strict: false)
-        pool_spec = RactorConnectionProxy.main_pool_spec(connection_name.to_s, role, shard, strict)
-        pool_spec && RactorConnectionPool.new(pool_spec)
+        connection_name = connection_name.to_s
+        if !ActiveSupport::Ractors.main? && self.class.pool_specs.any?
+          pool_spec = self.class.pool_specs.fetch([connection_name, role, shard], nil)
+          if pool_spec
+            RactorConnectionPool.new(pool_spec)
+          elsif strict
+            raise ConnectionNotDefined, "No connection pool for #{connection_name} found for the #{role} role and #{shard} shard."
+          end
+        else
+          pool_spec = RactorConnectionProxy.main_pool_spec(connection_name, role, shard, strict)
+          pool_spec && RactorConnectionPool.new(pool_spec)
+        end
       end
 
       def connected?(connection_name, role: ActiveRecord::Base.current_role, shard: ActiveRecord::Base.current_shard)

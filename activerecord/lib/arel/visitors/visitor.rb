@@ -15,7 +15,13 @@ module Arel # :nodoc: all
         attr_reader :dispatch
 
         def self.dispatch_cache
-          @dispatch_cache ||= Hash.new do |hash, klass|
+          return build_dispatch_cache unless ActiveSupport::Ractors.main?
+
+          @dispatch_cache ||= build_dispatch_cache
+        end
+
+        def self.build_dispatch_cache
+          Hash.new do |hash, klass|
             hash[klass] = :"visit_#{(klass.name || "").gsub("::", "_")}"
           end.compare_by_identity
         end
