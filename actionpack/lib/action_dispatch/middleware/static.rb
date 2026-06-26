@@ -58,6 +58,7 @@ module ActionDispatch
 
       @precompressed = Array(precompressed).map(&:to_s) | %w[ identity ]
       @compressible_content_types = compressible_content_types
+      @default_static_extension = ::ActionController::Base.default_static_extension
 
       @file_server = ::Rack::Files.new(@root, headers)
     end
@@ -177,7 +178,7 @@ module ActionDispatch
         # resolvable file extension. No need to check for foo.js.html and
         # foo.js/index.html.
         unless content_type
-          default_ext = ::ActionController::Base.default_static_extension
+          default_ext = @default_static_extension
           if ext != default_ext
             default_content_type = ::Rack::Mime.mime_type(default_ext, "text/plain")
 
