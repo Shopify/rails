@@ -366,6 +366,7 @@ module ActiveSupport
         class MethodCall
           def initialize(method)
             @method_name = method
+            freeze
           end
 
           # Return the parts needed to make this call, with the given
@@ -404,6 +405,7 @@ module ActiveSupport
           def initialize(target, method)
             @override_target = target
             @method_name = method
+            freeze
           end
 
           def expand(target, value, block)
@@ -430,6 +432,7 @@ module ActiveSupport
         class InstanceExec0
           def initialize(block)
             @override_block = block
+            freeze
           end
 
           def expand(target, value, block)
@@ -454,6 +457,7 @@ module ActiveSupport
         class InstanceExec1
           def initialize(block)
             @override_block = block
+            freeze
           end
 
           def expand(target, value, block)
@@ -478,6 +482,7 @@ module ActiveSupport
         class InstanceExec2
           def initialize(block)
             @override_block = block
+            freeze
           end
 
           def expand(target, value, block)
@@ -505,6 +510,7 @@ module ActiveSupport
         class ProcCall
           def initialize(target)
             @override_target = target
+            freeze
           end
 
           def expand(target, value, block)
@@ -611,6 +617,9 @@ module ActiveSupport
         end
 
         def freeze
+          @nested&.freeze
+          @call_template&.freeze
+          @user_conditions&.freeze
           @before&.freeze
           @after&.freeze
           super
@@ -810,6 +819,7 @@ module ActiveSupport
           type, filters, options = normalize_callback_params(filter_list, block)
 
           self_chain = get_callbacks name
+          self_chain = self_chain.dup.freeze if ractor_shareable_callback_owner? && !Ractors.shareable?(self_chain)
           mapped = filters.map do |filter|
             Callback.build(self_chain, filter, type, options)
           end
@@ -1010,6 +1020,14 @@ module ActiveSupport
             __callbacks[name.to_sym]
           end
 
+          def ractor_shareable_callback_owner? # :nodoc:
+            (defined?(ActiveSupport::ExecutionWrapper) &&
+              ActiveSupport::ExecutionWrapper.respond_to?(:ractor_shareable_callbacks?) &&
+              self <= ActiveSupport::ExecutionWrapper &&
+              ractor_shareable_callbacks?) ||
+              (defined?(ActionController::Metal) && self <= ActionController::Metal)
+          end
+
           def set_callbacks(name, callbacks) # :nodoc:
             name = name.to_sym
             callback_sets = __callbacks.dup
@@ -1020,10 +1038,7 @@ module ActiveSupport
             callback_sets[name] = callbacks
             ractor_shareable =
               (!__callbacks.empty? && Ractors.shareable?(__callbacks)) ||
-              (defined?(ActiveSupport::ExecutionWrapper) &&
-                ActiveSupport::ExecutionWrapper.respond_to?(:ractor_shareable_callbacks?) &&
-                self <= ActiveSupport::ExecutionWrapper &&
-                ractor_shareable_callbacks?)
+              ractor_shareable_callback_owner?
 
             self.__callbacks = if ractor_shareable
               callback_sets.each_value(&:freeze)

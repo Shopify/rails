@@ -33,8 +33,9 @@ module AbstractController
 
     included do
       define_callbacks :process_action,
-                       terminator: ->(controller, result_lambda) { result_lambda.call; controller.performed? },
+                       terminator: ActiveSupport::Ractors.shareable_lambda { |controller, result_lambda| result_lambda.call; controller.performed? },
                        skip_after_callbacks_if_terminated: true
+      self.__callbacks = __callbacks.transform_values(&:freeze).freeze
       class_attribute :raise_on_missing_callback_actions, instance_predicate: false, default: false
     end
 
