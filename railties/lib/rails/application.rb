@@ -260,6 +260,18 @@ module Rails
             next if model.respond_to?(:table_exists?) && !model.table_exists?
 
             model.define_attribute_methods if model.respond_to?(:define_attribute_methods)
+            if defined?(::I18n) && model.respond_to?(:model_name)
+              model_name = model.model_name
+              model_human_name = model_name.human
+              %i[create update].each do |key|
+                defaults = [
+                  :"helpers.submit.#{model_name.i18n_key}.#{key}",
+                  :"helpers.submit.#{key}",
+                  "#{key.to_s.humanize} #{model_human_name}",
+                ]
+                ::I18n.t(defaults.shift, model: model_human_name, default: defaults)
+              end
+            end
             model.ractor_share_schema_state! if model.respond_to?(:ractor_share_schema_state!, true)
           rescue ::ActiveRecord::StatementInvalid, ::ActiveRecord::TableNotSpecified
             # Some framework models are loaded even when their optional tables are not installed.
@@ -270,6 +282,14 @@ module Rails
         ([::ActionController::Base] + ::ActionController::Base.descendants).each do |controller|
           controller.ractor_share_wrapper_options! if controller.respond_to?(:ractor_share_wrapper_options!)
         end
+      end
+      if defined?(::I18n::Base) && ::I18n::Base.class_variable_defined?(:@@normalized_key_cache)
+        normalized_key_cache = ::I18n::Base.class_variable_get(:@@normalized_key_cache)
+        shareable_cache = {}
+        normalized_key_cache.each_pair do |separator, keys|
+          shareable_cache[separator] = keys.each_pair.to_h
+        end
+        ::I18n::Base.class_variable_set(:@@normalized_key_cache, ractor_make_shareable(shareable_cache))
       end
       ::ActiveSupport::Notifications.notifier.make_shareable! if defined?(::ActiveSupport::Notifications)
       ractor_make_shareable(::ActiveSupport.error_reporter) if defined?(::ActiveSupport.error_reporter)
