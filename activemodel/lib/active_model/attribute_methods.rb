@@ -69,7 +69,7 @@ module ActiveModel
 
     included do
       @attribute_method_patterns_cache = Concurrent::Map.new(initial_capacity: 4)
-      class_attribute :attribute_aliases, instance_writer: false, default: {}
+      class_attribute :attribute_aliases, instance_writer: false, default: {}.freeze
       class_attribute :attribute_method_patterns, instance_writer: false, default: [ ClassMethods::AttributeMethodPattern.new ]
     end
 
@@ -202,9 +202,9 @@ module ActiveModel
       #   person.name_short?     # => true
       #   person.nickname_short? # => true
       def alias_attribute(new_name, old_name)
-        old_name = old_name.to_s
-        new_name = new_name.to_s
-        self.attribute_aliases = attribute_aliases.merge(new_name => old_name)
+        old_name = -old_name.to_s
+        new_name = -new_name.to_s
+        self.attribute_aliases = attribute_aliases.merge(new_name => old_name).freeze
         aliases_by_attribute_name[old_name] |= [new_name]
         eagerly_generate_alias_attribute_methods(new_name, old_name)
       end
