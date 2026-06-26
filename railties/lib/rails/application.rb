@@ -220,6 +220,10 @@ module Rails
         ::I18n.fallbacks[::I18n.locale]
         ::I18n.fallbacks[::I18n.default_locale]
         ractor_make_shareable(::I18n.fallbacks)
+        if ::I18n.respond_to?(:backend)
+          ::I18n.backend.eager_load! if ::I18n.backend.respond_to?(:eager_load!)
+          ractor_make_shareable(::I18n.backend)
+        end
         if ::I18n.config.respond_to?(:available_locales_set)
           ::I18n.config.class.class_variable_set(:@@available_locales_set, ractor_make_shareable(::I18n.config.available_locales_set))
         end

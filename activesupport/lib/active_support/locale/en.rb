@@ -1,10 +1,12 @@
 # frozen_string_literal: true
 
+require "active_support/core_ext/kernel/ractor_shareability"
+
 {
   en: {
     number: {
       nth: {
-        ordinals: lambda do |_key, options|
+        ordinals: ractor_shareable_proc do |_key, options|
           number = options[:number]
           case number
           when 1; "st"
@@ -23,7 +25,7 @@
           end
         end,
 
-        ordinalized: lambda do |_key, options|
+        ordinalized: ractor_shareable_proc do |_key, options|
           number = options[:number]
           "#{number}#{ActiveSupport::Inflector.ordinal(number)}"
         end
