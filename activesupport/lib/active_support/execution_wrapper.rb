@@ -115,7 +115,7 @@ module ActiveSupport
     end
 
     def self.active_key # :nodoc:
-      @active_key ||= :"active_execution_wrapper_#{object_id}"
+      :"active_execution_wrapper_#{object_id}"
     end
 
     def self.active? # :nodoc:
