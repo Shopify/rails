@@ -46,8 +46,8 @@ module Mime
   end
 
   REGISTRY            = Mimes.new
-  LOOKUP_BY_STRING    = {} # rubocop:disable Style/MutableConstant
-  LOOKUP_BY_EXTENSION = {} # rubocop:disable Style/MutableConstant
+  LOOKUP_BY_STRING    = {}.freeze
+  LOOKUP_BY_EXTENSION = {}.freeze
   private_constant :REGISTRY, :LOOKUP_BY_STRING, :LOOKUP_BY_EXTENSION
 
   SET = ActiveSupport::Deprecation::DeprecatedObjectProxy.new( # :nodoc:
@@ -83,6 +83,12 @@ module Mime
     def fetch(type, &block)
       return type if type.is_a?(Type)
       LOOKUP_BY_EXTENSION.fetch(type.to_s, &block)
+    end
+
+    def replace_lookup(name, value) # :nodoc:
+      remove_const(name)
+      const_set(name, value.freeze)
+      private_constant(name)
     end
   end
 
@@ -206,8 +212,12 @@ module Mime
         new_mime = Type.new(string, symbol, mime_type_synonyms).freeze
 
         REGISTRY << new_mime
-        ([string] + mime_type_synonyms).each { |str| LOOKUP_BY_STRING[str] = new_mime } unless skip_lookup
-        ([symbol] + extension_synonyms).each { |ext| LOOKUP_BY_EXTENSION[ext.to_s] = new_mime }
+        unless skip_lookup
+          additions = ([string] + mime_type_synonyms).to_h { |str| [-str.to_s, new_mime] }
+          Mime.replace_lookup(:LOOKUP_BY_STRING, LOOKUP_BY_STRING.merge(additions))
+        end
+        additions = ([symbol] + extension_synonyms).to_h { |ext| [-ext.to_s, new_mime] }
+        Mime.replace_lookup(:LOOKUP_BY_EXTENSION, LOOKUP_BY_EXTENSION.merge(additions))
 
         @register_callbacks.each do |callback|
           callback.call(new_mime)
@@ -264,8 +274,8 @@ module Mime
         symbol = symbol.downcase
         if mime = Mime[symbol]
           REGISTRY.delete_if { |v| v.eql?(mime) }
-          LOOKUP_BY_STRING.delete_if { |_, v| v.eql?(mime) }
-          LOOKUP_BY_EXTENSION.delete_if { |_, v| v.eql?(mime) }
+          Mime.replace_lookup(:LOOKUP_BY_STRING, LOOKUP_BY_STRING.reject { |_, v| v.eql?(mime) })
+          Mime.replace_lookup(:LOOKUP_BY_EXTENSION, LOOKUP_BY_EXTENSION.reject { |_, v| v.eql?(mime) })
         end
       end
     end
