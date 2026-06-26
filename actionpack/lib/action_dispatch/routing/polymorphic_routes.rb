@@ -204,11 +204,11 @@ module ActionDispatch
           end
 
           def self.singular(prefix, suffix)
-            new(->(name) { name.singular_route_key }, prefix, suffix)
+            new(ActiveSupport::Ractors.shareable_lambda { |name| name.singular_route_key }, prefix, suffix)
           end
 
           def self.plural(prefix, suffix)
-            new(->(name) { name.route_key }, prefix, suffix)
+            new(ActiveSupport::Ractors.shareable_lambda { |name| name.route_key }, prefix, suffix)
           end
 
           def self.polymorphic_method(recipient, record_or_hash_or_array, action, type, options)
@@ -247,8 +247,9 @@ module ActionDispatch
 
           def initialize(key_strategy, prefix, suffix)
             @key_strategy = key_strategy
-            @prefix       = prefix
-            @suffix       = suffix
+            @prefix       = -prefix.to_s
+            @suffix       = -suffix.to_s
+            freeze
           end
 
           def handle_string(record)
@@ -357,6 +358,7 @@ module ActionDispatch
               CACHE[:url][action]  = build action, "url"
               CACHE[:path][action] = build action, "path"
             end
+            ActiveSupport::Ractors.make_shareable(CACHE)
         end
     end
   end

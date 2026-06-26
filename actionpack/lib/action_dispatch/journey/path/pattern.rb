@@ -24,10 +24,15 @@ module ActionDispatch
           @anchored     = anchored
 
           @names          = ast.names
+          @glob           = ast.glob?
           @optional_names = nil
           @required_names = nil
           @re             = nil
           @offsets        = nil
+        end
+
+        def glob?
+          @glob
         end
 
         def build_formatter

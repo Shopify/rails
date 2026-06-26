@@ -159,7 +159,7 @@ module ActionDispatch
       end
 
       def glob?
-        path.ast.glob?
+        path.glob?
       end
 
       def dispatcher?

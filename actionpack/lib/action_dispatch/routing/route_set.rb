@@ -330,8 +330,10 @@ module ActionDispatch
           #
           #     foo_url(bar, baz, bang, sort_by: 'baz')
           #
-          def define_url_helper(mod, name, helper, url_strategy)
-            mod.define_method(name) do |*args|
+          def define_url_helper(mod, name, route_helper, url_strategy)
+            route_name = name.to_s.sub(/_(?:path|url)\z/, "").to_sym
+            helper_method_name = name
+            mod.define_method(name, ActiveSupport::Ractors.shareable_proc do |*args|
               last = args.last
               options = \
                 case last
@@ -340,8 +342,10 @@ module ActionDispatch
                 when ActionController::Parameters
                   args.pop.to_h
                 end
-              helper.call(self, name, args, options, url_strategy)
-            end
+              route = _routes.named_routes[route_name]
+              url_helper = UrlHelper.create(route, route.defaults, route_name)
+              url_helper.call(self, helper_method_name, args, options, url_strategy)
+            end)
           end
       end
 
@@ -607,18 +611,20 @@ module ActionDispatch
 
           # plus a singleton class method called _routes ...
           included do
-            redefine_singleton_method(:_routes) { routes }
+            @_routes = routes
+            redefine_singleton_method(:_routes, &ActiveSupport::Ractors.shareable_proc { @_routes || (superclass._routes if superclass.respond_to?(:_routes)) })
           end
 
           # And an instance method _routes. Note that UrlFor (included in this module) add
           # extra conveniences for working with @_routes.
-          define_method(:_routes) { @_routes || routes }
+          define_method(:_routes, ActiveSupport::Ractors.shareable_proc { @_routes || self.class._routes })
 
-          define_method(:_generate_paths_by_default) do
-            supports_path
-          end
-
-          private :_generate_paths_by_default
+          class_eval <<-RUBY, __FILE__, __LINE__ + 1
+            def _generate_paths_by_default
+              #{supports_path.inspect}
+            end
+            private :_generate_paths_by_default
+          RUBY
 
           # If the module is included more than once (for example, in a subclass of an
           # ancestor that includes the module), ensure that the `_routes` singleton and
