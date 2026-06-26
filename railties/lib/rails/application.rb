@@ -171,7 +171,13 @@ module Rails
       if respond_to?(:assets) && (assets = self.assets)
         assets.compilers if assets.respond_to?(:compilers)
         assets.load_path if assets.respond_to?(:load_path)
-        assets.resolver if assets.respond_to?(:resolver)
+        if assets.respond_to?(:resolver)
+          resolver = assets.resolver
+          if resolver.respond_to?(:resolve)
+            resolver.resolve("app.css")
+            resolver.resolve("application.css")
+          end
+        end
         assets.prefix if assets.respond_to?(:prefix)
         if assets.respond_to?(:load_path)
           load_path = assets.load_path
