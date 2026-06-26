@@ -266,6 +266,8 @@ module ActionController
 
       # Returns the list of enabled formats.
       def _wrapper_formats
+        return [].freeze unless ActiveSupport::Ractors.main?
+
         _wrapper_options.format
       end
 
