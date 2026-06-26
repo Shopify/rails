@@ -206,6 +206,12 @@ module ActiveModel
       translation
     end
 
+    def make_shareable! # :nodoc:
+      i18n_keys
+      i18n_scope
+      ractor_make_shareable(self)
+    end
+
     def uncountable?
       @uncountable
     end
@@ -219,7 +225,7 @@ module ActiveModel
 
       def i18n_keys
         @i18n_keys ||= if @klass.respond_to?(:lookup_ancestors)
-          @klass.lookup_ancestors.map { |klass| klass.model_name.i18n_key }
+          @klass.lookup_ancestors.map { |klass| klass.equal?(@klass) ? i18n_key : klass.model_name.i18n_key }
         else
           []
         end
@@ -273,7 +279,7 @@ module ActiveModel
       namespace = module_parents.detect do |n|
         n.respond_to?(:use_relative_model_naming?) && n.use_relative_model_naming?
       end
-      model_name = ractor_make_shareable(ActiveModel::Name.new(self, namespace))
+      model_name = ActiveModel::Name.new(self, namespace).make_shareable!
       @_model_name = model_name if Ractor.main?
       model_name
     end
