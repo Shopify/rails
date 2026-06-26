@@ -2698,6 +2698,8 @@ module ActionView
           defaults << :"helpers.submit.#{key}"
           defaults << "#{key.to_s.humanize} #{model}"
 
+          return defaults.last unless ActiveSupport::Ractors.main?
+
           I18n.t(defaults.shift, model: model, default: defaults)
         end
 

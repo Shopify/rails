@@ -194,6 +194,7 @@ module ActiveModel
     #
     # Specify +options+ with additional translating options.
     def human(options = {})
+      return @human unless ActiveSupport::Ractors.main?
       return @human if i18n_keys.empty? || i18n_scope.empty?
 
       key, *defaults = i18n_keys
@@ -207,6 +208,12 @@ module ActiveModel
 
     def uncountable?
       @uncountable
+    end
+
+    def freeze
+      i18n_keys
+      i18n_scope
+      super
     end
 
     private
@@ -270,12 +277,11 @@ module ActiveModel
       return @_model_name if @_model_name
       return ActiveSupport::Ractors.on_main(self) { model_name } unless ActiveSupport::Ractors.main?
 
-      @_model_name = ActiveSupport::Ractors.make_shareable(begin
-        namespace = module_parents.detect do |n|
-          n.respond_to?(:use_relative_model_naming?) && n.use_relative_model_naming?
-        end
-        ActiveModel::Name.new(self, namespace)
-      end)
+      namespace = module_parents.detect do |n|
+        n.respond_to?(:use_relative_model_naming?) && n.use_relative_model_naming?
+      end
+      @_model_name = ActiveModel::Name.new(self, namespace)
+      ActiveSupport::Ractors.make_shareable(@_model_name)
     end
 
     # Returns the plural class name of a record or class.

@@ -269,7 +269,7 @@ module ActiveRecord
       #     self.table_name = "project"
       #   end
       def table_name=(value)
-        value = value && value.to_s
+        value = value && -value.to_s
 
         if defined?(@table_name)
           return if value == @table_name
