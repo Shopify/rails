@@ -460,7 +460,7 @@ module ActiveRecord
   self.verify_foreign_keys_for_fixtures = false
 
   singleton_class.attr_accessor :query_transformers
-  self.query_transformers = []
+  self.query_transformers = [].freeze
 
   ##
   # :singleton-method: use_yaml_unsafe_load
