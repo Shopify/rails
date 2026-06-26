@@ -239,6 +239,15 @@ module Rails
         ::I18n.default_separator if ::I18n.respond_to?(:default_separator)
         ractor_make_shareable(::I18n::RESERVED_KEYS) if defined?(::I18n::RESERVED_KEYS)
         ractor_make_shareable(::I18n.reserved_keys_pattern) if ::I18n.respond_to?(:reserved_keys_pattern)
+        if ::I18n.config.respond_to?(:interpolation_patterns)
+          interpolation_patterns = ::I18n.config.interpolation_patterns
+          ractor_make_shareable(interpolation_patterns)
+          if ::I18n.const_defined?(:INTERPOLATION_PATTERNS_CACHE, false)
+            interpolation_patterns_cache = ::I18n.const_get(:INTERPOLATION_PATTERNS_CACHE)
+            interpolation_patterns_cache[interpolation_patterns]
+            ractor_make_shareable(interpolation_patterns_cache)
+          end
+        end
         if ::I18n.respond_to?(:backend)
           ::I18n.backend.eager_load! if ::I18n.backend.respond_to?(:eager_load!)
           ractor_make_shareable(::I18n.backend)
