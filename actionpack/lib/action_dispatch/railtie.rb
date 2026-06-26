@@ -86,8 +86,8 @@ module ActionDispatch
       end
 
       ActiveSupport.on_load(:action_dispatch_response) do
-        self.default_charset = app.config.action_dispatch.default_charset || app.config.encoding
-        self.default_headers = app.config.action_dispatch.default_headers
+        self.default_charset = -(app.config.action_dispatch.default_charset || app.config.encoding).to_s
+        self.default_headers = app.config.action_dispatch.default_headers.to_h.transform_keys { |key| -key.to_s }.transform_values { |value| value.is_a?(String) ? -value : value.freeze }.freeze
       end
 
       ActionDispatch::ExceptionWrapper.rescue_responses = ActionDispatch::ExceptionWrapper.rescue_responses.merge(config.action_dispatch.rescue_responses).freeze
