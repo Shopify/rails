@@ -194,6 +194,8 @@ module ActiveSupport
   # to all log subscribers. You can use any queue implementation you want.
   #
   module Notifications
+    NULL_INSTRUMENTER = NullInstrumenter.new.freeze
+
     class << self
       attr_accessor :notifier
 
@@ -201,7 +203,7 @@ module ActiveSupport
       # publishing any notifications. Useful for suppressing instrumentation
       # on specific connections or components.
       def null_instrumenter
-        @null_instrumenter ||= NullInstrumenter.new
+        NULL_INSTRUMENTER
       end
 
       def publish(name, *args)
@@ -274,6 +276,8 @@ module ActiveSupport
       end
 
       def instrumenter
+        return null_instrumenter unless ActiveSupport::Ractors.main?
+
         registry[notifier] ||= Instrumenter.new(notifier)
       end
 
