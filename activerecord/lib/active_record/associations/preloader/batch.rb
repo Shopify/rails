@@ -95,23 +95,11 @@ module ActiveRecord
 
           def plan_records(record_loads, pending)
             record_loads.each do |record_load|
-              realize(pending) if pending.any? && depends_on_pending_writes?(record_load, pending)
-
-              record_load.plan.enqueue(pipeline: true)
-              if record_load.query?
+              record_load.plan(pending_record_loads: pending).enqueue(pipeline: true)
+              if record_load.deferred?
                 pending << record_load
               else
                 record_load.realize
-              end
-            end
-          end
-
-          def depends_on_pending_writes?(record_load, pending)
-            record_load.read_keys_with_preload_index.any? do |key, preload_index|
-              pending.any? do |pending_record_load|
-                pending_record_load.write_keys_with_preload_index.any? do |write_key, write_preload_index|
-                  key == write_key && write_preload_index <= preload_index
-                end
               end
             end
           end

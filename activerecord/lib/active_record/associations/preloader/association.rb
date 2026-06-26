@@ -107,8 +107,8 @@ module ActiveRecord
             end
           end
 
-          def plan
-            populate_keys_to_load_and_already_loaded_records
+          def plan(pending_record_loads: [])
+            populate_keys_to_load_and_already_loaded_records(pending_record_loads)
             self
           end
 
@@ -124,7 +124,12 @@ module ActiveRecord
           end
 
           def realize
-            load_records_in_loaders(future_records.respond_to?(:value) ? future_records.value : future_records)
+            records = future_records.respond_to?(:value) ? future_records.value : future_records
+            load_records_in_loaders(records + pending_loaded_records)
+          end
+
+          def deferred?
+            query? || pending_loaded_records_by_key.any?
           end
 
           def query?
@@ -132,18 +137,21 @@ module ActiveRecord
           end
 
           private
-            attr_reader :loader_query, :loaders, :keys_to_load, :already_loaded_records_by_key, :preload_writes
+            attr_reader :loader_query, :loaders, :keys_to_load, :already_loaded_records_by_key, :pending_loaded_records_by_key, :preload_writes
 
-            def populate_keys_to_load_and_already_loaded_records
+            def populate_keys_to_load_and_already_loaded_records(pending_record_loads)
               return if defined?(@keys_to_load)
 
               @keys_to_load = Set.new
               @already_loaded_records_by_key = {}
+              @pending_loaded_records_by_key = {}
 
               loaders.each do |loader|
                 loader.owners_by_key.each do |key, owners|
                   if loaded_owner = owners.find { |owner| loaded_for_preload?(loader, owner) }
                     already_loaded_records_by_key[key] = loader.target_for(loaded_owner)
+                  elsif pending_loaded_owner = owners.find { |owner| pending_write_for?(loader, owner, pending_record_loads) }
+                    pending_loaded_records_by_key[key] = [loader, pending_loaded_owner]
                   else
                     keys_to_load << key
                   end
@@ -151,6 +159,7 @@ module ActiveRecord
               end
 
               @keys_to_load.subtract(already_loaded_records_by_key.keys)
+              @keys_to_load.subtract(pending_loaded_records_by_key.keys)
             end
 
             def loaded_for_preload?(loader, owner)
@@ -158,6 +167,15 @@ module ActiveRecord
 
               index = preload_writes&.[](loader.association_cache_key(owner))
               index.nil? || index <= loader.preload_index
+            end
+
+            def pending_write_for?(loader, owner, pending_record_loads)
+              key = loader.association_cache_key(owner)
+              pending_record_loads.any? do |record_load|
+                record_load.write_keys_with_preload_index.any? do |write_key, preload_index|
+                  key == write_key && preload_index <= loader.preload_index
+                end
+              end
             end
 
             def load_records_in_loaders(raw_records)
@@ -175,6 +193,12 @@ module ActiveRecord
 
             def already_loaded_records
               already_loaded_records_by_key.values.flatten
+            end
+
+            def pending_loaded_records
+              pending_loaded_records_by_key.values.flat_map do |loader, owner|
+                loader.target_for(owner)
+              end
             end
         end
 
