@@ -413,7 +413,7 @@ module ActiveRecord
 
       def predicate_builder # :nodoc:
         @predicate_builder || ActiveSupport::Ractors.on_main(self) do
-          @predicate_builder ||= PredicateBuilder.new(TableMetadata.new(self, arel_table))
+          @predicate_builder ||= ActiveSupport::Ractors.make_shareable(PredicateBuilder.new(TableMetadata.new(self, arel_table)))
         end
       end
 
