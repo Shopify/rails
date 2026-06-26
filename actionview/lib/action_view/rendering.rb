@@ -80,6 +80,11 @@ module ActionView
       end
 
       def view_context_class
+        unless ActiveSupport::Ractors.main?
+          return @view_context_class if @view_context_class
+          return ActiveSupport::Ractors.on_main(self) { view_context_class }
+        end
+
         klass = ActionView::Base.view_context_class
 
         @view_context_class ||= build_view_context_class(klass, supports_path?, _routes, _helpers)

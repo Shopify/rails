@@ -192,6 +192,11 @@ module ActionView # :nodoc:
       delegate :erb_trim_mode=, to: "ActionView::Template::Handlers::ERB"
 
       def view_context_class
+        unless ActiveSupport::Ractors.main?
+          return @view_context_class if @view_context_class
+          return ActiveSupport::Ractors.on_main(self) { view_context_class }
+        end
+
         @view_context_mutex.synchronize do
           @view_context_class ||= with_empty_template_cache
         end
