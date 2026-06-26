@@ -11,7 +11,7 @@ module ActiveRecord
     include ActiveModel::Access
 
     included do
-      @arel_table = Arel::Table.new(klass: self)
+      @arel_table = ActiveSupport::Ractors.make_shareable(Arel::Table.new(klass: self))
 
       ##
       # :singleton-method:
@@ -441,7 +441,7 @@ module ActiveRecord
           end
 
           subclass.class_eval do
-            @arel_table = Arel::Table.new(klass: self)
+            @arel_table = ActiveSupport::Ractors.make_shareable(Arel::Table.new(klass: self))
             @predicate_builder = nil
             @inspection_filter = nil
             @filter_attributes ||= nil

@@ -278,7 +278,7 @@ module ActiveRecord
         end
 
         @table_name        = value
-        @arel_table        = Arel::Table.new(klass: self)
+        @arel_table        = ActiveSupport::Ractors.make_shareable(Arel::Table.new(klass: self))
         @sequence_name     = nil unless @explicit_sequence_name
       end
 
@@ -583,7 +583,7 @@ module ActiveRecord
         def reload_schema_from_cache(recursive = true)
           @_returning_columns_for_insert = nil
           @_returning_columns_for_update = nil
-          @arel_table = Arel::Table.new(klass: self)
+          @arel_table = ActiveSupport::Ractors.make_shareable(Arel::Table.new(klass: self))
           @symbol_column_to_string_name_hash = nil
           @content_columns = nil
           @column_defaults = nil
