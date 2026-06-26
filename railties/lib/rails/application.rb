@@ -420,6 +420,11 @@ module Rails
       @revision
     end
 
+    def freeze
+      revision
+      super
+    end
+
     ## Rails internal API
 
     def revision=(rev) # :nodoc:
