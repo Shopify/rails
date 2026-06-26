@@ -687,6 +687,33 @@ module Rails
         ActiveRecord::ConnectionAdapters::RactorConnectionHandler.capture_main_pool_specs!
       end
 
+      if respond_to?(:assets) && assets
+        assets.compilers if assets.respond_to?(:compilers)
+        load_path = assets.load_path if assets.respond_to?(:load_path)
+        if load_path
+          load_path.assets if load_path.respond_to?(:assets)
+          load_path.asset_paths_by_type("css") if load_path.respond_to?(:asset_paths_by_type)
+          load_path.asset_paths_by_type("js") if load_path.respond_to?(:asset_paths_by_type)
+          load_path.asset_paths_by_glob("#{root.join("app/assets")}/**/*.css") if load_path.respond_to?(:asset_paths_by_glob)
+          load_path.asset_paths_by_glob("#{root.join("app/assets")}/**/*.js") if load_path.respond_to?(:asset_paths_by_glob)
+        end
+        resolver = assets.resolver if assets.respond_to?(:resolver)
+        if resolver && load_path && load_path.respond_to?(:assets)
+          load_path.assets.each do |asset|
+            logical_path = asset.logical_path.to_s
+            resolver.resolve(logical_path) if resolver.respond_to?(:resolve)
+            resolver.integrity(logical_path) if resolver.respond_to?(:integrity)
+          end
+        end
+        assets.prefix if assets.respond_to?(:prefix)
+      end
+
+      if respond_to?(:importmap) && importmap && defined?(ActionController::Base)
+        resolver = ActionController::Base.helpers
+        importmap.to_json(resolver: resolver) if importmap.respond_to?(:to_json)
+        importmap.preloaded_module_packages(resolver: resolver, entry_point: "application", cache_key: "application") if importmap.respond_to?(:preloaded_module_packages)
+      end
+
       if defined?(I18n)
         available_locales = I18n.available_locales
         I18n.available_locales = available_locales
