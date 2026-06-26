@@ -20,7 +20,7 @@ module ActionView
       def assign_controller(controller)
         if @_controller = controller
           @_request = controller.request if controller.respond_to?(:request)
-          if controller.respond_to?(:config)
+          if controller.respond_to?(:config) && ActiveSupport::Ractors.main?
             @_config = controller.config.inheritable_copy
           else
             @_config = ActiveSupport::InheritableOptions.new
