@@ -192,6 +192,22 @@ module Rails
           end
         end
       end
+      if respond_to?(:importmap) && (importmap = self.importmap)
+        resolver = if defined?(::ApplicationController) && ::ApplicationController.respond_to?(:helpers)
+          ::ApplicationController.helpers
+        elsif defined?(::ActionController::Base) && ::ActionController::Base.respond_to?(:helpers)
+          ::ActionController::Base.helpers
+        end
+
+        if resolver
+          importmap.to_json(resolver: resolver) if importmap.respond_to?(:to_json)
+          if importmap.respond_to?(:preloaded_module_packages)
+            importmap.preloaded_module_packages(resolver: resolver)
+            importmap.preloaded_module_packages(resolver: resolver, entry_point: "application", cache_key: "application")
+          end
+          importmap.digest(resolver: resolver) if importmap.respond_to?(:digest)
+        end
+      end
 
       require "rails/logging/actor"
       require "rails/logging/proxy"
