@@ -83,28 +83,52 @@ module ActiveRecord
             end
           end
 
+          attr_reader :future_records
+
           def load(pipeline: false)
-            raw_records = records(pipeline: pipeline)
+            plan.enqueue(pipeline: pipeline)
 
             if pipeline
-              raw_records.then do |records|
+              future_records.then do |records|
                 load_records_in_loaders(records)
               end
             else
-              load_records_in_loaders(raw_records)
+              realize
             end
           end
 
           def records(pipeline: false)
-            populate_keys_to_load_and_already_loaded_records
+            plan.enqueue(pipeline: pipeline)
 
             if pipeline
+              future_records
+            else
+              future_records
+            end
+          end
+
+          def plan
+            populate_keys_to_load_and_already_loaded_records
+            self
+          end
+
+          def enqueue(pipeline: false)
+            @future_records = if pipeline
               load_records(pipeline: true).then do |records|
                 records + already_loaded_records
               end
             else
               load_records + already_loaded_records
             end
+            self
+          end
+
+          def realize
+            load_records_in_loaders(future_records.respond_to?(:value) ? future_records.value : future_records)
+          end
+
+          def query?
+            keys_to_load.any?
           end
 
           private

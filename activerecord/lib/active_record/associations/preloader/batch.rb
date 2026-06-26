@@ -21,10 +21,17 @@ module ActiveRecord
             active, waiting = branch_groups.partition do |_branches, index|
               (dependencies[index] & unfinished).empty?
             end
-            target_loaders = active.map { |branches, _index| runnable_loaders_for(branches) }
 
-            load_records(target_loaders.flat_map { |loaders| loader_records(loaders) }).each(&:value)
-            target_loaders.flatten.each(&:run)
+            pending = []
+            target_loaders = []
+            active.each do |branches, _index|
+              realize(pending) if pending.any? && instance_dependent_scope?(branches)
+              loaders = runnable_loaders_for(branches)
+              target_loaders.concat(loaders)
+              plan_records(loader_records(loaders), pending)
+            end
+            realize(pending)
+            target_loaders.each(&:run)
 
             branch_groups = (waiting + active.filter_map do |branches, index|
               finished, in_progress = branches.partition(&:done?)
@@ -77,29 +84,41 @@ module ActiveRecord
             target_loaders.presence || loaders
           end
 
-          def load_records(record_loads)
-            promises_by_key = Hash.new { |hash, key| hash[key] = [] }
-            writers, readers = record_loads.partition { |record_load| record_load.write_keys.any? }
-
-            (writers + readers).map do |record_load|
-              dependencies = record_load.read_keys_with_preload_index.filter_map do |key, preload_index|
-                promises_by_key[key].reverse_each.find do |index, _promise|
-                  index <= preload_index
-                end&.last
+          def instance_dependent_scope?(branches)
+            branches.any? do |branch|
+              branch.source_records.any? do |record|
+                reflection = record.class._reflect_on_association(branch.association)
+                reflection&.scope && reflection.scope.arity != 0
               end
-              promise = if dependency = dependencies.find(&:pending?)
-                dependency.then do
-                  record_load.load(pipeline: true).value
-                end
-              else
-                record_load.load(pipeline: true)
-              end
-
-              record_load.write_keys_with_preload_index.each do |key, preload_index|
-                promises_by_key[key] << [preload_index, promise]
-              end
-              promise
             end
+          end
+
+          def plan_records(record_loads, pending)
+            record_loads.each do |record_load|
+              realize(pending) if pending.any? && depends_on_pending_writes?(record_load, pending)
+
+              record_load.plan.enqueue(pipeline: true)
+              if record_load.query?
+                pending << record_load
+              else
+                record_load.realize
+              end
+            end
+          end
+
+          def depends_on_pending_writes?(record_load, pending)
+            record_load.read_keys_with_preload_index.any? do |key, preload_index|
+              pending.any? do |pending_record_load|
+                pending_record_load.write_keys_with_preload_index.any? do |write_key, write_preload_index|
+                  key == write_key && write_preload_index <= preload_index
+                end
+              end
+            end
+          end
+
+          def realize(record_loads)
+            record_loads.each(&:realize)
+            record_loads.clear
           end
 
           def loader_records(loaders)

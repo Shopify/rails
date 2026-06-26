@@ -812,6 +812,21 @@ class OverridingAssociationsTest < ActiveRecord::TestCase
   end
 end
 
+class PreloaderPlanningParent < ActiveRecord::Base
+  self.table_name = "authors"
+
+  has_many :foos, class_name: "PreloaderPlanningChild", foreign_key: :author_id
+  has_many :bars, ->(parent) {
+    where(body: parent.association(:foos).loaded? ? "foos_loaded" : "foos_not_loaded")
+  }, class_name: "PreloaderPlanningChild", foreign_key: :author_id
+end
+
+class PreloaderPlanningChild < ActiveRecord::Base
+  self.table_name = "posts"
+
+  belongs_to :parent, class_name: "PreloaderPlanningParent", foreign_key: :author_id
+end
+
 class PreloaderTest < ActiveRecord::TestCase
   fixtures :posts, :comments, :books, :authors, :tags, :taggings, :essays, :categories, :author_addresses,
            :sharded_blog_posts, :sharded_comments, :sharded_blog_posts_tags, :sharded_tags,
@@ -826,6 +841,19 @@ class PreloaderTest < ActiveRecord::TestCase
 
     assert_predicate post.comments, :loaded?
     assert_equal [comments(:greetings)], post.comments
+  end
+
+  def test_preload_plans_with_prior_top_level_side_effects_visible
+    parent = PreloaderPlanningParent.create!(name: "preloader visibility")
+    PreloaderPlanningChild.create!(parent: parent, title: "foo", body: "foo")
+    PreloaderPlanningChild.create!(parent: parent, title: "bar loaded", body: "foos_loaded")
+    PreloaderPlanningChild.create!(parent: parent, title: "bar not loaded", body: "foos_not_loaded")
+
+    parent = PreloaderPlanningParent.where(id: parent.id).preload(:foos, :bars).first
+
+    assert_predicate parent.association(:foos), :loaded?
+    assert_predicate parent.association(:bars), :loaded?
+    assert_equal ["foos_loaded"], parent.bars.map(&:body)
   end
 
   def test_preload_makes_correct_number_of_queries_on_array
