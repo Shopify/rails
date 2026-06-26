@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "action_view/rendering"
+require "active_support/core_ext/kernel/ractor_shareability"
 require "active_support/core_ext/module/redefine_method"
 
 module ActionView
@@ -272,6 +273,7 @@ module ActionView
         conditions.each { |k, v| conditions[k] = Array(v).map(&:to_s) }
         self._layout_conditions = conditions
 
+        layout = ractor_make_shareable(layout) if layout.is_a?(Proc)
         self._layout = layout
         _write_layout_method
       end
