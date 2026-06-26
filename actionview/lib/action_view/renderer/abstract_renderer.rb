@@ -83,7 +83,11 @@ module ActionView
           end
 
           if view.prefix_partial_path_with_controller_namespace
-            PREFIXED_PARTIAL_NAMES[@context_prefix][path] ||= merge_prefix_into_object_path(@context_prefix, path.dup)
+            if ActiveSupport::Ractors.main?
+              PREFIXED_PARTIAL_NAMES[@context_prefix][path] ||= merge_prefix_into_object_path(@context_prefix, path.dup)
+            else
+              merge_prefix_into_object_path(@context_prefix, path.dup)
+            end
           else
             path
           end
