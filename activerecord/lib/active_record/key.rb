@@ -5,14 +5,14 @@ module ActiveRecord
     include Enumerable
 
     def self.for(name)
-      case name
+      ActiveSupport::Ractors.make_shareable(case name
       when Array
         Composite.new(name)
       when nil, false
         None.new
       else
         Single.new(name)
-      end
+      end)
     end
 
     attr_reader :name, :columns

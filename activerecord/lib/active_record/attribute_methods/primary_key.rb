@@ -89,7 +89,10 @@ module ActiveRecord
           end
 
           def primary_key_definition # :nodoc:
-            reset_primary_key unless _primary_key_definition
+            return _primary_key_definition if _primary_key_definition
+            return ActiveSupport::Ractors.on_main(self) { primary_key_definition } unless ActiveSupport::Ractors.main?
+
+            reset_primary_key
             _primary_key_definition
           end
 
