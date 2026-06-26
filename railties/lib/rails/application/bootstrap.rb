@@ -70,13 +70,13 @@ module Rails
           Rails.error.logger = Rails.logger
         end
 
-        Rails.error.add_middleware(->(error, handled:, severity:, context:, source:) {
+        Rails.error.add_middleware(ActiveSupport::Ractors.shareable_lambda do |error, handled:, severity:, context:, source:|
           context.reverse_merge(rails: {
             version: Rails::VERSION::STRING,
-            app_revision: app.revision,
+            app_revision: Rails.application.revision,
             environment: Rails.env.to_s,
           })
-        })
+        end)
       end
 
       initializer :initialize_event_reporter, group: :all do

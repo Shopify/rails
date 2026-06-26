@@ -674,6 +674,11 @@ module Rails
       env_config
       routes
 
+      Rails.application
+      Ractor.make_shareable(Rails.backtrace_cleaner)
+      Ractor.make_shareable(Rails.event)
+      Ractor.make_shareable(Rails.error)
+
       @autoloaders, @reloaders, @routes_reloader = nil, nil, nil
 
       Ractor.make_shareable(self)
