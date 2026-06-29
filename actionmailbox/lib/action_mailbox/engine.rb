@@ -11,7 +11,6 @@ require "action_mailbox"
 module ActionMailbox
   class Engine < Rails::Engine
     isolate_namespace ActionMailbox
-    config.eager_load_namespaces << ActionMailbox
 
     config.action_mailbox = ActiveSupport::OrderedOptions.new
     config.action_mailbox.incinerate = true

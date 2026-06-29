@@ -7,7 +7,11 @@ module ActiveSupport
   class Railtie < Rails::Railtie # :nodoc:
     config.active_support = ActiveSupport::OrderedOptions.new
 
-    config.eager_load_namespaces << ActiveSupport
+    config.before_eager_load do
+      unless ActiveSupport::Autoload.eager_load_namespaces.equal?(config.eager_load_namespaces)
+        ActiveSupport::Autoload.eager_load_namespaces = config.eager_load_namespaces.concat(ActiveSupport::Autoload.eager_load_namespaces)
+      end
+    end
 
     guard_load_hooks(:message_pack, :active_support_test_case)
 

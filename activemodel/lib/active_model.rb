@@ -73,11 +73,6 @@ module ActiveModel
       autoload :JSON
     end
   end
-
-  def self.eager_load!
-    super
-    ActiveModel::Serializers.eager_load!
-  end
 end
 
 ActiveSupport.on_load(:i18n) do

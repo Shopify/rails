@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "active_support/inflector/methods"
+require "active_support/core_ext/module/attribute_accessors"
 
 module ActiveSupport
   # = Active Support \Autoload
@@ -27,6 +28,8 @@ module ActiveSupport
   #
   #   MyLib.eager_load!
   module Autoload
+    mattr_accessor :eager_load_namespaces, default: [], instance_accessor: false
+
     def autoload(const_name, path = @_at_path)
       unless path
         full = [name, @_under_path, const_name.to_s].compact.join("::")
@@ -56,6 +59,7 @@ module ActiveSupport
     end
 
     def eager_autoload
+      Autoload.eager_load_namespaces << self
       old_eager, @_eager_autoload = @_eager_autoload, true
       yield
     ensure

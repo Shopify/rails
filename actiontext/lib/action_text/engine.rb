@@ -13,7 +13,6 @@ require "action_text/trix"
 module ActionText
   class Engine < Rails::Engine
     isolate_namespace ActionText
-    config.eager_load_namespaces << ActionText
 
     config.action_text = ActiveSupport::OrderedOptions.new
     config.action_text.editors = ActiveSupport::InheritableOptions.new(

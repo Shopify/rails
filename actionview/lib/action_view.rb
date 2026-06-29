@@ -106,12 +106,6 @@ module ActionView
   end
 
   self.render_tracker = :regex
-
-  def self.eager_load!
-    super
-    ActionView::Helpers.eager_load!
-    ActionView::Template.eager_load!
-  end
 end
 
 require "active_support/core_ext/string/output_safety"

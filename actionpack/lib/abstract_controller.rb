@@ -13,7 +13,6 @@ module AbstractController
 
   autoload :ActionNotFound, "abstract_controller/base"
   autoload :Base
-  autoload :Caching
   autoload :Callbacks
   autoload :Collector
   autoload :DoubleRenderError, "abstract_controller/rendering"
@@ -24,9 +23,12 @@ module AbstractController
   autoload :AssetPaths
   autoload :UrlFor
 
+  eager_autoload do
+    autoload :Caching
+  end
+
   def self.eager_load!
     super
-    AbstractController::Caching.eager_load!
     AbstractController::Base.descendants.each do |controller|
       unless controller.abstract?
         controller.eager_load!

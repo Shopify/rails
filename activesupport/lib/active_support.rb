@@ -98,12 +98,6 @@ module ActiveSupport
   autoload :SafeBuffer, "active_support/core_ext/string/output_safety"
   autoload :TestCase
 
-  def self.eager_load!
-    super
-
-    NumberHelper.eager_load!
-  end
-
   singleton_class.attr_accessor :test_order # :nodoc:
 
   @test_parallelization_threshold = 50

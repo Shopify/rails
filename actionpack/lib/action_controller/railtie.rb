@@ -18,9 +18,6 @@ module ActionController
     config.action_controller.wrap_parameters_by_default = false
     config.action_controller.allowed_redirect_hosts = []
 
-    config.eager_load_namespaces << AbstractController
-    config.eager_load_namespaces << ActionController
-
     guard_load_hooks(:action_controller, :action_controller_base, :action_controller_api, :action_controller_test_case)
 
     initializer "action_controller.deprecator", before: :load_environment_config do |app|

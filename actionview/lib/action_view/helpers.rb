@@ -30,11 +30,8 @@ module ActionView # :nodoc:
   module Helpers # :nodoc:
     extend ActiveSupport::Autoload
 
-    autoload :Tags
-
-    def self.eager_load!
-      super
-      Tags.eager_load!
+    eager_autoload do
+      autoload :Tags
     end
 
     extend ActiveSupport::Concern

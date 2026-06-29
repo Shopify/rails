@@ -51,6 +51,8 @@ module ActionDispatch
   end
 
   eager_autoload do
+    autoload :Routing
+
     autoload_under "http" do
       autoload :ContentSecurityPolicy
       autoload :InvalidParameterError, "action_dispatch/http/param_error"
@@ -90,7 +92,6 @@ module ActionDispatch
   autoload :Constants
   autoload :Journey
   autoload :MiddlewareStack, "action_dispatch/middleware/stack"
-  autoload :Routing
 
   module Http
     extend ActiveSupport::Autoload
@@ -145,11 +146,6 @@ module ActionDispatch
   #  be logged below their relevant log lines. Defaults to false.
   singleton_class.attr_accessor :verbose_redirect_logs
   self.verbose_redirect_logs = false
-
-  def eager_load!
-    super
-    Routing.eager_load!
-  end
 end
 
 autoload :Mime, "action_dispatch/http/mime_type"

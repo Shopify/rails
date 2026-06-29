@@ -49,7 +49,6 @@ module ActiveRecord
   autoload :DelegatedType
   autoload :DestroyAssociationAsyncJob
   autoload :DynamicMatchers
-  autoload :Encryption
   autoload :Enum
   autoload :Explain
   autoload :FixtureSet, "active_record/fixtures"
@@ -103,6 +102,7 @@ module ActiveRecord
     autoload :AutosaveAssociation
     autoload :ConnectionAdapters
     autoload :DisableJoinsAssociationRelation
+    autoload :Encryption
     autoload :FutureResult
     autoload :LegacyYamlAdapter
     autoload :Promise
@@ -556,16 +556,6 @@ module ActiveRecord
   # ActiveSupport::MessageVerifiers instance for Active Record. If you are using
   # Rails, this will be set to +Rails.application.message_verifiers+.
   singleton_class.attr_accessor :message_verifiers
-
-  def self.eager_load!
-    super
-    ActiveRecord::Locking.eager_load!
-    ActiveRecord::Scoping.eager_load!
-    ActiveRecord::Associations.eager_load!
-    ActiveRecord::AttributeMethods.eager_load!
-    ActiveRecord::ConnectionAdapters.eager_load!
-    ActiveRecord::Encryption.eager_load!
-  end
 
   # Explicitly closes all database connections in all pools.
   def self.disconnect_all!

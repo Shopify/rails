@@ -15,8 +15,6 @@ module ActionView
     config.action_view.apply_stylesheet_media_default = true
     config.action_view.prepend_content_exfiltration_prevention = false
 
-    config.eager_load_namespaces << ActionView
-
     guard_load_hooks(:action_view, :action_view_test_case)
 
     config.after_initialize do |app|

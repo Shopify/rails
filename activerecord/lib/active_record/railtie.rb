@@ -44,8 +44,6 @@ module ActiveRecord
 
     config.active_record.queues = ActiveSupport::InheritableOptions.new
 
-    config.eager_load_namespaces << ActiveRecord
-
     guard_load_hooks(
       :active_record, :active_record_encryption, :active_record_fixture_set, :active_record_fixtures,
       :active_record_mysql2adapter, :active_record_postgresqladapter, :active_record_sqlite3adapter,

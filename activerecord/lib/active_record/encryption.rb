@@ -46,12 +46,6 @@ module ActiveRecord
 
     include Configurable
     include Contexts
-
-    def self.eager_load!
-      super
-
-      Cipher.eager_load!
-    end
   end
 
   ActiveSupport.run_load_hooks :active_record_encryption, Encryption

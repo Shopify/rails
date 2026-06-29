@@ -51,8 +51,6 @@ module ActionDispatch
 
     config.action_dispatch.cookies_rotations = ActiveSupport::Messages::RotationConfiguration.new
 
-    config.eager_load_namespaces << ActionDispatch
-
     guard_load_hooks(
       :action_dispatch_response, :action_dispatch_system_test_case,
       :action_dispatch_integration_test,
