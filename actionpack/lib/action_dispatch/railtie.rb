@@ -103,5 +103,9 @@ module ActionDispatch
       ActionDispatch::Http::Cache::Request.strict_freshness = app.config.action_dispatch.strict_freshness
       ActionDispatch.test_app = app
     end
+
+    config.after_initialize do
+      Mime.soft_freeze
+    end
   end
 end
