@@ -465,7 +465,7 @@ module ActiveRecord
         end
 
         def flush_pipelined_result(connection)
-          connection.flush_pipeline
+          connection.flush_pipeline(waiting_on: self)
         end
 
 

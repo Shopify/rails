@@ -845,6 +845,102 @@ module ActiveRecord
       assert_equal 1, event[:row_count]
     end
 
+    def test_pipelined_query_payload_records_enqueue_depth
+      events = capture_sql_payloads do
+        @connection.enter_pipeline_mode
+
+        intent1 = @connection.send(:internal_build_intent, "SELECT 1 AS n", "TEST")
+        intent2 = @connection.send(:internal_build_intent, "SELECT 2 AS n", "TEST")
+
+        intent1.execute!
+        intent2.execute!
+
+        @connection.flush_pipeline
+        @connection.exit_pipeline_mode
+      end
+
+      event1 = find_sql_event(events, "SELECT 1 AS n")
+      event2 = find_sql_event(events, "SELECT 2 AS n")
+
+      assert_equal true, event1[:pipelined]
+      assert_equal 0, event1[:pipeline_depth_at_enqueue]
+      assert_equal true, event2[:pipelined]
+      assert_equal 1, event2[:pipeline_depth_at_enqueue]
+    end
+
+    def test_pipelined_result_access_attributes_wait_to_accessed_intent
+      events = capture_sql_payloads do
+        @connection.enter_pipeline_mode
+
+        waited_on = @connection.send(
+          :internal_build_intent, "SELECT 1 AS n FROM pg_sleep(0.02)", "TEST"
+        )
+        delivered_with_it = @connection.send(:internal_build_intent, "SELECT 2 AS n", "TEST")
+
+        waited_on.execute!
+        delivered_with_it.execute!
+
+        waited_on.cast_result
+        @connection.exit_pipeline_mode
+      end
+
+      waited_on_event = find_sql_event(events, "SELECT 1 AS n FROM pg_sleep(0.02)")
+      delivered_event = find_sql_event(events, "SELECT 2 AS n")
+
+      assert_operator waited_on_event[:pipeline_wait_duration_ms], :>, 0.0
+      assert_equal 0.0, delivered_event[:pipeline_wait_duration_ms]
+    end
+
+    def test_non_query_triggered_pipeline_drain_attributes_wait_to_first_pending_intent
+      events = capture_sql_payloads do
+        @connection.enter_pipeline_mode
+
+        first_pending = @connection.send(
+          :internal_build_intent, "SELECT 1 AS n FROM pg_sleep(0.1)", "TEST"
+        )
+        delivered_with_it = @connection.send(:internal_build_intent, "SELECT 2 AS n", "TEST")
+
+        first_pending.execute!
+        delivered_with_it.execute!
+        @connection.pipeline_sync
+
+        assert @connection.active?
+        @connection.exit_pipeline_mode
+      end
+
+      first_pending_event = find_sql_event(events, "SELECT 1 AS n FROM pg_sleep(0.1)")
+      delivered_event = find_sql_event(events, "SELECT 2 AS n")
+
+      assert_operator first_pending_event[:pipeline_wait_duration_ms], :>, 0.0
+      assert_equal 0.0, delivered_event[:pipeline_wait_duration_ms]
+    end
+
+    def test_non_pipelined_query_pipeline_exit_does_not_assign_pipeline_wait_to_pending_intents
+      events = capture_sql_payloads do
+        @connection.enter_pipeline_mode
+
+        intent1 = @connection.send(
+          :internal_build_intent, "SELECT 1 AS n FROM pg_sleep(0.02)", "TEST"
+        )
+        intent2 = @connection.send(:internal_build_intent, "SELECT 2 AS n", "TEST")
+
+        intent1.execute!
+        intent2.execute!
+
+        result = @connection.execute("SELECT 3 AS n; SELECT 4 AS n", "SYNC")
+        result.clear
+      end
+
+      event1 = find_sql_event(events, "SELECT 1 AS n FROM pg_sleep(0.02)")
+      event2 = find_sql_event(events, "SELECT 2 AS n")
+      sync_event = find_sql_event(events, "SELECT 3 AS n; SELECT 4 AS n")
+
+      assert_equal 0.0, event1[:pipeline_wait_duration_ms]
+      assert_equal 0.0, event2[:pipeline_wait_duration_ms]
+      assert_equal false, sync_event[:pipelined]
+      assert_nil sync_event[:pipeline_wait_duration_ms]
+    end
+
     def test_statement_pool_eviction_during_pipeline_mode
       pool_config = ActiveRecord::Base.connection_pool.db_config
       test_config = pool_config.configuration_hash.merge(statement_limit: 2)
@@ -2310,6 +2406,22 @@ module ActiveRecord
     end
 
     private
+      def capture_sql_payloads
+        events = []
+        callback = ->(_name, _start, _finish, _id, payload) { events << payload.dup }
+
+        ActiveSupport::Notifications.subscribed(callback, "sql.active_record") do
+          yield
+        end
+
+        events
+      end
+
+      def find_sql_event(events, sql)
+        events.find { |payload| payload[:sql] == sql } ||
+          flunk("Expected sql.active_record event for #{sql.inspect}")
+      end
+
       def with_dedicated_connection(connection_retries: nil)
         pool_config = ActiveRecord::Base.connection_pool.db_config
         db_config =

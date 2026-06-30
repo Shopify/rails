@@ -471,10 +471,10 @@ module ActiveRecord
         raise NotImplementedError
       end
 
-      def exit_pipeline_mode
+      def exit_pipeline_mode(waiting_on: nil)
       end
 
-      def flush_pipeline
+      def flush_pipeline(waiting_on: nil)
       end
 
       # Should primary key values be selected from their corresponding

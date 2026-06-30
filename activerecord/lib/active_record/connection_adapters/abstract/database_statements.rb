@@ -654,7 +654,7 @@ module ActiveRecord
 
       def perform_sync_attempt(intent) # :nodoc:
         begin
-          exit_pipeline_mode if pipeline_active?
+          exit_pipeline_mode(waiting_on: intent) if pipeline_active?
           result = perform_query(@raw_connection, intent)
         rescue ::RangeError
           raise
@@ -689,6 +689,7 @@ module ActiveRecord
           transaction:       current_transaction.user_transaction.presence,
           affected_rows:     0,
           row_count:         0,
+          pipelined:         false,
         }
         intent.notification_payload = payload
 

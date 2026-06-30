@@ -349,9 +349,9 @@ class PipelinedQueriesTest < ActiveRecord::PostgreSQLTestCase
       pending_lengths = []
       original_flush = @connection.method(:flush_pipeline)
 
-      @connection.stub(:flush_pipeline, -> {
+      @connection.stub(:flush_pipeline, ->(**kwargs) {
         pending_lengths << Array(@connection.instance_variable_get(:@pending_intents)).length
-        original_flush.call
+        original_flush.call(**kwargs)
       }) { yield }
 
       pending_lengths
