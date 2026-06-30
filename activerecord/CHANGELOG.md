@@ -1,3 +1,10 @@
+*   Cache schema context column names and attribute builders.
+
+    Avoid recomputing schema-derived attribute builder state on repeated model
+    deserialization.
+
+    *Adrianna Chang*
+
 *   Encapsulate model schema-derived state in a schema context object.
 
     Active Record models now keep their schema-derived caches, such as columns,

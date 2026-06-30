@@ -104,4 +104,36 @@ class SchemaContextTest < ActiveRecord::TestCase
     assert_same schema_context, model.schema_context
     assert_not_predicate schema_context, :schema_loaded?
   end
+
+  def test_schema_context_caches_attributes_builder_until_reload
+    model = Class.new(ActiveRecord::Base) do
+      self.table_name = "tasks"
+    end
+
+    schema_context = model.schema_context
+    attributes_builder = schema_context.attributes_builder
+
+    assert_same attributes_builder, schema_context.attributes_builder
+
+    schema_context.reload_schema_from_cache
+
+    assert_not_same attributes_builder, schema_context.attributes_builder
+    assert_same schema_context.attributes_builder, schema_context.attributes_builder
+  end
+
+  def test_schema_context_caches_column_names_until_reload
+    model = Class.new(ActiveRecord::Base) do
+      self.table_name = "tasks"
+    end
+
+    schema_context = model.schema_context
+    column_names = schema_context.column_names
+
+    assert_same column_names, schema_context.column_names
+
+    schema_context.reload_schema_from_cache
+
+    assert_not_same column_names, schema_context.column_names
+    assert_same schema_context.column_names, schema_context.column_names
+  end
 end
