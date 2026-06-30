@@ -36,6 +36,7 @@ module ActiveRecord
       def checkin(_); end
       def remove(_); end
       def async_executor; end
+      def release_connection_if_unheld(_ = nil); false; end
 
       def db_config
         NULL_CONFIG
@@ -156,16 +157,19 @@ module ActiveRecord
 
       class Lease # :nodoc:
         attr_accessor :connection, :sticky
+        attr_reader :with_connection_depth
 
         def initialize
           @connection = nil
           @sticky = nil
+          @with_connection_depth = 0
         end
 
         def release
           conn = @connection
           @connection = nil
           @sticky = nil
+          @with_connection_depth = 0
           conn
         end
 
@@ -173,10 +177,23 @@ module ActiveRecord
           if @connection == connection
             @connection = nil
             @sticky = nil
+            @with_connection_depth = 0
             true
           else
             false
           end
+        end
+
+        def increment_with_connection_depth
+          @with_connection_depth += 1
+        end
+
+        def decrement_with_connection_depth
+          @with_connection_depth -= 1
+        end
+
+        def held?
+          sticky || @with_connection_depth > 0 || @connection&.pipeline_pending?
         end
       end
 
@@ -430,11 +447,21 @@ module ActiveRecord
       def release_connection(existing_lease = nil)
         return if self.discarded?
 
-        if conn = connection_lease.release
+        lease = existing_lease || connection_lease
+        if conn = lease.release
           checkin conn
           return true
         end
         false
+      end
+
+      def release_connection_if_unheld(connection = nil) # :nodoc:
+        lease = connection_lease
+        return false if connection && !lease.connection.equal?(connection)
+        return false unless lease.connection
+        return false if lease.held?
+
+        release_connection(lease)
       end
 
       # Yields a connection from the connection pool to the block. If no connection
@@ -452,17 +479,24 @@ module ActiveRecord
         lease.sticky = false if prevent_permanent_checkout
 
         if lease.connection
+          conn = lease.connection
           begin
-            yield lease.connection
+            lease.increment_with_connection_depth
+            yield conn
           ensure
+            lease.decrement_with_connection_depth if lease.connection.equal?(conn)
             lease.sticky = sticky_was if prevent_permanent_checkout
+            release_connection_if_unheld
           end
         else
           begin
-            yield lease.connection = checkout
+            conn = lease.connection = checkout
+            lease.increment_with_connection_depth
+            yield conn
           ensure
+            lease.decrement_with_connection_depth if conn && lease.connection.equal?(conn)
             lease.sticky = sticky_was if prevent_permanent_checkout
-            release_connection(lease) unless lease.sticky
+            release_connection_if_unheld
           end
         end
       end
@@ -521,9 +555,18 @@ module ActiveRecord
               @connections.each do |conn|
                 if conn.in_use?
                   conn.steal!
-                  checkin conn
+                  begin
+                    checkin conn
+                  rescue StandardError => error
+                    ActiveSupport.error_reporter.report(error, handled: true, source: "active_record.connection_pool")
+                  end
                 end
-                conn.disconnect!
+
+                begin
+                  conn.disconnect!
+                rescue StandardError => error
+                  ActiveSupport.error_reporter.report(error, handled: true, source: "active_record.connection_pool")
+                end
               end
               @connections = @pinned_connection ? [@pinned_connection] : []
               @leases.clear

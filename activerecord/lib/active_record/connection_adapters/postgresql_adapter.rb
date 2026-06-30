@@ -16,6 +16,7 @@ require "active_record/connection_adapters/postgresql/schema_creation"
 require "active_record/connection_adapters/postgresql/schema_definitions"
 require "active_record/connection_adapters/postgresql/schema_dumper"
 require "active_record/connection_adapters/postgresql/schema_statements"
+require "active_record/connection_adapters/postgresql/pipeline_context"
 require "active_record/connection_adapters/postgresql/type_metadata"
 require "active_record/connection_adapters/postgresql/utils"
 
@@ -207,6 +208,7 @@ module ActiveRecord
       include PostgreSQL::ReferentialIntegrity
       include PostgreSQL::SchemaStatements
       include PostgreSQL::DatabaseStatements
+      include PostgreSQL::PipelineContext
 
       def supports_bulk_alter?
         true
@@ -333,6 +335,25 @@ module ActiveRecord
         { concurrently: "CONCURRENTLY" }
       end
 
+      class ErrorResultSnapshot # :nodoc:
+        def initialize(result)
+          @fields = PG.constants.
+            grep(/\APG_DIAG_/).
+            map { PG.const_get(_1) }.
+            index_with { result.error_field(_1) }
+
+          @error_message = result.error_message
+        end
+
+        def error_field(field)
+          @fields[field]
+        end
+        alias :result_error_field :error_field
+
+        attr_reader :error_message
+        alias :result_error_message :error_message
+      end
+
       class StatementPool < ConnectionAdapters::StatementPool # :nodoc:
         def initialize(connection, max)
           super(max)
@@ -350,6 +371,7 @@ module ActiveRecord
             # accessed while holding the connection's lock. (And we
             # don't need the complication of with_raw_connection because
             # a reconnect would invalidate the entire statement pool.)
+            @connection.exit_pipeline_mode
             if (conn = @connection.instance_variable_get(:@raw_connection)) && conn.status == PG::CONNECTION_OK
               if @connection.supports_close_prepared?
                 conn.close_prepared key
@@ -382,6 +404,7 @@ module ActiveRecord
         @type_map_queried = false
         @raw_connection = nil
         @notice_receiver_sql_warnings = []
+        @notice_receiver_fatal_error = nil
 
         @use_insert_returning = @config.key?(:insert_returning) ? self.class.type_cast_config_to_boolean(@config[:insert_returning]) : true
       end
@@ -394,11 +417,17 @@ module ActiveRecord
       def active?
         @lock.synchronize do
           return false unless connected?
-          @raw_connection.query ";"
+
+          if pipeline_active?
+            return false unless active_pipeline_connection?
+          else
+            @raw_connection.query ";"
+          end
+
           verified!
+          true
         end
-        true
-      rescue PG::Error
+      rescue PG::Error, IOError, SystemCallError
         false
       end
 
@@ -419,6 +448,8 @@ module ActiveRecord
         @lock.synchronize do
           return connect! unless @raw_connection
 
+          exit_pipeline_mode
+
           unless @raw_connection.transaction_status == ::PG::PQTRANS_IDLE
             @raw_connection.query "ROLLBACK"
           end
@@ -437,17 +468,24 @@ module ActiveRecord
       # method does nothing.
       def disconnect!
         @lock.synchronize do
+          exit_pipeline_mode rescue nil
+          discard_pipeline_buffer
+
           super
           @raw_connection&.close rescue nil
           @raw_connection = nil
+          @notice_receiver_fatal_error = nil
         end
       end
 
       def discard! # :nodoc:
+        discard_pipeline_buffer
         super
         @raw_connection&.socket_io&.reopen(IO::NULL) rescue nil
         @raw_connection = nil
       end
+
+      set_callback :checkin, :before, :exit_pipeline_mode
 
       def self.native_database_types # :nodoc:
         @native_database_types ||= begin
@@ -812,6 +850,37 @@ module ActiveRecord
       private
         attr_reader :type_map
 
+        def connection_terminating_severity?(result)
+          severity = result&.error_field(PG::PG_DIAG_SEVERITY_NONLOCALIZED)
+          severity == "FATAL" || severity == "PANIC"
+        end
+
+        def capture_fatal_notice(result)
+          return false unless connection_terminating_severity?(result)
+
+          begin
+            result.check
+          rescue PG::Error => error
+            # result will be cleared when the notice handler returns, so
+            # we need to replace it on the exception with a snapshot.
+            snapshot = ErrorResultSnapshot.new(result)
+            error.define_singleton_method(:result) { snapshot }
+
+            @notice_receiver_fatal_error = error
+          end
+
+          @last_activity = nil
+          @verified = false
+          @needs_reconnect = true
+
+          true
+        end
+
+        def consume_notice_receiver_fatal_error
+          consumed, @notice_receiver_fatal_error = @notice_receiver_fatal_error, nil
+          consumed
+        end
+
         def initialize_type_map(m = type_map)
           self.class.initialize_type_map(m)
 
@@ -881,7 +950,8 @@ module ActiveRecord
           when nil
             if exception.message.match?(/connection is closed/i) || exception.message.match?(/no connection to the server/i)
               ConnectionNotEstablished.new(exception, connection_pool: @pool)
-            elsif exception.is_a?(PG::ConnectionBad)
+            elsif exception.is_a?(PG::ConnectionBad) ||
+                  (exception.is_a?(PG::Error) && exception.connection&.status == PG::CONNECTION_BAD)
               # libpq message style always ends with a newline; the pg gem's internal
               # errors do not. We separate these cases because a pg-internal
               # ConnectionBad means it failed before it managed to send the query,
@@ -920,7 +990,11 @@ module ActiveRecord
           when QUERY_CANCELED
             QueryCanceled.new(message, sql: sql, binds: binds, connection_pool: @pool)
           else
-            super
+            if connection_terminating_severity?(exception.result)
+              ConnectionFailed.new(exception, connection_pool: @pool)
+            else
+              super
+            end
           end
         end
 
@@ -1021,16 +1095,17 @@ module ActiveRecord
         # Prepare the statement if it hasn't been prepared, return
         # the statement key.
         def prepare_statement(sql, binds, conn)
+          raise "pipeline mode does not support prepared statements" if pipeline_active?
           sql_key = sql_key(sql)
           unless @statements.key? sql_key
             nextkey = @statements.next_key
             begin
-              conn.prepare nextkey, sql
+              conn.send_prepare(nextkey, sql)
+              result = get_result(conn)
+              result&.check
             rescue => e
               raise translate_exception_class(e, sql, binds)
             end
-            # Clear the queue
-            conn.get_last_result
             @statements[sql_key] = nextkey
           end
           @statements[sql_key]
@@ -1045,6 +1120,8 @@ module ActiveRecord
         end
 
         def reconnect
+          abandon_pipelined_intents
+
           begin
             @raw_connection&.reset
           rescue PG::ConnectionBad
@@ -1073,8 +1150,11 @@ module ActiveRecord
             @raw_connection.set_client_encoding(@config[:encoding])
           end
 
-          unless ActiveRecord.db_warnings_action.nil?
-            @raw_connection.set_notice_receiver do |result|
+          @notice_receiver_fatal_error = nil
+          @raw_connection.set_notice_receiver do |result|
+            next if capture_fatal_notice(result)
+
+            if ActiveRecord.db_warnings_action
               message = result.error_field(PG::Result::PG_DIAG_MESSAGE_PRIMARY)
               code = result.error_field(PG::Result::PG_DIAG_SQLSTATE)
               level = result.error_field(PG::Result::PG_DIAG_SEVERITY)

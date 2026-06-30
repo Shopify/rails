@@ -68,7 +68,7 @@ module ActiveRecord
       end
 
       # Returns an ActiveRecord::Result instance.
-      def select_all(arel, name = nil, binds = [], preparable: nil, async: false, allow_retry: false)
+      def select_all(arel, name = nil, binds = [], preparable: nil, async: false, allow_retry: false, pipeline: false)
         arel = arel_from_relation(arel)
         intent = QueryIntent.new(
           adapter: self,
@@ -77,12 +77,13 @@ module ActiveRecord
           binds: binds,
           prepare: preparable,
           allow_async: async,
+          prefer_pipeline: pipeline,
           allow_retry: allow_retry
         )
 
         intent.execute!
 
-        if async
+        if async || pipeline
           intent.future_result
         else
           intent.cast_result
@@ -91,13 +92,13 @@ module ActiveRecord
 
       # Returns a record hash with the column names as keys and column values
       # as values.
-      def select_one(arel, name = nil, binds = [], async: false)
-        select_all(arel, name, binds, async: async).then(&:first)
+      def select_one(arel, name = nil, binds = [], async: false, pipeline: false)
+        select_all(arel, name, binds, async: async, pipeline: pipeline).then(&:first)
       end
 
       # Returns a single value from a record
-      def select_value(arel, name = nil, binds = [], async: false)
-        select_rows(arel, name, binds, async: async).then { |rows| single_value_from_rows(rows) }
+      def select_value(arel, name = nil, binds = [], async: false, pipeline: false)
+        select_rows(arel, name, binds, async: async, pipeline: pipeline).then { |rows| single_value_from_rows(rows) }
       end
 
       # Returns an array of the values of the first column in a select:
@@ -108,8 +109,8 @@ module ActiveRecord
 
       # Returns an array of arrays containing the field values.
       # Order is the same as that returned by +columns+.
-      def select_rows(arel, name = nil, binds = [], async: false)
-        select_all(arel, name, binds, async: async).then(&:rows)
+      def select_rows(arel, name = nil, binds = [], async: false, pipeline: false)
+        select_all(arel, name, binds, async: async, pipeline: pipeline).then(&:rows)
       end
 
       def query_value(...) # :nodoc:
@@ -613,8 +614,8 @@ module ActiveRecord
       end
 
       # Lowest-level abstract execution of a query, called only from the intent itself.
-      # Final wrapper around the subclass-specific +perform_query+. Populates the calling
-      # intent's raw_result.
+      # Final wrapper around the subclass-specific +perform_query+. Delivers the outcome
+      # back to the calling intent.
       def execute_intent(intent) # :nodoc:
         should_dirty = false
 
@@ -625,29 +626,112 @@ module ActiveRecord
           materialize_transactions
         end
 
-        log(intent) do |notification_payload|
-          intent.notification_payload = notification_payload
-          with_raw_connection(allow_retry: intent.allow_retry, materialize_transactions: false) do |conn|
+        start_intent_log(intent)
+        begin
+          @lock.synchronize do
+            reconnectable = ensure_connection_ready(
+              allow_retry: intent.allow_retry,
+              materialize_transactions: false
+            )
+
             should_dirty = intent.materialize_transactions
-            begin
-              result = perform_query(conn, intent)
-              intent.raw_result = result
 
-              query_completed = true
-            ensure
-              begin
-                handle_warnings(result, intent.processed_sql)
-              rescue
-                raise if query_completed
+            intent.initialize_retry_state(
+              retries: intent.allow_retry ? connection_retries : 0,
+              deadline: retry_deadline && Process.clock_gettime(Process::CLOCK_MONOTONIC) + retry_deadline,
+              reconnectable: reconnectable
+            )
 
-                # The query failed, so we need to swallow this exception
-                # from handle_warnings to avoid masking the original.
-              end
-            end
+            perform_sync_attempt(intent)
           end
+        rescue => error
+          intent.send(:finish_log, exception: error) unless intent.raw_result_available?
+          raise
         end
       ensure
         dirty_current_transaction if should_dirty
+      end
+
+      def perform_sync_attempt(intent) # :nodoc:
+        begin
+          exit_pipeline_mode(waiting_on: intent) if pipeline_active?
+          result = perform_query(@raw_connection, intent)
+        rescue ::RangeError
+          raise
+        rescue => error
+          translated = translate_exception_with_cause(error, intent.processed_sql, intent.binds)
+          invalidate_transaction(translated)
+
+          begin
+            warnings = collect_warnings(result)
+          rescue
+            # The query failed, so we need to swallow this exception
+            # from warning collection to avoid masking the original.
+          end
+
+          intent.deliver_failure(translated, warnings: warnings)
+        else
+          intent.deliver_result(result, warnings: collect_warnings(result))
+        end
+      end
+
+      def start_intent_log(intent) # :nodoc:
+        return if intent.log_handle
+
+        payload = {
+          sql:               intent.processed_sql,
+          name:              intent.name,
+          binds:             intent.binds,
+          type_casted_binds: intent.type_casted_binds,
+          async:             intent.ran_async,
+          allow_retry:       intent.allow_retry,
+          connection:        self,
+          transaction:       current_transaction.user_transaction.presence,
+          affected_rows:     0,
+          row_count:         0,
+          pipelined:         false,
+        }
+        intent.notification_payload = payload
+
+        active_record_instrumenter = intent.event_buffer || instrumenter
+        handle = active_record_instrumenter.build_handle("sql.active_record", payload)
+        handle.start
+        intent.log_handle = handle
+        @unfinalized_intents << intent
+      end
+
+      def finish_intent_log(intent, exception: nil) # :nodoc:
+        handle = intent.log_handle
+        return unless handle
+
+        intent.log_handle = nil
+        @unfinalized_intents.delete(intent)
+
+        if exception
+          payload = intent.notification_payload
+          payload[:exception] = [exception.class.name, exception.message]
+          payload[:exception_object] = exception
+        end
+
+        handle.finish
+      end
+
+      def finalize_remaining_intents # :nodoc:
+        intents = @unfinalized_intents
+        @unfinalized_intents = []
+
+        intents.each do |intent|
+          next if intent.finalized?
+
+          exception = intent.error
+          if exception.nil? && intent.not_run_reason
+            exception = ActiveRecord::QueryNotRun.new(
+              "Query was not run due to pipeline failure (#{intent.not_run_reason})"
+            )
+          end
+
+          intent.send(:finish_log, exception: exception)
+        end
       end
 
       # Executes SQL statements in the context of this connection without
@@ -677,7 +761,19 @@ module ActiveRecord
           raise NotImplementedError
         end
 
-        def handle_warnings(raw_result, sql)
+        def collect_warnings(raw_result)
+          []
+        end
+
+        def handle_warnings(intent, warnings)
+          return unless action = ActiveRecord.db_warnings_action
+
+          warnings&.each do |warning|
+            next if warning_ignored?(warning)
+
+            warning.sql = intent.processed_sql
+            action.call(warning)
+          end
         end
 
         # Receive a native adapter result object and returns an ActiveRecord::Result object.

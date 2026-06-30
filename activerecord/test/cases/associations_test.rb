@@ -12,6 +12,7 @@ require "models/post"
 require "models/author"
 require "models/book"
 require "models/comment"
+require "models/rating"
 require "models/tag"
 require "models/tagging"
 require "models/person"
@@ -811,6 +812,21 @@ class OverridingAssociationsTest < ActiveRecord::TestCase
   end
 end
 
+class PreloaderPlanningParent < ActiveRecord::Base
+  self.table_name = "authors"
+
+  has_many :foos, class_name: "PreloaderPlanningChild", foreign_key: :author_id
+  has_many :bars, ->(parent) {
+    where(body: parent.association(:foos).loaded? ? "foos_loaded" : "foos_not_loaded")
+  }, class_name: "PreloaderPlanningChild", foreign_key: :author_id
+end
+
+class PreloaderPlanningChild < ActiveRecord::Base
+  self.table_name = "posts"
+
+  belongs_to :parent, class_name: "PreloaderPlanningParent", foreign_key: :author_id
+end
+
 class PreloaderTest < ActiveRecord::TestCase
   fixtures :posts, :comments, :books, :authors, :tags, :taggings, :essays, :categories, :author_addresses,
            :sharded_blog_posts, :sharded_comments, :sharded_blog_posts_tags, :sharded_tags,
@@ -825,6 +841,19 @@ class PreloaderTest < ActiveRecord::TestCase
 
     assert_predicate post.comments, :loaded?
     assert_equal [comments(:greetings)], post.comments
+  end
+
+  def test_preload_plans_with_prior_top_level_side_effects_visible
+    parent = PreloaderPlanningParent.create!(name: "preloader visibility")
+    PreloaderPlanningChild.create!(parent: parent, title: "foo", body: "foo")
+    PreloaderPlanningChild.create!(parent: parent, title: "bar loaded", body: "foos_loaded")
+    PreloaderPlanningChild.create!(parent: parent, title: "bar not loaded", body: "foos_not_loaded")
+
+    parent = PreloaderPlanningParent.where(id: parent.id).preload(:foos, :bars).first
+
+    assert_predicate parent.association(:foos), :loaded?
+    assert_predicate parent.association(:bars), :loaded?
+    assert_equal ["foos_loaded"], parent.bars.map(&:body)
   end
 
   def test_preload_makes_correct_number_of_queries_on_array
@@ -884,6 +913,36 @@ class PreloaderTest < ActiveRecord::TestCase
     end
   end
 
+  def test_preload_groups_top_level_associations
+    authors = [authors(:david), authors(:mary)]
+
+    assert_queries_count(1) do
+      ActiveRecord::Associations::Preloader.new(records: authors, associations: [:posts, :other_posts]).call
+    end
+
+    assert_no_queries do
+      authors.each do |author|
+        author.posts.to_a
+        author.other_posts.to_a
+      end
+    end
+  end
+
+  def test_preload_keeps_top_level_associations_separate
+    authors = [authors(:david), authors(:mary)]
+
+    assert_queries_count(2) do
+      ActiveRecord::Associations::Preloader.new(records: authors, associations: [:posts, :other_posts], merge_top_level: false).call
+    end
+
+    assert_no_queries do
+      authors.each do |author|
+        author.posts.to_a
+        author.other_posts.to_a
+      end
+    end
+  end
+
   def test_preload_grouped_queries_with_already_loaded_records
     book = books(:awdr)
     post = posts(:welcome)
@@ -897,21 +956,75 @@ class PreloaderTest < ActiveRecord::TestCase
   end
 
   def test_preload_grouped_queries_of_middle_records
-    comments = [
-      comments(:eager_sti_on_associations_s_comment1),
-      comments(:eager_sti_on_associations_s_comment2),
-    ]
+    mary = authors(:mary)
+    bob = authors(:bob)
+    post = Post.create!(author: mary, title: "test post", body: "hello")
 
-    assert_queries_count(2) do
-      ActiveRecord::Associations::Preloader.new(records: comments, associations: [:author, :ordinary_post]).call
+    AuthorFavorite.create!(author: mary, favorite_author: bob)
+    post.reload
+
+    assert_queries_count(3) do
+      ActiveRecord::Associations::Preloader.new(records: [post], associations: { author_favorites: [:author, :favorite_author] }).call
+    end
+  end
+
+  def test_preload_preserves_ordered_overlap_visibility
+    category = Category.create!(name: "Preloader overlap")
+    post = Post.create!(author: authors(:david), title: "test post", body: "hello")
+    post.comments.create!(body: "hello")
+    category.posts << post
+    category.reload
+
+    comment_loads = []
+    subscriber = lambda do |_name, _start, _finish, _id, payload|
+      comment_loads << payload[:sql] if payload[:name] == "Comment Load"
+    end
+
+    ActiveSupport::Notifications.subscribed(subscriber, "sql.active_record") do
+      ActiveRecord::Associations::Preloader.new(
+        records: [category],
+        associations: [
+          { ordered_post_comments: :post },
+          { posts: [{ comments: :post }] },
+        ],
+      ).call
+    end
+
+    assert_equal 2, comment_loads.size
+    assert_no_queries do
+      category.ordered_post_comments.to_a
+      category.posts.each(&:comments)
+    end
+  end
+
+  def test_preload_uses_associated_records_for_overlapping_child_preloads
+    author = Author.create!(name: "Preloader identity")
+    post = author.posts.create!(title: "test post", body: "hello")
+    comment = post.comments.create!(body: "hello")
+    rating = comment.ratings.create!(value: 10)
+    author.reload
+
+    ActiveRecord::Associations::Preloader.new(
+      records: [author],
+      associations: [
+        { comments: :ratings },
+        { posts: [{ comments: :ratings }] },
+      ],
+    ).call
+
+    assert_same author.comments.first, author.posts.first.comments.first
+    assert_equal [rating], author.posts.first.comments.first.ratings.to_a
+    assert_no_queries do
+      author.comments.to_a
+      author.posts.each { |preloaded_post| preloaded_post.comments.each(&:ratings) }
     end
   end
 
   def test_preload_grouped_queries_of_through_records
-    author = authors(:david)
+    organization = organizations(:nsa)
 
-    assert_queries_count(3) do
-      ActiveRecord::Associations::Preloader.new(records: [author], associations: [:hello_post_comments, :comments]).call
+    assert_queries_count(4) do
+      ActiveRecord::Associations::Preloader.new(records: [organization], associations: { authors: [:hello_post_comments, :comments] }).call
     end
   end
 
@@ -1134,33 +1247,34 @@ class PreloaderTest < ActiveRecord::TestCase
     bob = authors(:bob)
 
     AuthorFavorite.create!(author: mary, favorite_author: bob)
-    favorites = AuthorFavorite.all.load
 
-    assert_queries_count(1) do
-      preloader = ActiveRecord::Associations::Preloader.new(records: favorites, associations: [:author, :favorite_author])
+    assert_queries_count(2) do
+      preloader = ActiveRecord::Associations::Preloader.new(records: [mary], associations: { author_favorites: [:author, :favorite_author] })
       preloader.call
     end
 
+    favorite = mary.author_favorites.first
     assert_no_queries do
-      favorites.first.author
-      favorites.first.favorite_author
+      favorite.author
+      favorite.favorite_author
     end
   end
 
   def test_preload_can_group_separate_levels
     mary = authors(:mary)
     bob = authors(:bob)
+    post = Post.create!(author: mary, title: "test post", body: "hello")
 
     AuthorFavorite.create!(author: mary, favorite_author: bob)
 
     assert_queries_count(3) do
-      preloader = ActiveRecord::Associations::Preloader.new(records: [mary], associations: [:posts, favorite_authors: :posts])
+      preloader = ActiveRecord::Associations::Preloader.new(records: [post], associations: { author: [:posts, { favorite_authors: :posts }] })
       preloader.call
     end
 
     assert_no_queries do
-      mary.posts
-      mary.favorite_authors.map(&:posts)
+      post.author.posts.to_a
+      post.author.favorite_authors.map(&:posts)
     end
   end
 
