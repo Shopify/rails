@@ -75,6 +75,10 @@ ActiveSupport::Logger.prepend(ActiveSupport::Ractors::Logger::ShareableDevice)
 # sentinel constant; freeze it so a Ractor-local Concurrent::Map is usable from a
 # non-main Ractor.
 ActiveSupport::Ractors.on_freeze do
+  # ActiveSupport::Digest memoizes @hash_digest_class (a Class); warm it so a
+  # non-main Ractor reads it instead of assigning it.
+  ActiveSupport::Digest.hash_digest_class if defined?(ActiveSupport::Digest)
+
   Ractor.make_shareable(Concurrent::NULL) if defined?(Concurrent::NULL)
   Ractor.make_shareable(Concurrent::NO_VALUE) if defined?(Concurrent::NO_VALUE)
 end

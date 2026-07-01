@@ -99,6 +99,31 @@ module ActionView
         @view_context_class
       end
     end
+
+    # Digestor.digest uses a class-variable mutex (@@digest_mutex) around a
+    # (now Ractor-local) finder digest cache. In a non-main Ractor, compute the
+    # digest without the shared mutex.
+    module Digestor
+      def digest(name:, format: nil, finder:, dependencies: nil)
+        return super if Ractor.main?
+
+        cache_key =
+          if dependencies.nil? || dependencies.empty?
+            "#{name}.#{format}"
+          else
+            "#{name}.#{format}.#{dependencies.flatten.tap(&:compact!).join('.')}"
+          end
+
+        finder.digest_cache[cache_key] ||= begin
+          path = ActionView::TemplatePath.parse(name)
+          root = tree(path.to_s, finder, path.partial?)
+          if dependencies
+            dependencies.each { |dep| root.children << ActionView::Digestor::Injected.new(dep, nil, nil) }
+          end
+          root.digest(finder)
+        end
+      end
+    end
   end
 end
 
@@ -108,6 +133,7 @@ ActiveSupport::Ractors.before_freeze do
   end
   ActionView::PathRegistry.singleton_class.prepend(ActionView::RactorPatches::PathRegistry)
   ActionView::LookupContext::DetailsKey.singleton_class.prepend(ActionView::RactorPatches::DetailsKey)
+  ActionView::Digestor.singleton_class.prepend(ActionView::RactorPatches::Digestor)
   ActionView::Rendering::ClassMethods.prepend(ActionView::RactorPatches::RenderingClassMethods)
 end
 
@@ -126,6 +152,21 @@ ActiveSupport::Ractors.on_freeze do
   # ERB compiler constants read while compiling a template in a Ractor.
   if defined?(ActionView::Template::Handlers::ERB::ENCODING_TAG)
     Ractor.make_shareable(ActionView::Template::Handlers::ERB::ENCODING_TAG)
+  end
+  if defined?(ActionView::AbstractRenderer::RenderedTemplate::EMPTY_SPACER)
+    Ractor.make_shareable(ActionView::AbstractRenderer::RenderedTemplate::EMPTY_SPACER)
+  end
+
+  # DependencyTracker.@trackers is a Concurrent::Map class ivar (registered at
+  # boot, read at request time). Replace with a shareable Hash so a non-main
+  # Ractor can read it.
+  if defined?(ActionView::DependencyTracker)
+    trackers = ActionView::DependencyTracker.instance_variable_get(:@trackers)
+    if trackers && !Ractor.shareable?(trackers)
+      plain = {}
+      trackers.each { |k, v| plain[k] = v }
+      ActionView::DependencyTracker.instance_variable_set(:@trackers, Ractor.make_shareable(plain))
+    end
   end
 
   registry = ActionView::PathRegistry

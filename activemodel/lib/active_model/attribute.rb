@@ -218,6 +218,17 @@ module ActiveModel
       end
 
       class WithCastValue < Attribute # :nodoc:
+        def initialize(...)
+          super
+          # Eagerly resolve the memoized value/database value so the attribute can
+          # be deep-frozen and shared across Ractors (query binds are frozen
+          # before a query is dispatched to the main Ractor).
+          value
+          value_for_database
+        rescue StandardError
+          # If resolution needs resources not available yet, fall back to lazy.
+        end
+
         def type_cast(value)
           value
         end

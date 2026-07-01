@@ -18,6 +18,19 @@ module ActiveRecord
           unless @value_before_type_cast.frozen?
             @value_before_type_cast = @value_before_type_cast.deep_dup
           end
+        else
+          # Eagerly resolve the database value for immutable types too, so the
+          # attribute can be safely deep-frozen and shared across Ractors (the
+          # arel/binds are frozen before a query is dispatched to the main
+          # Ractor). Without this, value_for_database would be memoized lazily
+          # during compilation and mutate a frozen attribute.
+          value_for_database
+        end
+
+        # unboundable? also memoizes (@_unboundable) during SQL compilation;
+        # warm it now so the attribute can be frozen for cross-Ractor sharing.
+        unless value_before_type_cast.is_a?(StatementCache::Substitute)
+          unboundable?
         end
       end
 

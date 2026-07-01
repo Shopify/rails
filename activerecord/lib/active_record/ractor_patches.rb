@@ -31,6 +31,21 @@ module ActiveRecord
           end
         end
       end
+
+      # to_sql (used e.g. for collection cache keys) compiles the arel via the
+      # connection; dispatch that compilation to the main Ractor.
+      def to_sql
+        return super if Ractor.main? || @to_sql || eager_loading?
+
+        shareable_arel = Ractor.make_shareable(arel, copy: true)
+        model_name = model.name
+        @to_sql = Ractor::Dispatch.main.run do
+          klass = Object.const_get(model_name)
+          klass.with_connection do |c|
+            Ractor.make_shareable(c.unprepared_statement { c.to_sql(shareable_arel) })
+          end
+        end
+      end
     end
     # Association reflections hold a scope Proc (invoked via instance_exec, so
     # self-detaching is safe) and Concurrent::Map caches. Make them shareable so
@@ -94,6 +109,26 @@ end
 
 ActiveSupport::Ractors.before_freeze do
   ActiveRecord::Relation.prepend(ActiveRecord::RactorPatches::RelationQueryDispatch)
+
+  # Warm model schema/relation state BEFORE anything is frozen (load_schema!
+  # loads columns from the DB and memoizes class state; it must not run for the
+  # first time inside a non-main Ractor).
+  warm = ->(receiver, name) do
+    receiver.send(name) if receiver.respond_to?(name, true)
+  rescue StandardError
+  end
+
+  ActiveRecord::Base.descendants.each do |klass|
+    next if klass.respond_to?(:abstract_class?) && klass.abstract_class?
+    %i[load_schema finder_needs_type_condition? primary_key query_constraints_list
+       columns_hash attribute_types arel_table predicate_builder].each { |m| warm.call(klass, m) }
+    # Exercise the finder path to warm remaining lazily-memoized class state
+    # (order columns, ...). Runs on the main Ractor where the connection exists.
+    begin
+      klass.first if klass.table_exists?
+    rescue StandardError
+    end
+  end
 end
 
 # adapter_class (a shareable Class) is reached via the unshareable connection

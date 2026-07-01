@@ -69,6 +69,7 @@ module ActionDispatch
       @__class_attr_config
       @__class_attr_middleware_stack
       @controller_path
+      @controller_name
       @_prefixes
       @action_methods
       @renderer
@@ -101,6 +102,7 @@ module ActionDispatch
       klasses.uniq.each do |klass|
         klass.view_context_class if klass.respond_to?(:view_context_class) && klass.respond_to?(:_routes)
         klass._prefixes if klass.respond_to?(:_prefixes)
+        klass.controller_name if klass.respond_to?(:controller_name)
         share_class_ivars!(klass, CONTROLLER_SHAREABLE_ATTRS)
       end
     end
@@ -124,6 +126,17 @@ ActiveSupport::Ractors.capture_class_reader(ActionDispatch::ParamBuilder, :defau
 ActiveSupport::Ractors.capture_class_reader(ActionDispatch::Request, :ignore_accept_header)
 ActiveSupport::Ractors.capture_class_reader(ActionDispatch::Request, :strict_accept_header)
 ActiveSupport::Ractors.capture_class_reader(ActionDispatch::ExceptionWrapper, :rescue_responses)
+
+# The url_helpers module defines `_routes` capturing the route set in an
+# unshareable proc. After ractorize! the route set is frozen (shareable) while
+# modules are still mutable, so redefine `_routes` with a shareable proc then.
+ActiveSupport::Ractors.on_freeze do
+  if defined?(Rails) && Rails.application
+    app_routes = Rails.application.routes
+    shareable_routes = app_routes
+    app_routes.url_helpers.define_method(:_routes, &Ractor.shareable_proc { @_routes || shareable_routes })
+  end
+end
 
 ActiveSupport::Ractors.on_freeze do
   Ractor.make_shareable(Mime::SET)
