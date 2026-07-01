@@ -134,18 +134,48 @@ ActiveSupport::Ractors.before_freeze do
   ActionView::PathRegistry.singleton_class.prepend(ActionView::RactorPatches::PathRegistry)
   ActionView::LookupContext::DetailsKey.singleton_class.prepend(ActionView::RactorPatches::DetailsKey)
   ActionView::Digestor.singleton_class.prepend(ActionView::RactorPatches::Digestor)
+
+  # Form field tag classes memoize @field_type; warm it so a non-main Ractor
+  # doesn't try to set the class ivar while rendering form fields.
+  if defined?(ActionView::Helpers::Tags)
+    ActionView::Helpers::Tags.constants.each do |const|
+      klass = ActionView::Helpers::Tags.const_get(const)
+      next unless klass.is_a?(Class) && klass.respond_to?(:field_type)
+      klass.field_type
+      if klass.instance_variable_defined?(:@field_type)
+        klass.instance_variable_set(:@field_type, Ractor.make_shareable(klass.instance_variable_get(:@field_type)))
+      end
+    end
+  end
   ActionView::Rendering::ClassMethods.prepend(ActionView::RactorPatches::RenderingClassMethods)
 end
 
 ActiveSupport::Ractors.capture_class_reader(ActionView::Base, :default_formats)
 ActiveSupport::Ractors.capture_class_reader(ActionView::Template::Handlers::ERB, :escape_ignore_list)
 ActiveSupport::Ractors.capture_class_reader(ActionView::Base, :annotate_rendered_view_with_filenames)
+ActiveSupport::Ractors.capture_class_reader(ActionView::Base, :default_form_builder)
+ActiveSupport::Ractors.capture_class_reader(ActionView::Base, :remove_hidden_field_autocomplete)
+ActiveSupport::Ractors.capture_class_reader(ActionView::Base, :automatically_disable_submit_tag)
+ActiveSupport::Ractors.capture_class_reader(ActionView::Base, :streaming_completion_on_exception)
 
 # AssetTagHelper mattr_accessors read as instance methods while rendering asset
 # tags (image_tag, stylesheet_link_tag, ...).
 %i[image_loading image_decoding preload_links_header apply_stylesheet_media_default
    auto_include_nonce_for_scripts auto_include_nonce_for_styles].each do |name|
   ActiveSupport::Ractors.capture_instance_reader(ActionView::Helpers::AssetTagHelper, name)
+end
+
+# FormHelper / FormTagHelper mattr_accessors read as instance methods while
+# rendering forms (form_with, etc.).
+%i[form_with_generates_remote_forms form_with_generates_ids
+   multiple_file_field_include_hidden].each do |name|
+  ActiveSupport::Ractors.capture_instance_reader(ActionView::Helpers::FormHelper, name)
+end
+%i[embed_authenticity_token_in_remote_forms default_enforce_utf8].each do |name|
+  ActiveSupport::Ractors.capture_instance_reader(ActionView::Helpers::FormTagHelper, name)
+end
+if defined?(ActionView::Helpers::ContentExfiltrationPreventionHelper)
+  ActiveSupport::Ractors.capture_instance_reader(ActionView::Helpers::ContentExfiltrationPreventionHelper, :prepend_content_exfiltration_prevention)
 end
 
 ActiveSupport::Ractors.on_freeze do

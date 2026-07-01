@@ -55,7 +55,22 @@ module ActionController # :nodoc:
       #       allow_browser versions: { opera: 104, chrome: 119 }, only: :show
       #     end
       def allow_browser(versions:, block: -> { render file: Rails.root.join("public/406-unsupported-browser.html"), layout: false, status: :not_acceptable }, **options)
-        before_action -> { allow_browser(versions: versions, block: block) }, **options
+        # Copy the keyword args into fresh locals (a captured proc can't close
+        # over reassignable kwargs) and make the outdated-browser block a
+        # shareable proc (it is invoked via instance_exec), so the generated
+        # before_action can be made Ractor-shareable.
+        allowed_versions = versions
+        outdated_block =
+          if block.is_a?(Symbol)
+            block
+          else
+            begin
+              ActiveSupport::Ractors.shareable_proc(&block)
+            rescue Ractor::IsolationError
+              block
+            end
+          end
+        before_action(**options) { allow_browser(versions: allowed_versions, block: outdated_block) }
       end
     end
 

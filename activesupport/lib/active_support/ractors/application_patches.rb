@@ -8,6 +8,12 @@
 require "active_support/ractors"
 require "active_support/ractors/patches"
 
+# Custom Rails config options live in Rails::Railtie::Configuration's @@options
+# class variable; capture a shareable copy for non-main Ractors.
+ActiveSupport::Ractors.on_freeze do
+  Rails::Railtie::Configuration.capture_ractor_options! if defined?(Rails::Railtie::Configuration)
+end
+
 require "active_record/ractor_patches" if defined?(ActiveRecord::Base)
 require "action_dispatch/ractor_patches" if defined?(ActionDispatch)
 require "action_view/ractor_patches" if defined?(ActionView) && defined?(ActionView::Base)

@@ -47,8 +47,7 @@ class Module
       if default.nil?
         class_eval(<<~RUBY, __FILE__, __LINE__ + 1)
           def self.#{sym}
-            @__thread_mattr_#{sym} ||= "attr_#{sym}_\#{object_id}"
-            ::ActiveSupport::IsolatedExecutionState[@__thread_mattr_#{sym}]
+            ::ActiveSupport::IsolatedExecutionState["attr_#{sym}_\#{object_id}"]
           end
         RUBY
       else
@@ -57,11 +56,14 @@ class Module
 
         class_eval(<<~RUBY, __FILE__, __LINE__ + 1)
           def self.#{sym}
-            @__thread_mattr_#{sym} ||= "attr_#{sym}_\#{object_id}"
-            value = ::ActiveSupport::IsolatedExecutionState[@__thread_mattr_#{sym}]
+            # Compute the storage key inline (rather than memoizing it in a class
+            # ivar) so this works from a non-main Ractor, which can't write class
+            # ivars. The per-thread storage itself is Ractor-safe.
+            __thread_mattr_key = "attr_#{sym}_\#{object_id}"
+            value = ::ActiveSupport::IsolatedExecutionState[__thread_mattr_key]
 
-            if value.nil? && !::ActiveSupport::IsolatedExecutionState.key?(@__thread_mattr_#{sym})
-              ::ActiveSupport::IsolatedExecutionState[@__thread_mattr_#{sym}] = #{sym}_default_value
+            if value.nil? && !::ActiveSupport::IsolatedExecutionState.key?(__thread_mattr_key)
+              ::ActiveSupport::IsolatedExecutionState[__thread_mattr_key] = #{sym}_default_value
             else
               value
             end
@@ -106,8 +108,9 @@ class Module
       # subclasses to maintain independent values.
       class_eval(<<~RUBY, __FILE__, __LINE__ + 1)
         def self.#{sym}=(obj)
-          @__thread_mattr_#{sym} ||= "attr_#{sym}_\#{object_id}"
-          ::ActiveSupport::IsolatedExecutionState[@__thread_mattr_#{sym}] = obj
+          # Compute the storage key inline (see thread_mattr_reader) so this is
+          # writable from a non-main Ractor.
+          ::ActiveSupport::IsolatedExecutionState["attr_#{sym}_\#{object_id}"] = obj
         end
       RUBY
 

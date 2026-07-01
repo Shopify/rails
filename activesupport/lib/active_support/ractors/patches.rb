@@ -71,6 +71,13 @@ ActiveSupport::ErrorReporter.prepend(ActiveSupport::Ractors::ErrorReporterFallba
 ActiveSupport::LogSubscriber.singleton_class.prepend(ActiveSupport::Ractors::LogSubscriberFallback)
 ActiveSupport::Logger.prepend(ActiveSupport::Ractors::Logger::ShareableDevice)
 
+# Convert callback/condition procs to shareable procs during the freeze phase
+# (rails/rails#57629) so controller callback chains can be made Ractor-shareable
+# and actually run inside a non-main Ractor.
+ActiveSupport::Ractors.on_freeze do
+  ActiveSupport::Ractors.unshareable_proc_action = :raise
+end
+
 # concurrent-ruby's Concurrent::Map#compute_if_absent reads the Concurrent::NULL
 # sentinel constant; freeze it so a Ractor-local Concurrent::Map is usable from a
 # non-main Ractor.

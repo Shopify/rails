@@ -9,6 +9,17 @@ module Rails
         @@options ||= {}
       end
 
+      # Custom options live in the @@options class variable, which can't be read
+      # from a non-main Ractor. Capture a shareable copy at ractorize time and
+      # serve it to non-main Ractors (see #method_missing / #respond_to?).
+      def self.capture_ractor_options! # :nodoc:
+        @ractor_options = ::Ractor.make_shareable((@@options || {}).dup)
+      end
+
+      def self.ractor_options # :nodoc:
+        @ractor_options if defined?(@ractor_options)
+      end
+
       # Expose the eager_load_namespaces at "module" level for convenience.
       def self.eager_load_namespaces # :nodoc:
         @@eager_load_namespaces ||= []
@@ -88,6 +99,10 @@ module Rails
       end
 
       def respond_to?(name, include_private = false)
+        unless ::Ractor.main?
+          opts = Rails::Railtie::Configuration.ractor_options
+          return super || (opts ? opts.key?(name.to_sym) : false)
+        end
         super || @@options.key?(name.to_sym)
       end
 
@@ -97,6 +112,14 @@ module Rails
       end
 
       def method_missing(name, *args, &blk)
+        unless ::Ractor.main?
+          opts = Rails::Railtie::Configuration.ractor_options
+          if opts && !name.end_with?("=") && opts.key?(name)
+            return opts[name]
+          end
+          return super
+        end
+
         if name.end_with?("=")
           key = name[0..-2].to_sym
           if actual_method?(key)
