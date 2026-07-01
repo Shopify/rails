@@ -308,7 +308,18 @@ module ActionView
               end
             RUBY
           when Proc
-            define_method :_layout_from_proc, &_layout
+            # Define with a shareable proc when possible so _layout_from_proc can
+            # be called from a non-main Ractor. The proc is invoked with `self`
+            # rebound to the controller instance, so detaching its original self
+            # is safe. Falls back to the original proc when it can't be made
+            # shareable.
+            layout_proc =
+              begin
+                ActiveSupport::Ractors.shareable_proc(&_layout)
+              rescue Ractor::IsolationError
+                _layout
+              end
+            define_method :_layout_from_proc, &layout_proc
             private :_layout_from_proc
             <<-RUBY
               result = _layout_from_proc(#{_layout.arity == 0 ? '' : 'self'})

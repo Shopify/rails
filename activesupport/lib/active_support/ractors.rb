@@ -42,6 +42,31 @@ module ActiveSupport
         on_freeze_callbacks.each(&:call)
       end
 
+      # Like +capture_class_reader+ but for an *instance* reader backed by a
+      # class variable (a +cattr_accessor+ read from mixed-in instance methods,
+      # e.g. view helpers). Captures the value via the module-level reader and
+      # serves it to non-main Ractors from the prepended instance method.
+      def capture_instance_reader(mod, name)
+        ivar = :"@_ractor_captured_i_#{name}"
+        reader = Module.new
+        reader.module_eval(<<~RUBY, __FILE__, __LINE__ + 1)
+          def #{name}
+            return super if Ractor.main?
+            #{mod.name}.instance_variable_get(:#{ivar})
+          end
+        RUBY
+        mod.prepend(reader)
+        on_freeze do
+          value = mod.send(name)
+          shareable = begin
+            make_shareable(value.dup)
+          rescue StandardError, TypeError
+            make_shareable(value)
+          end
+          mod.instance_variable_set(ivar, shareable)
+        end
+      end
+
       # Serve a class-level reader that is backed by a class variable (cattr) or
       # a class ivar to non-main Ractors. Class variables can't be read from a
       # non-main Ractor at all, so capture the (effectively-immutable) value into

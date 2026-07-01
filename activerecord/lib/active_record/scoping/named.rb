@@ -171,10 +171,31 @@ module ActiveRecord
           extension = Module.new(&block) if block
 
           if body.respond_to?(:to_proc)
-            singleton_class.define_method(name) do |*args|
-              scope = all._exec_scope(*args, &body)
-              scope = scope.extending(extension) if extension
-              scope
+            # A scope body is always invoked via instance_exec (see
+            # Relation#_exec_scope), so detaching its `self` with a shareable
+            # proc is safe. When the body (and any extension) can be made
+            # shareable, define the scope method with a shareable proc too, so
+            # it can be called from a non-main Ractor. Otherwise fall back to the
+            # regular (main-Ractor-only) definition.
+            shareable_body =
+              begin
+                ActiveSupport::Ractors.shareable_proc(&body)
+              rescue Ractor::IsolationError
+                nil
+              end
+
+            if shareable_body && (extension.nil? || ActiveSupport::Ractors.shareable?(extension))
+              singleton_class.define_method(name, &ActiveSupport::Ractors.shareable_proc do |*args|
+                scope = all._exec_scope(*args, &shareable_body)
+                scope = scope.extending(extension) if extension
+                scope
+              end)
+            else
+              singleton_class.define_method(name) do |*args|
+                scope = all._exec_scope(*args, &body)
+                scope = scope.extending(extension) if extension
+                scope
+              end
             end
           else
             singleton_class.define_method(name) do |*args|

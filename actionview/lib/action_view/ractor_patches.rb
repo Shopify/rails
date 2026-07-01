@@ -12,10 +12,41 @@ module ActionView
     # use Ractor-local template caches).
     module ResolverShareable
       def freeze
-        @unbound_templates = {}.freeze if instance_variable_defined?(:@unbound_templates)
-        @path_parser = nil if instance_variable_defined?(:@path_parser)
+        # The path parser memoizes a Regexp; warm it, then make it shareable so a
+        # non-main Ractor can reuse the frozen parser.
+        if instance_variable_defined?(:@path_parser) && @path_parser
+          @path_parser.parse("warm/warm.html.erb") rescue nil
+          @path_parser = Ractor.make_shareable(@path_parser) rescue @path_parser
+        end
+        # The unbound-template cache is a Concurrent::Map (can't be frozen); drop
+        # it and use a Ractor-local cache instead (see #_find_all below).
+        if instance_variable_defined?(:@unbound_templates)
+          @unbound_templates = nil
+          @ractor_unbound_key = :"__ractor_resolver_unbound_#{object_id}"
+        end
         super
       end
+
+      def built_templates
+        return [] if instance_variable_defined?(:@unbound_templates) && @unbound_templates.nil?
+        super
+      end
+
+      private
+        def _find_all(name, prefix, partial, details, key, locals)
+          return super if @unbound_templates || Ractor.main?
+
+          requested_details = key || TemplateDetails::Requested.new(**details)
+          cache = key ? (Ractor[@ractor_unbound_key] ||= Concurrent::Map.new) : Concurrent::Map.new
+          unbound_templates =
+            cache.compute_if_absent(TemplatePath.virtual(name, prefix, partial)) do
+              path = TemplatePath.build(name, prefix, partial)
+              unbound_templates_from_path(path)
+            end
+          filter_and_sort_by_details(unbound_templates, requested_details).map do |unbound_template|
+            unbound_template.bind_locals(locals)
+          end
+        end
     end
 
     module PathRegistry
@@ -41,6 +72,22 @@ module ActionView
         return super if Ractor.main?
         @view_context_class
       end
+
+      # @details_keys / @digest_cache are Concurrent::Map class-ivar caches that a
+      # non-main Ractor can't read/write. Compute without the shared cache.
+      def details_cache_key(details)
+        return super if Ractor.main?
+        if (formats = details[:formats]) && (normalized = Template.normalized_formats(formats))
+          details = details.dup
+          details[:formats] = normalized
+        end
+        TemplateDetails::Requested.new(**details)
+      end
+
+      def digest_cache(details)
+        return super if Ractor.main?
+        Concurrent::Map.new
+      end
     end
 
     # Rendering::ClassMethods#view_context_class rebuilds when klass.changed?,
@@ -56,15 +103,31 @@ module ActionView
 end
 
 ActiveSupport::Ractors.before_freeze do
-  ActionView::Resolver.prepend(ActionView::RactorPatches::ResolverShareable)
+  ([ActionView::Resolver, ActionView::FileSystemResolver] + ActionView::FileSystemResolver.descendants).uniq.each do |klass|
+    klass.prepend(ActionView::RactorPatches::ResolverShareable)
+  end
   ActionView::PathRegistry.singleton_class.prepend(ActionView::RactorPatches::PathRegistry)
   ActionView::LookupContext::DetailsKey.singleton_class.prepend(ActionView::RactorPatches::DetailsKey)
   ActionView::Rendering::ClassMethods.prepend(ActionView::RactorPatches::RenderingClassMethods)
 end
 
 ActiveSupport::Ractors.capture_class_reader(ActionView::Base, :default_formats)
+ActiveSupport::Ractors.capture_class_reader(ActionView::Template::Handlers::ERB, :escape_ignore_list)
+ActiveSupport::Ractors.capture_class_reader(ActionView::Base, :annotate_rendered_view_with_filenames)
+
+# AssetTagHelper mattr_accessors read as instance methods while rendering asset
+# tags (image_tag, stylesheet_link_tag, ...).
+%i[image_loading image_decoding preload_links_header apply_stylesheet_media_default
+   auto_include_nonce_for_scripts auto_include_nonce_for_styles].each do |name|
+  ActiveSupport::Ractors.capture_instance_reader(ActionView::Helpers::AssetTagHelper, name)
+end
 
 ActiveSupport::Ractors.on_freeze do
+  # ERB compiler constants read while compiling a template in a Ractor.
+  if defined?(ActionView::Template::Handlers::ERB::ENCODING_TAG)
+    Ractor.make_shareable(ActionView::Template::Handlers::ERB::ENCODING_TAG)
+  end
+
   registry = ActionView::PathRegistry
   %i[@view_paths_by_class @file_system_resolvers].each do |ivar|
     value = registry.instance_variable_get(ivar)

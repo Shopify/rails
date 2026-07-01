@@ -71,6 +71,14 @@ ActiveSupport::ErrorReporter.prepend(ActiveSupport::Ractors::ErrorReporterFallba
 ActiveSupport::LogSubscriber.singleton_class.prepend(ActiveSupport::Ractors::LogSubscriberFallback)
 ActiveSupport::Logger.prepend(ActiveSupport::Ractors::Logger::ShareableDevice)
 
+# concurrent-ruby's Concurrent::Map#compute_if_absent reads the Concurrent::NULL
+# sentinel constant; freeze it so a Ractor-local Concurrent::Map is usable from a
+# non-main Ractor.
+ActiveSupport::Ractors.on_freeze do
+  Ractor.make_shareable(Concurrent::NULL) if defined?(Concurrent::NULL)
+  Ractor.make_shareable(Concurrent::NO_VALUE) if defined?(Concurrent::NO_VALUE)
+end
+
 # Inflector memoizes the inflections singleton in a class ivar (@__en_instance__)
 # read by String#camelize/underscore on the request path.
 ActiveSupport::Ractors.on_freeze do

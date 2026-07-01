@@ -90,6 +90,14 @@ module ActionDispatch
           @url_helpers = Set.new
           @url_helpers_module  = Module.new
           @path_helpers_module = Module.new
+          # Helper objects by method name, so the generated helper methods can
+          # look them up at call time instead of capturing them in an
+          # (unshareable) closure -- which lets them run in a non-main Ractor.
+          @helpers_by_name = {}
+        end
+
+        def helper_for(method_name) # :nodoc:
+          @helpers_by_name[method_name]
         end
 
         def route_defined?(name)
@@ -113,6 +121,7 @@ module ActionDispatch
           @routes.clear
           @path_helpers.clear
           @url_helpers.clear
+          @helpers_by_name.clear
         end
 
         def add(name, route)
@@ -127,6 +136,8 @@ module ActionDispatch
           routes[key] = route
 
           helper = UrlHelper.create(route, route.defaults, name)
+          @helpers_by_name[path_name] = helper
+          @helpers_by_name[url_name] = helper
           define_url_helper @path_helpers_module, path_name, helper, PATH
           define_url_helper @url_helpers_module, url_name, helper, UNKNOWN
 
@@ -331,7 +342,12 @@ module ActionDispatch
           #     foo_url(bar, baz, bang, sort_by: 'baz')
           #
           def define_url_helper(mod, name, helper, url_strategy)
-            mod.define_method(name) do |*args|
+            # Define with a shareable proc that looks the helper up at call time
+            # (via the route set) instead of capturing it, so the method can be
+            # called from a non-main Ractor. `self` is rebound to the view /
+            # controller instance, and `_routes` (frozen after ractorize!) yields
+            # the shareable helper.
+            body = ActiveSupport::Ractors.shareable_proc do |*args|
               last = args.last
               options = \
                 case last
@@ -340,8 +356,9 @@ module ActionDispatch
                 when ActionController::Parameters
                   args.pop.to_h
                 end
-              helper.call(self, name, args, options, url_strategy)
+              _routes.named_routes.helper_for(name).call(self, name, args, options, url_strategy)
             end
+            mod.define_method(name, &body)
           end
       end
 
