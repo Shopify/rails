@@ -671,12 +671,22 @@ module Rails
     def ractorize! # :nodoc:
       warn "WARNING: Rails' Ractor support is experimental. Don't try this at home!", category: :experimental, uplevel: 1
 
+      # Load the framework Ractor patches (they register before_freeze/on_freeze
+      # callbacks; referenced constants are resolved lazily inside the callbacks).
+      require "active_support/ractors/application_patches"
+
       env_config
       routes
 
       @autoloaders, @reloaders, @routes_reloader = nil, nil, nil
 
+      # Apply behavioral patches and warm lazily-memoized state before freezing.
+      ActiveSupport::Ractors.run_before_freeze!
+
       Ractor.make_shareable(self)
+
+      # Freeze/share request-path state that lives outside the application graph.
+      ActiveSupport::Ractors.run_on_freeze!
 
       Ractor.make_shareable(Rails.event)
       Ractor.make_shareable(Rails.error)

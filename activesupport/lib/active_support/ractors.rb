@@ -7,6 +7,68 @@ module ActiveSupport
     class << self
       attr_accessor :unshareable_proc_action
 
+      # Callbacks run by +Rails::Application#ractorize!+.
+      #
+      # +before_freeze+ callbacks run *before* the application graph is frozen
+      # (make it shareable). Use them to apply behavioral patches (module
+      # prepends) and to warm state that would otherwise be lazily memoized onto
+      # an object that is about to be frozen.
+      #
+      # +on_freeze+ callbacks run *after* the application graph is frozen. Use
+      # them to freeze/share request-path state that is not reachable from the
+      # application object graph (module constants, class variables captured into
+      # class ivars, controller class-level state, ...).
+      def before_freeze_callbacks
+        @before_freeze_callbacks ||= []
+      end
+
+      def on_freeze_callbacks
+        @on_freeze_callbacks ||= []
+      end
+
+      def before_freeze(&block)
+        before_freeze_callbacks << block
+      end
+
+      def on_freeze(&block)
+        on_freeze_callbacks << block
+      end
+
+      def run_before_freeze!
+        before_freeze_callbacks.each(&:call)
+      end
+
+      def run_on_freeze!
+        on_freeze_callbacks.each(&:call)
+      end
+
+      # Serve a class-level reader that is backed by a class variable (cattr) or
+      # a class ivar to non-main Ractors. Class variables can't be read from a
+      # non-main Ractor at all, so capture the (effectively-immutable) value into
+      # a shareable class ivar on +on_freeze+ and return it from a Ractor.
+      def capture_class_reader(mod, name)
+        ivar = :"@_ractor_captured_#{name}"
+        reader = Module.new
+        # Define with a string (not define_method): a method backed by an
+        # unshareable Proc can't be called from a non-main Ractor.
+        reader.module_eval(<<~RUBY, __FILE__, __LINE__ + 1)
+          def #{name}
+            return super if Ractor.main?
+            #{mod.name}.instance_variable_get(:#{ivar})
+          end
+        RUBY
+        mod.singleton_class.prepend(reader)
+        on_freeze do
+          value = mod.send(name)
+          shareable = begin
+            make_shareable(value.dup)
+          rescue StandardError, TypeError
+            make_shareable(value)
+          end
+          mod.instance_variable_set(ivar, shareable)
+        end
+      end
+
       # Attempt to make a proc shareable. If successful, a shareable proc is returned.
       # If a Ractor::IsolationError is raised, the outcome will depend on how
       # the user's application configuration:
