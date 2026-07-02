@@ -11,15 +11,24 @@ require "active_support/ractors/logger"
 module ActiveSupport
   module Ractors
     module CallbacksRunFallback # :nodoc:
-      # Making a whole callback chain shareable is deep (compiled callback
-      # lambdas bound to unshareable self, a Mutex, unshareable terminators). In
-      # a non-main Ractor where the chain can't be read, run the protected block
-      # directly without the surrounding callbacks.
+      # Some framework callback chains (e.g. the executor and reloader chains)
+      # are intentionally left unshareable and cannot be read from a non-main
+      # Ractor. Detect that up-front by reading the chain, so we skip *only*
+      # those chains.
+      #
+      # Once the chain is readable we run it normally: a Ractor::IsolationError
+      # raised from inside a callback body means a callback touched an
+      # unshareable object. That is a real bug and must surface (500), not be
+      # silently swallowed (which would e.g. skip authentication).
       def run_callbacks(*args, &block)
+        unless Ractor.main?
+          begin
+            __callbacks
+          rescue Ractor::IsolationError
+            return block ? block.call : true
+          end
+        end
         super
-      rescue Ractor::IsolationError
-        raise if Ractor.main?
-        block ? block.call : true
       end
     end
 
@@ -28,17 +37,27 @@ module ActiveSupport
       # shareable. In a non-main Ractor, run instrumented blocks without
       # publishing, and hand out a no-op instrumenter.
       def instrument(name, payload = {}, &block)
+        unless Ractor.main?
+          begin
+            notifier
+          rescue Ractor::IsolationError
+            # The global notifier isn't reachable here: run the instrumented
+            # block once, without publishing. Errors from the block propagate.
+            return block ? yield(payload) : nil
+          end
+        end
         super
-      rescue Ractor::IsolationError
-        raise if Ractor.main?
-        block ? yield(payload) : nil
       end
 
       def instrumenter
+        unless Ractor.main?
+          begin
+            notifier
+          rescue Ractor::IsolationError
+            return ActiveSupport::Notifications::NullInstrumenter.new
+          end
+        end
         super
-      rescue Ractor::IsolationError
-        raise if Ractor.main?
-        ActiveSupport::Notifications::NullInstrumenter.new
       end
     end
 
