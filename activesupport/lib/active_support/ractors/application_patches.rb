@@ -24,3 +24,12 @@ require "active_record/ractor_patches" if defined?(ActiveRecord::Base)
 require "action_dispatch/ractor_patches" if defined?(ActionDispatch)
 require "action_view/ractor_patches" if defined?(ActionView) && defined?(ActionView::Base)
 require "action_cable/ractor_patches" if defined?(ActionCable) && defined?(ActionCable::Server::Base)
+
+# Root pass: make every callback chain (controllers, models, the executor,
+# ActionDispatch::Callbacks, CurrentAttributes, ...) Ractor-shareable in one go,
+# via the registry in ActiveSupport::Callbacks. Registered last so it runs after
+# all component warming (schema, reflections, class ivars) has completed and
+# after unshareable_proc_action has been set to :raise.
+ActiveSupport::Ractors.on_freeze do
+  ActiveSupport::Callbacks.make_shareable
+end

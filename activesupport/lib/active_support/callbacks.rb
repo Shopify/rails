@@ -68,6 +68,44 @@ module ActiveSupport
     included do
       extend ActiveSupport::DescendantsTracker
       class_attribute :__callbacks, instance_writer: false, instance_predicate: false, default: {}.freeze
+      ActiveSupport::Callbacks.register_callbacks_owner(self)
+    end
+
+    @callbacks_owners = []
+
+    class << self
+      # Every class that includes ActiveSupport::Callbacks is tracked here so all
+      # callback chains can be made Ractor-shareable in one pass, rather than
+      # enumerating callback-bearing classes (controllers, models, the executor,
+      # CurrentAttributes, ...) individually.
+      def register_callbacks_owner(base) # :nodoc:
+        (@callbacks_owners ||= []) << base
+      end
+
+      # Make every tracked class's (and its descendants') callback chains
+      # Ractor-shareable, so run_callbacks can read and run them from a non-main
+      # Ractor. Intended to run once, on the main Ractor, during the freeze phase
+      # (e.g. from Rails.application.ractorize!) with
+      # ActiveSupport::Ractors.unshareable_proc_action set.
+      #
+      # Pre-sharing here is best-effort: a chain that closes over state which
+      # can't be made shareable is left as-is. It is NOT silently skipped at
+      # run time -- if such a chain is used on a Ractor request path, reading it
+      # there raises, surfacing the problem so it can be fixed at the source.
+      def make_shareable # :nodoc:
+        (@callbacks_owners || []).each do |base|
+          classes = [base]
+          classes.concat(base.descendants) if base.respond_to?(:descendants)
+          classes.uniq.each do |klass|
+            next unless klass.respond_to?(:__callbacks)
+            begin
+              klass.__callbacks = ActiveSupport::Ractors.make_callbacks_shareable(klass.__callbacks)
+            rescue ::Ractor::Error, ::Ractor::IsolationError
+              # Left unshareable; will raise at run time if used in a Ractor.
+            end
+          end
+        end
+      end
     end
 
     CALLBACK_FILTER_TYPES = [:before, :after, :around].freeze
@@ -685,6 +723,19 @@ module ActiveSupport
 
         def prepend(*callbacks)
           callbacks.each { |c| prepend_one(c) }
+        end
+
+        # Drop sequences compiled before the freeze phase. They may hold procs
+        # built while Ractors.unshareable_proc_action was unset (e.g. compiled at
+        # boot, as the executor chain is when it first runs during
+        # initialization), which aren't shareable. Callers reset the caches
+        # before making the chain shareable so #freeze recompiles them -- during
+        # the freeze phase, with the action set -- as shareable procs.
+        def reset_compiled_sequences! # :nodoc:
+          return self if frozen?
+          @all_callbacks = nil
+          @single_callbacks = {}
+          self
         end
 
         def freeze

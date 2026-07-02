@@ -214,16 +214,8 @@ module ActiveRecord
       if klass.respond_to?(:reflections)
         klass._reflections.each_value { |r| freeze_reflection!(r) }
       end
-
-      # Make the model's callback chains shareable so before/after callbacks
-      # (has_secure_token, timestamps, custom before_create, ...) run inside a
-      # non-main Ractor instead of being skipped.
-      if klass.respond_to?(:__callbacks)
-        begin
-          klass.__callbacks = ActiveSupport::Ractors.make_shareable(klass.__callbacks)
-        rescue Ractor::Error, Ractor::IsolationError
-        end
-      end
+      # Model callback chains are made shareable centrally by
+      # ActiveSupport::Callbacks.make_shareable.
 
       # Make model class-level state (class_attribute values in @__class_attr_*,
       # memoized arel/predicate state, ...) shareable so a non-main Ractor can

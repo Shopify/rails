@@ -84,7 +84,22 @@ module ActionController # :nodoc:
       # switch the cache store to ActiveSupport::Cache::MemoryStore for the
       # duration of your test.
       def rate_limit(to:, within:, by: -> { request.remote_ip }, with: -> { raise TooManyRequests }, store: cache_store, name: nil, scope: nil, **options)
-        before_action -> { rate_limiting(to: to, within: within, by: by, with: with, store: store, name: name, scope: scope || controller_path) }, **options
+        # Build a Ractor-shareable before_action: assign each captured value
+        # exactly once (a shareable Proc can't close over a reassignable outer
+        # variable) and make the Duration and the by/with closures shareable, so
+        # the callback chain can be frozen and run inside a non-main Ractor. The
+        # store must itself be Ractor-shareable.
+        limit       = to
+        period      = ActiveSupport::Ractors.make_shareable(within)
+        by_filter   = by.is_a?(Symbol)   ? by   : ActiveSupport::Ractors.shareable_proc(&by)
+        with_filter = with.is_a?(Symbol) ? with : ActiveSupport::Ractors.shareable_proc(&with)
+        limit_store = store
+        limit_name  = name
+        limit_scope = scope
+        before_action(**options) do
+          rate_limiting(to: limit, within: period, by: by_filter, with: with_filter,
+                        store: limit_store, name: limit_name, scope: limit_scope || controller_path)
+        end
       end
     end
 

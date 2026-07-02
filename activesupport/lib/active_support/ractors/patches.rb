@@ -10,28 +10,6 @@ require "active_support/ractors/logger"
 
 module ActiveSupport
   module Ractors
-    module CallbacksRunFallback # :nodoc:
-      # Some framework callback chains (e.g. the executor and reloader chains)
-      # are intentionally left unshareable and cannot be read from a non-main
-      # Ractor. Detect that up-front by reading the chain, so we skip *only*
-      # those chains.
-      #
-      # Once the chain is readable we run it normally: a Ractor::IsolationError
-      # raised from inside a callback body means a callback touched an
-      # unshareable object. That is a real bug and must surface (500), not be
-      # silently swallowed (which would e.g. skip authentication).
-      def run_callbacks(*args, &block)
-        unless Ractor.main?
-          begin
-            __callbacks
-          rescue Ractor::IsolationError
-            return block ? block.call : true
-          end
-        end
-        super
-      end
-    end
-
     module NotificationsFallback # :nodoc:
       # The global @notifier (a Fanout with subscribers and mutexes) isn't
       # shareable. In a non-main Ractor, run instrumented blocks without
@@ -84,7 +62,6 @@ module ActiveSupport
   end
 end
 
-ActiveSupport::Callbacks.prepend(ActiveSupport::Ractors::CallbacksRunFallback)
 ActiveSupport::Notifications.singleton_class.prepend(ActiveSupport::Ractors::NotificationsFallback)
 ActiveSupport::ErrorReporter.prepend(ActiveSupport::Ractors::ErrorReporterFallback)
 ActiveSupport::LogSubscriber.singleton_class.prepend(ActiveSupport::Ractors::LogSubscriberFallback)
@@ -136,8 +113,8 @@ end
 
 # CurrentAttributes (the app's Current model) memoizes class-level state.
 ActiveSupport::Ractors.on_freeze do
-  ActiveSupport::CurrentAttributes.descendants.each do |klass|
-    klass.send(:current_instances_key) # warm @current_instances_key (private)
+  (ActiveSupport::CurrentAttributes.descendants + [ActiveSupport::CurrentAttributes]).each do |klass|
+    klass.send(:current_instances_key) if klass.respond_to?(:current_instances_key, true) # warm (private)
     defaults = klass.instance_variable_get(:@__class_attr_defaults)
     if defaults && !Ractor.shareable?(defaults)
       begin
@@ -145,5 +122,7 @@ ActiveSupport::Ractors.on_freeze do
       rescue Ractor::Error, Ractor::IsolationError
       end
     end
+    # Reset callbacks are made shareable centrally by
+    # ActiveSupport::Callbacks.make_shareable.
   end
 end

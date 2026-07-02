@@ -104,16 +104,8 @@ module ActionDispatch
         klass._prefixes if klass.respond_to?(:_prefixes)
         klass.controller_name if klass.respond_to?(:controller_name)
         share_class_ivars!(klass, CONTROLLER_SHAREABLE_ATTRS)
-        # Make the controller callback chains shareable so before/after/around
-        # callbacks (authentication, etc.) actually run inside a non-main Ractor.
-        # If a chain has a callback that can't be made shareable, leave it (that
-        # controller's callbacks are then skipped via the run_callbacks fallback).
-        if klass.respond_to?(:__callbacks)
-          begin
-            klass.__callbacks = ActiveSupport::Ractors.make_shareable(klass.__callbacks)
-          rescue Ractor::Error, Ractor::IsolationError
-          end
-        end
+        # Callback chains are made shareable centrally by
+        # ActiveSupport::Callbacks.make_shareable.
       end
     end
   end

@@ -122,6 +122,18 @@ module ActiveSupport
         end
       end
 
+      # Makes a set_callbacks hash (event => CallbackChain) Ractor-shareable.
+      # Resets any sequences compiled before the freeze phase first, so freezing
+      # recompiles them into shareable procs (see CallbackChain#freeze).
+      def make_callbacks_shareable(callbacks)
+        if callbacks.respond_to?(:each_value)
+          callbacks.each_value do |chain|
+            chain.reset_compiled_sequences! if chain.respond_to?(:reset_compiled_sequences!)
+          end
+        end
+        make_shareable(callbacks)
+      end
+
       if defined?(Ractor) && RUBY_VERSION >= "4.0"
         # Makes +obj+ Ractor-shareable by delegating to +Ractor.make_shareable+.
         #
