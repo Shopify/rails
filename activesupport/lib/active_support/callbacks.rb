@@ -309,6 +309,10 @@ module ActiveSupport
           self.class.build chain, @filter, @kind, options
         end
 
+        def reset_compiled! # :nodoc:
+          @compiled = nil unless frozen?
+        end
+
         def matches?(_kind, _filter)
           @kind == _kind && (filter == _filter || (@original_filter  == _filter.object_id))
         end
@@ -735,6 +739,11 @@ module ActiveSupport
           return self if frozen?
           @all_callbacks = nil
           @single_callbacks = {}
+          # Also drop each callback's memoized @compiled: it may have been built at
+          # boot (before the freeze phase) with non-shareable make_lambda procs.
+          # make_shareable would otherwise reach those before Callback#freeze can
+          # rebuild them. Cleared here so #freeze recompiles them as shareable.
+          @chain.each { |callback| callback.reset_compiled! unless callback.frozen? }
           self
         end
 

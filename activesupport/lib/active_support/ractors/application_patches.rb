@@ -21,6 +21,7 @@ ActiveSupport::Ractors.before_freeze do
 end
 
 require "active_record/ractor_patches" if defined?(ActiveRecord::Base)
+require "active_storage/ractor_patches" if defined?(ActiveStorage)
 require "action_dispatch/ractor_patches" if defined?(ActionDispatch)
 require "action_view/ractor_patches" if defined?(ActionView) && defined?(ActionView::Base)
 require "action_cable/ractor_patches" if defined?(ActionCable) && defined?(ActionCable::Server::Base)

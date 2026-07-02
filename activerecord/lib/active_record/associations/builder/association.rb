@@ -52,7 +52,16 @@ module ActiveRecord::Associations::Builder # :nodoc:
 
     def self.build_scope(scope)
       if scope && scope.arity == 0
-        proc { instance_exec(&scope) }
+        # Make the wrapped scope Ractor-shareable when possible (the inner scope
+        # is invoked via instance_exec, so detaching its self is safe), so the
+        # reflection can be shared with a non-main Ractor. Fall back to the plain
+        # wrapper if the scope closes over unshareable state.
+        begin
+          inner = ActiveSupport::Ractors.shareable_proc(&scope)
+          ActiveSupport::Ractors.shareable_proc { instance_exec(&inner) }
+        rescue ::Ractor::Error, ::Ractor::IsolationError
+          proc { instance_exec(&scope) }
+        end
       else
         scope
       end

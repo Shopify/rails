@@ -145,14 +145,28 @@ module ActiveRecord
         end
 
         mod.module_eval do
+          # Define the accessor with a Ractor-shareable Proc (its captured
+          # store_attribute/key are Symbols) so store accessors can be called
+          # from a non-main Ractor. Falls back to a plain definition if the
+          # block can't be made shareable.
+          define_shareable = lambda do |method_name, &blk|
+            callable =
+              begin
+                ActiveSupport::Ractors.shareable_proc(&blk)
+              rescue ::Ractor::Error, ::Ractor::IsolationError
+                blk
+              end
+            define_method(method_name, &callable)
+          end
+
           keys.each do |key|
             accessor_key = "#{accessor_prefix}#{key}#{accessor_suffix}"
 
-            define_method("#{accessor_key}=") do |value|
+            define_shareable.("#{accessor_key}=") do |value|
               write_store_attribute(store_attribute, key, value)
             end
 
-            define_method(accessor_key) do
+            define_shareable.(accessor_key) do
               read_store_attribute(store_attribute, key)
             end
 

@@ -8,6 +8,9 @@ module ActiveStorage
       end
 
       def named_variants
+        return @named_variants if defined?(@named_variants)
+        # A frozen reflection (deep-frozen for Ractor sharing) can't memoize.
+        return {}.freeze if frozen?
         @named_variants ||= {}
       end
     end

@@ -1216,6 +1216,8 @@ module ActiveRecord
       end
 
       def deprecated_nested_reflections
+        return @deprecated_nested_reflections if defined?(@deprecated_nested_reflections)
+        return collect_deprecated_nested_reflections if frozen? # can't memoize when frozen
         @deprecated_nested_reflections ||= collect_deprecated_nested_reflections
       end
 

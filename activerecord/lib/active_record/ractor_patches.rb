@@ -18,6 +18,17 @@ module ActiveRecord
     # Ractor-shareable. This is transparent to the application: with_connection
     # yields the proxy, and select/insert/update/quote/... all forward to main.
     module ConnectionProxy
+      # Make a value Ractor-shareable, preferring a deep copy but falling back to
+      # freezing in place for objects make_shareable can't copy (e.g. Set).
+      def self.share(obj)
+        return obj if Ractor.shareable?(obj)
+        begin
+          Ractor.make_shareable(obj, copy: true)
+        rescue Ractor::Error
+          Ractor.make_shareable(obj)
+        end
+      end
+
       def initialize(model_name)
         @model_name = model_name || "ActiveRecord::Base"
       end
@@ -29,14 +40,36 @@ module ActiveRecord
       def lease; end
       def expire; end
       def connection; self; end
-      # schema_cache holds a Monitor (unshareable); return a proxy that forwards
-      # its method calls to the main Ractor instead.
+      # schema_cache and pool hold a Monitor (unshareable); return proxies that
+      # forward to the main Ractor instead.
       def schema_cache; SchemaCacheProxyObject.for(@model_name); end
+      def pool; ConnectionPoolProxyObject.for(@model_name); end
 
       # EXPERIMENT: a non-main Ractor has no real transaction; run the body
       # directly. Each forwarded statement is auto-committed on the main Ractor.
       def transaction(*, **)
         block_given? ? yield : nil
+      end
+
+      # Transaction bookkeeping is a no-op without a real transaction (and would
+      # otherwise try to ship the record, which isn't shareable). after_commit /
+      # after_rollback callbacks are not supported in a non-main Ractor.
+      def add_transaction_record(*, **); nil; end
+      def transaction_open?; false; end
+      def current_transaction; ActiveRecord::ConnectionAdapters::NullTransaction.instance; end
+
+      # exec_insert_all is passed the InsertAll object (which holds a Set and a
+      # reference to this proxy, so it can't be shipped). Build its SQL here
+      # (quoting is proxied) and dispatch the resulting SQL string instead.
+      def exec_insert_all(inserter, name)
+        sql = ConnectionProxy.share(inserter.to_sql)
+        shared_name = ConnectionProxy.share(name)
+        model_name = @model_name
+        Ractor::Dispatch.main.run do
+          Object.const_get(model_name).with_connection do |conn|
+            ConnectionProxy.share(conn.exec_query(sql, shared_name))
+          end
+        end
       end
 
       def method_missing(name, *args, **kwargs, &block)
@@ -49,11 +82,11 @@ module ActiveRecord
         # cleanly shareable and re-triggers query building when shipped, so
         # convert it to its Arel here (built in this Ractor) before dispatching.
         args = args.map { |a| a.is_a?(ActiveRecord::Relation) ? a.arel : a }
-        shareable_args = Ractor.make_shareable(args, copy: true)
-        shareable_kwargs = Ractor.make_shareable(kwargs, copy: true)
+        shareable_args = Ractor.make_shareable(args.map { |a| ConnectionProxy.share(a) })
+        shareable_kwargs = Ractor.make_shareable(kwargs.transform_values { |v| ConnectionProxy.share(v) })
         Ractor::Dispatch.main.run do
           Object.const_get(model_name).with_connection do |conn|
-            Ractor.make_shareable(conn.public_send(name, *shareable_args, **shareable_kwargs))
+            ConnectionProxy.share(conn.public_send(name, *shareable_args, **shareable_kwargs))
           end
         end
       end
@@ -73,7 +106,11 @@ module ActiveRecord
       def with_connection(*, **); yield ConnectionProxyObject.for(@model_name); end
       def lease_connection; ConnectionProxyObject.for(@model_name); end
       def db_config; ActiveRecord::RactorPatches.main_db_config; end
-      def schema_cache; ActiveRecord::RactorPatches.main_schema_cache; end
+      def schema_cache; SchemaCacheProxyObject.for(@model_name); end
+      # Transaction isolation is a no-op in the Ractor (transactions are skipped;
+      # see ConnectionProxy#transaction / TransactionDispatch); run the block.
+      def with_pool_transaction_isolation_level(*, **); yield; end
+      def permanent_lease?; false; end
 
       def method_missing(name, *args, **kwargs, &block)
         raise ArgumentError, "ConnectionPoolProxy can't forward ##{name} with a block" if block
@@ -251,6 +288,11 @@ module ActiveRecord
       # read it while building a relation. Best-effort: values that can't be
       # frozen (e.g. procs, connection-bound objects) are left as-is.
       klass.instance_variables.each do |ivar|
+        # Callback chains are handled centrally by
+        # ActiveSupport::Callbacks.make_shareable (which resets boot-compiled
+        # sequences first); freezing them here would freeze them with those
+        # non-shareable sequences before that pass can reset them.
+        next if ivar == :@__class_attr___callbacks
         value = klass.instance_variable_get(ivar)
         next if Ractor.shareable?(value)
         begin
@@ -298,6 +340,7 @@ ActiveSupport::Ractors.before_freeze do
   ActiveRecord::Base.descendants.each do |klass|
     next if klass.respond_to?(:abstract_class?) && klass.abstract_class?
     %i[load_schema finder_needs_type_condition? primary_key query_constraints_list
+       composite_query_constraints_list
        columns_hash columns column_names attribute_types arel_table predicate_builder
        define_attribute_methods all_timestamp_attributes_in_model
        timestamp_attributes_for_create_in_model timestamp_attributes_for_update_in_model
