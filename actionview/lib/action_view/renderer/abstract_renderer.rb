@@ -83,7 +83,14 @@ module ActionView
           end
 
           if view.prefix_partial_path_with_controller_namespace
-            PREFIXED_PARTIAL_NAMES[@context_prefix][path] ||= merge_prefix_into_object_path(@context_prefix, path.dup)
+            # PREFIXED_PARTIAL_NAMES is a shared Concurrent::Map cache that a
+            # non-main Ractor can neither read (the constant is unshareable) nor
+            # mutate; compute the prefixed path directly there.
+            if Ractor.main?
+              PREFIXED_PARTIAL_NAMES[@context_prefix][path] ||= merge_prefix_into_object_path(@context_prefix, path.dup)
+            else
+              merge_prefix_into_object_path(@context_prefix, path.dup)
+            end
           else
             path
           end

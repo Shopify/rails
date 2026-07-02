@@ -10,7 +10,7 @@
 require "active_support/ractors"
 
 %i[
-  variant_processor queues previewers analyzers analyze paths
+  verifier variant_processor queues previewers analyzers analyze paths
   variable_content_types web_image_content_types binary_content_type
   content_types_to_serve_as_binary content_types_allowed_inline
   supported_image_processing_methods unsupported_image_processing_arguments
@@ -104,4 +104,13 @@ if defined?(ActiveStorage::Blob)
     end
   end
   ActiveStorage::Blob.prepend(ActiveStorage::RactorJobEnqueueDispatch)
+
+  # Blob.signed_id_verifier memoizes @signed_id_verifier from ActiveStorage
+  # .verifier the first time a signed id / blob URL is generated. Warm it on the
+  # main Ractor so the (shareable) verifier is cached before any request Ractor
+  # reads it. Generating blob URLs is on the authenticated view path.
+  ActiveSupport::Ractors.on_freeze do
+    ActiveStorage::Blob.signed_id_verifier if ActiveStorage.verifier
+  rescue StandardError
+  end
 end
