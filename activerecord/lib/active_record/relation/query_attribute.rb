@@ -64,9 +64,17 @@ module ActiveRecord
       end
 
       def unboundable?
-        unless defined?(@_unboundable)
-          serializable? { |value| @_unboundable = value <=> 0 } && @_unboundable = nil
+        return @_unboundable if defined?(@_unboundable)
+
+        # A frozen attribute (e.g. a StatementCache::Substitute placeholder
+        # deep-frozen for cross-Ractor sharing) can't memoize; compute directly.
+        if frozen?
+          result = nil
+          serializable? { |value| result = (value <=> 0) }
+          return result
         end
+
+        serializable? { |value| @_unboundable = value <=> 0 } && @_unboundable = nil
         @_unboundable
       end
 

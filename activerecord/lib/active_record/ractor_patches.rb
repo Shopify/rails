@@ -118,7 +118,14 @@ module ActiveRecord
         shareable_args = Ractor.make_shareable(args, copy: true)
         shareable_kwargs = Ractor.make_shareable(kwargs, copy: true)
         Ractor::Dispatch.main.run do
-          Object.const_get(model_name).connection_pool.public_send(name, *shareable_args, **shareable_kwargs).then { |r| Ractor.make_shareable(r) }
+          r = Object.const_get(model_name).connection_pool.public_send(name, *shareable_args, **shareable_kwargs)
+          # Pool methods reached here are side-effecting (query cache, ...); if
+          # their return isn't shareable it isn't usable across Ractors anyway.
+          begin
+            ConnectionProxy.share(r)
+          rescue Ractor::Error
+            nil
+          end
         end
       end
 
@@ -201,7 +208,10 @@ module ActiveRecord
     # memoize onto a frozen reflection.
     def self.warm_reflection!(reflection)
       %i[class_name inverse_of klass foreign_key active_record_primary_key
-         join_primary_key join_foreign_key type].each do |m|
+         join_primary_key join_foreign_key type counter_cache_column
+         inverse_which_updates_counter_cache inverse_updates_counter_cache?
+         inverse_updates_counter_in_memory? has_cached_counter?
+         association_primary_key].each do |m|
         reflection.public_send(m) if reflection.respond_to?(m)
       rescue StandardError
       end
@@ -245,6 +255,29 @@ module ActiveRecord
 
     class << self
       attr_accessor :table_alias_length, :main_db_config, :main_schema_cache
+    end
+
+    # Bulk inserts (insert_all/upsert_all) build adapter-specific SQL through the
+    # connection and carry internal objects (a Set, the InsertAll builder) that
+    # can't be shipped to the main Ractor piecemeal via the connection proxy.
+    # Instead, dispatch the whole operation: the only thing needed from the
+    # (possibly association-scoped) relation is scope_for_create (a Hash), which
+    # we merge into the rows and run as a plain Model.insert_all on the main
+    # Ractor, where the real connection lives.
+    module InsertAllDispatch
+      def execute(relation, inserts, **options)
+        return super if Ractor.main?
+
+        model_name = relation.model.name
+        scope_attributes = relation.scope_for_create
+        shared_rows = ConnectionProxy.share(inserts.map { |row| scope_attributes.merge(row.stringify_keys) })
+        shared_options = Ractor.make_shareable(options.transform_values { |v| ConnectionProxy.share(v) })
+
+        Ractor::Dispatch.main.run do
+          klass = Object.const_get(model_name)
+          ConnectionProxy.share(ActiveRecord::InsertAll.execute(klass.all, shared_rows, **shared_options))
+        end
+      end
     end
 
     # current_time_from_proper_timezone only opens a connection to read the
@@ -307,6 +340,7 @@ end
 
 ActiveSupport::Ractors.before_freeze do
   ActiveRecord::Base.singleton_class.prepend(ActiveRecord::RactorPatches::ConnectionHandlingProxy)
+  ActiveRecord::InsertAll.singleton_class.prepend(ActiveRecord::RactorPatches::InsertAllDispatch)
   ActiveRecord::Transactions.prepend(ActiveRecord::RactorPatches::TransactionDispatch)
   ActiveRecord::Timestamp::ClassMethods.prepend(ActiveRecord::RactorPatches::TimestampDispatch)
 

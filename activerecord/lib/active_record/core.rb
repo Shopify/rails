@@ -416,6 +416,11 @@ module ActiveRecord
       end
 
       def cached_find_by_statement(connection, key, &block) # :nodoc:
+        # The statement cache lives in a class variable that can't be read from a
+        # non-main Ractor; skip caching there and build the statement each time
+        # (it still executes through the connection).
+        return StatementCache.create(connection, &block) unless Ractor.main?
+
         cache = @find_by_statement_cache[connection.prepared_statements]
         cache.compute_if_absent(key) { StatementCache.create(connection, &block) }
       end

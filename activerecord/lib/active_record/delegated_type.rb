@@ -239,41 +239,61 @@ module ActiveRecord
         role_type = options[:foreign_type] || "#{role}_type"
         role_id   = options[:foreign_key] || "#{role}_id"
 
-        define_singleton_method "#{role}_types" do
-          types.map(&:to_s)
-        end
+        # These methods/scopes are defined with Procs that capture role/type
+        # strings. Build them in clean bindings (helper methods below) whose only
+        # locals are Ractor-shareable (frozen) strings, and make the Procs
+        # shareable, so the generated methods can be called from a non-main
+        # Ractor.
+        s = ->(v) { ActiveSupport::Ractors.make_shareable(v.to_s) }
 
-        define_method "#{role}_class" do
-          public_send(role_type).constantize
-        end
-
-        define_method "#{role}_name" do
-          public_send("#{role}_class").model_name.singular.inquiry
-        end
-
-        define_method "build_#{role}" do |*params|
-          public_send("#{role}=", public_send("#{role}_class").new(*params))
-        end
+        define_singleton_method "#{role}_types", &_delegated_type_types_body(ActiveSupport::Ractors.make_shareable(types.map(&:to_s)))
+        define_method "#{role}_class", &_delegated_type_class_body(s.(role_type))
+        define_method "#{role}_name", &_delegated_type_name_body(s.("#{role}_class"))
+        define_method "build_#{role}", &_delegated_type_build_body(s.("#{role}="), s.("#{role}_class"))
 
         types.each do |type|
           scope_name = type.tableize.tr("/", "_")
           singular   = scope_name.singularize
           query      = "#{singular}?"
 
-          scope scope_name, -> { where(role_type => type) }
-
-          define_method query do
-            public_send(role_type) == type
-          end
-
-          define_method singular do
-            public_send(role) if public_send(query)
-          end
-
-          define_method "#{singular}_#{primary_key}" do
-            public_send(role_id) if public_send(query)
-          end
+          scope scope_name, _delegated_type_scope_body(s.(role_type), s.(type))
+          define_method query, &_delegated_type_query_body(s.(role_type), s.(type))
+          define_method singular, &_delegated_type_singular_body(s.(role), s.(query))
+          define_method "#{singular}_#{primary_key}", &_delegated_type_singular_id_body(s.(role_id), s.(query))
         end
       end
+
+      private
+        def _delegated_type_types_body(types)
+          ActiveSupport::Ractors.shareable_proc { types }
+        end
+
+        def _delegated_type_class_body(role_type)
+          ActiveSupport::Ractors.shareable_proc { public_send(role_type).constantize }
+        end
+
+        def _delegated_type_name_body(class_method)
+          ActiveSupport::Ractors.shareable_proc { public_send(class_method).model_name.singular.inquiry }
+        end
+
+        def _delegated_type_build_body(setter, class_method)
+          ActiveSupport::Ractors.shareable_proc { |*params| public_send(setter, public_send(class_method).new(*params)) }
+        end
+
+        def _delegated_type_scope_body(role_type, type)
+          -> { where(role_type => type) }
+        end
+
+        def _delegated_type_query_body(role_type, type)
+          ActiveSupport::Ractors.shareable_proc { public_send(role_type) == type }
+        end
+
+        def _delegated_type_singular_body(role, query)
+          ActiveSupport::Ractors.shareable_proc { public_send(role) if public_send(query) }
+        end
+
+        def _delegated_type_singular_id_body(role_id, query)
+          ActiveSupport::Ractors.shareable_proc { public_send(role_id) if public_send(query) }
+        end
   end
 end

@@ -287,16 +287,22 @@ module ActiveRecord
       #
       # Hence this method.
       def inverse_which_updates_counter_cache
-        unless @inverse_which_updates_counter_cache_defined
+        return @inverse_which_updates_counter_cache if @inverse_which_updates_counter_cache_defined
+
+        result =
           if counter_cache_column
             inverse_candidates = inverse_of ? [inverse_of] : klass.reflect_on_all_associations(:belongs_to)
-            @inverse_which_updates_counter_cache = inverse_candidates.find do |inverse|
+            inverse_candidates.find do |inverse|
               inverse.counter_cache_column == counter_cache_column && (inverse.polymorphic? || inverse.klass == active_record)
             end
           end
+
+        # A frozen reflection (deep-frozen for Ractor sharing) can't memoize.
+        unless frozen?
+          @inverse_which_updates_counter_cache = result
           @inverse_which_updates_counter_cache_defined = true
         end
-        @inverse_which_updates_counter_cache
+        result
       end
       alias inverse_updates_counter_cache? inverse_which_updates_counter_cache
 

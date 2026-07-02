@@ -313,12 +313,24 @@ module ActiveRecord
             if scopes
               # scope :active, -> { where(status: 0) }
               klass.send(:detect_enum_conflict!, name, value_method_name, true)
-              klass.scope value_method_name, -> { where(name => value) }
+              klass.scope value_method_name, enum_scope_body(Ractor.make_shareable(name), Ractor.make_shareable(value))
 
               # scope :not_active, -> { where.not(status: 0) }
               klass.send(:detect_enum_conflict!, name, "not_#{value_method_name}", true)
-              klass.scope "not_#{value_method_name}", -> { where(predicate_builder[name, value, :is_distinct_from]) }
+              klass.scope "not_#{value_method_name}", enum_not_scope_body(Ractor.make_shareable(name), Ractor.make_shareable(value))
             end
+          end
+
+          # Build the scope bodies in a clean binding whose only locals (column
+          # and value) are Ractor-shareable, so the resulting Procs can be made
+          # shareable (a Proc captures its whole binding, so they must not be
+          # created alongside unshareable locals such as the raw enum value).
+          def enum_scope_body(column, value)
+            -> { where(column => value) }
+          end
+
+          def enum_not_scope_body(column, value)
+            -> { where(predicate_builder[column, value, :is_distinct_from]) }
           end
       end
       private_constant :EnumMethods
