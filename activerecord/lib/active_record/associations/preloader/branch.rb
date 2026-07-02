@@ -61,12 +61,24 @@ module ActiveRecord
           parent.nil?
         end
 
+        def preload_index=(index)
+          @preload_index = index
+          children.each { |child| child.preload_index = index }
+        end
+
+        def preload_index
+          @preload_index || 0
+        end
+
         def source_records
           @parent.preloaded_records
         end
 
         def preloaded_records
-          @preloaded_records ||= loaders.flat_map(&:preloaded_records)
+          @preloaded_records ||= begin
+            records = loaders.flat_map(&:preloaded_records)
+            associated_records_from_owner_targets(records)
+          end
         end
 
         def done?
@@ -136,6 +148,29 @@ module ActiveRecord
                 )
               }
             }
+          end
+
+          def associated_records_from_owner_targets(records)
+            return records if root? || records.empty?
+
+            associated_records = []
+            source_records.each do |record|
+              reflection = record.class._reflect_on_association(association)
+              next if parent.polymorphic? && !reflection
+
+              owner_association = record.association(association)
+              return records unless owner_association.loaded?
+
+              associated_records.concat(Array.wrap(owner_association.target))
+            end
+            return records if associated_records.empty?
+
+            return associated_records if associated_records.any?(&:new_record?)
+
+            associated_records_by_key = associated_records.index_by { |record| [record.class.base_class, record.id] }
+            records.map do |record|
+              associated_records_by_key.fetch([record.class.base_class, record.id], record)
+            end
           end
 
           # Returns a class containing the logic needed to load preload the data
