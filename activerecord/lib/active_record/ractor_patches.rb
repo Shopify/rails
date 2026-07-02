@@ -267,6 +267,13 @@ ActiveSupport::Ractors.before_freeze do
        define_attribute_methods all_timestamp_attributes_in_model
        timestamp_attributes_for_create_in_model timestamp_attributes_for_update_in_model
        _returning_columns_for_insert content_columns].each { |m| warm.call(klass, m) }
+    # symbol_column_to_string(sym) memoizes @symbol_column_to_string_name_hash;
+    # warm it with a throwaway argument.
+    begin
+      klass.symbol_column_to_string(:id) if klass.respond_to?(:symbol_column_to_string) && klass.table_exists?
+    rescue StandardError
+    end
+
     # Exercise the finder path to warm remaining lazily-memoized class state
     # (order columns, ...). Runs on the main Ractor where the connection exists.
     begin

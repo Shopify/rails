@@ -84,6 +84,11 @@ ActiveSupport::Ractors.on_freeze do
 
   Ractor.make_shareable(Concurrent::NULL) if defined?(Concurrent::NULL)
   Ractor.make_shareable(Concurrent::NO_VALUE) if defined?(Concurrent::NO_VALUE)
+
+  # SecureRandom.base58/base36 (used e.g. by has_secure_token) read these
+  # alphabet arrays on the request path.
+  Ractor.make_shareable(SecureRandom::BASE58_ALPHABET) if defined?(SecureRandom::BASE58_ALPHABET)
+  Ractor.make_shareable(SecureRandom::BASE36_ALPHABET) if defined?(SecureRandom::BASE36_ALPHABET)
 end
 
 # Time.zone falls back to Time.zone_default (an ActiveSupport::TimeZone kept in a
@@ -103,6 +108,19 @@ ActiveSupport::Ractors.on_freeze do
   inflections = ActiveSupport::Inflector::Inflections.instance(:en)
   inflections.uncountables.uncountable?("sheep") # warm the lazy pattern
   ActiveSupport::Ractors.make_shareable(inflections)
+end
+
+# SerializerWithFallback (used to (de)serialize cookies/sessions/messages)
+# lazily memoizes @available (whether msgpack is loadable) the first time it
+# detects a format. That write can't happen in a non-main Ractor, so warm it on
+# the main Ractor -- otherwise cookie/session deserialization raises and is
+# rescued to nil, silently emptying the session.
+ActiveSupport::Ractors.before_freeze do
+  if defined?(ActiveSupport::Messages::SerializerWithFallback)
+    ActiveSupport::Messages::SerializerWithFallback::SERIALIZERS.each_value do |serializer|
+      serializer.send(:available?) if serializer.respond_to?(:available?, true)
+    end
+  end
 end
 
 # LocalCache#local_cache_key memoizes a key onto the (soon-frozen) cache store.
