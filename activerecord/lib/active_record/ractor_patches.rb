@@ -297,11 +297,26 @@ module ActiveRecord
       def with_transaction_returning_status
         return super if Ractor.main?
 
-        status = yield
-        raise ActiveRecord::Rollback unless status
-        status
-      rescue ActiveRecord::Rollback
-        nil
+        # No real DB transaction here; the dispatched statement auto-commits on
+        # the main Ractor. Remember the record state and, on success, fire the
+        # after_commit callbacks (committed!) so behavior that relies on them
+        # -- e.g. resetting a has_one negative cache after create -- still runs.
+        remember_transaction_record_state
+        begin
+          status = yield
+          if status
+            committed!(should_run_callbacks: true)
+          else
+            clear_transaction_record_state
+          end
+          status
+        rescue ActiveRecord::Rollback
+          clear_transaction_record_state
+          nil
+        rescue Exception
+          clear_transaction_record_state
+          raise
+        end
       end
     end
 

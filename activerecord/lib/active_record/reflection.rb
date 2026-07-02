@@ -756,11 +756,12 @@ module ActiveRecord
         # If it cannot find a suitable inverse association name, it returns
         # +nil+.
         def inverse_name
-          unless defined?(@inverse_name)
-            @inverse_name = options.fetch(:inverse_of) { automatic_inverse_of }
-          end
+          return @inverse_name if defined?(@inverse_name)
 
-          @inverse_name
+          computed = options.fetch(:inverse_of) { automatic_inverse_of }
+          # A frozen reflection (deep-frozen for Ractor sharing) can't memoize.
+          @inverse_name = computed unless frozen?
+          computed
         end
 
         # returns either +nil+ or the inverse association name that it finds.
