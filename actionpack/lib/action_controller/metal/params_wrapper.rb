@@ -94,6 +94,21 @@ module ActionController
         new name, format, include, exclude, nil, nil
       end
 
+      # Force the lazily-computed attributes and drop the Mutex so the options
+      # object can be made Ractor-shareable (frozen) at ractorize time; a frozen
+      # options object never recomputes, so the mutex is no longer needed.
+      def freeze # :nodoc:
+        return self if frozen?
+        if klass && !klass.anonymous? && Array(format).any?
+          name    # memoize name / model
+          include # memoize include (reads the model's attribute names)
+        end
+        @mutex = nil
+        @name_set = true
+        @include_set = true
+        super
+      end
+
       def initialize(name, format, include, exclude, klass, model) # :nodoc:
         super
         @mutex = Mutex.new

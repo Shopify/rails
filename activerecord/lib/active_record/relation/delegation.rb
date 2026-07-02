@@ -72,6 +72,12 @@ module ActiveRecord
       MUTEX = Mutex.new
 
       def generate_method(method)
+        # Compiling a delegation method mutates this shared module (and takes a
+        # Mutex), which isn't possible from a non-main Ractor. Skip the
+        # optimization there; #method_missing still delegates the call directly
+        # via `scoping { model.public_send(...) }` each time.
+        return unless Ractor.main?
+
         MUTEX.synchronize do
           return if method_defined?(method)
 

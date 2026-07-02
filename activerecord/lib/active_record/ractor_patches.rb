@@ -64,6 +64,23 @@ module ActiveRecord
     # self-detaching is safe) and Concurrent::Map caches. Make them shareable so
     # the whole _reflections hash can be read from a non-main Ractor.
     def self.make_reflection_shareable!(reflection)
+      # Warm lazily-computed reflection state that consults the connection/schema
+      # (inverse_of walks the associated class and calls #inspect -> table_exists?).
+      # Doing it here on the main Ractor memoizes it before the reflection is
+      # frozen, so a non-main Ractor never triggers the connection.
+      %i[inverse_of klass foreign_key active_record_primary_key join_primary_key
+         join_foreign_key type].each do |m|
+        reflection.public_send(m) if reflection.respond_to?(m)
+      rescue StandardError
+      end
+      # check_validity! memoizes @validated; warm it so the per-association-build
+      # validity check (which calls Class#inspect -> table_exists?) is skipped in
+      # a non-main Ractor.
+      begin
+        reflection.check_validity! if reflection.respond_to?(:check_validity!)
+      rescue StandardError
+      end
+
       scope = reflection.instance_variable_get(:@scope) if reflection.instance_variable_defined?(:@scope)
       if scope.is_a?(Proc) && !Ractor.shareable?(scope)
         replacement =
@@ -123,6 +140,10 @@ end
 ActiveSupport::Ractors.before_freeze do
   ActiveRecord::Relation.prepend(ActiveRecord::RactorPatches::RelationQueryDispatch)
 
+  # Delegation.uncacheable_methods memoizes a class ivar the first time a
+  # relation delegates a method; warm it on the main Ractor.
+  ActiveRecord::Delegation.uncacheable_methods if defined?(ActiveRecord::Delegation)
+
   # Warm model schema/relation state BEFORE anything is frozen (load_schema!
   # loads columns from the DB and memoizes class state; it must not run for the
   # first time inside a non-main Ractor).
@@ -152,6 +173,12 @@ ActiveSupport::Ractors.capture_class_reader(ActiveRecord::Base, :adapter_class)
 ActiveSupport::Ractors.on_freeze do
   # Effectively-immutable relation constants read on the query-building path.
   Ractor.make_shareable(ActiveRecord::Relation::WhereClause::EMPTY) if defined?(ActiveRecord::Relation::WhereClause::EMPTY)
+
+  # AssociationScope::INSTANCE holds a self-contained identity lambda; freeze it
+  # so association scopes can be built from a non-main Ractor.
+  if defined?(ActiveRecord::Associations::AssociationScope::INSTANCE)
+    Ractor.make_shareable(ActiveRecord::Associations::AssociationScope::INSTANCE)
+  end
 
   models = ActiveRecord::Base.descendants.select { |k| k.respond_to?(:abstract_class?) }
   (models + [ActiveRecord::Base]).uniq.each do |klass|

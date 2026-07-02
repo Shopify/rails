@@ -18,6 +18,11 @@ module ActiveRecord
           unless @value_before_type_cast.frozen?
             @value_before_type_cast = @value_before_type_cast.deep_dup
           end
+          # Eagerly resolve the database value (after the deep_dup snapshot) so the
+          # attribute can be deep-frozen and shared across Ractors without
+          # value_for_database being memoized lazily onto a frozen attribute
+          # during query compilation.
+          value_for_database
         else
           # Eagerly resolve the database value for immutable types too, so the
           # attribute can be safely deep-frozen and shared across Ractors (the

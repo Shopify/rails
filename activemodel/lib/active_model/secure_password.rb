@@ -265,16 +265,30 @@ module ActiveModel
       def initialize(attribute, reset_token:, algorithm:)
         attr_reader attribute
 
-        define_method("#{attribute}=") do |unencrypted_password|
+        # Make the captured algorithm object Ractor-shareable so the generated
+        # instance methods can be invoked from a non-main Ractor. A method
+        # defined with a non-shareable Proc can only be called from the Ractor
+        # that defined it; wrapping the definition blocks in shareable Procs
+        # lifts that restriction. `algo` is assigned exactly once (a shareable
+        # Proc can't capture a reassignable outer variable). If a custom
+        # algorithm object can't be made shareable, fall back to plain blocks.
+        algo = InstanceMethodsOnActivation.try_make_shareable(algorithm)
+        shareable_captures = Ractor.shareable?(algo)
+        define = ->(name, callable) do
+          callable = Ractor.make_shareable(callable) if shareable_captures
+          define_method(name, &callable)
+        end
+
+        define.("#{attribute}=", ->(unencrypted_password) do
           if unencrypted_password.nil?
             instance_variable_set("@#{attribute}", nil)
             self.public_send("#{attribute}_digest=", nil)
           elsif !unencrypted_password.empty?
             instance_variable_set("@#{attribute}", unencrypted_password)
-            password_digest = algorithm.hash_password(unencrypted_password)
+            password_digest = algo.hash_password(unencrypted_password)
             self.public_send("#{attribute}_digest=", password_digest)
           end
-        end
+        end)
 
         attr_accessor :"#{attribute}_confirmation", :"#{attribute}_challenge"
 
@@ -288,29 +302,35 @@ module ActiveModel
         #   user.save
         #   user.authenticate_password('notright')      # => false
         #   user.authenticate_password('mUc3m00RsqyRe') # => user
-        define_method("authenticate_#{attribute}") do |unencrypted_password|
+        define.("authenticate_#{attribute}", ->(unencrypted_password) do
           attribute_digest = public_send("#{attribute}_digest")
-          attribute_digest.present? && algorithm.verify_password(unencrypted_password, attribute_digest) && self
-        end
+          attribute_digest.present? && algo.verify_password(unencrypted_password, attribute_digest) && self
+        end)
 
         # Returns the salt, a small chunk of random data added to the password before it's hashed.
-        define_method("#{attribute}_salt") do
+        define.("#{attribute}_salt", -> do
           attribute_digest = public_send("#{attribute}_digest")
-          attribute_digest.present? ? algorithm.password_salt(attribute_digest) : nil
-        end
+          attribute_digest.present? ? algo.password_salt(attribute_digest) : nil
+        end)
 
         alias_method :authenticate, :authenticate_password if attribute == :password
 
         if reset_token
           # Returns the class-level configured reset token for the password.
-          define_method("#{attribute}_reset_token") do
+          define.("#{attribute}_reset_token", -> do
             generate_token_for(:"#{attribute}_reset")
-          end
+          end)
         end
 
-        define_method("#{attribute}_algorithm") do
-          algorithm.algorithm_name
-        end
+        define.("#{attribute}_algorithm", -> do
+          algo.algorithm_name
+        end)
+      end
+
+      def self.try_make_shareable(value) # :nodoc:
+        Ractor.make_shareable(value)
+      rescue Ractor::Error, Ractor::IsolationError
+        value
       end
     end
   end
