@@ -188,7 +188,11 @@ module ActiveRecord
       # <tt>composed_of :balance, class_name: 'Money'</tt> returns <tt>'Money'</tt>
       # <tt>has_many :clients</tt> returns <tt>'Client'</tt>
       def class_name
-        @class_name ||= -(options[:class_name] || derive_class_name).to_s
+        return @class_name if @class_name
+        # A frozen reflection (deep-frozen for Ractor sharing) can't memoize;
+        # compute without caching.
+        return -(options[:class_name] || derive_class_name).to_s if frozen?
+        @class_name = -(options[:class_name] || derive_class_name).to_s
       end
 
       # Returns a list of scopes that should be applied for this Reflection
@@ -420,7 +424,9 @@ module ActiveRecord
       # a new association object. Use +build_association+ or +create_association+
       # instead. This allows plugins to hook into association object creation.
       def klass
-        @klass ||= _klass(class_name)
+        return @klass if @klass
+        return _klass(class_name) if frozen? # see #class_name
+        @klass = _klass(class_name)
       end
 
       def _klass(class_name) # :nodoc:

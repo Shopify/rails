@@ -11,90 +11,146 @@ require "ractor/dispatch"
 
 module ActiveRecord
   module RactorPatches # :nodoc:
-    # Non-main Ractors can't own a DB connection (the pool isn't shareable), so
-    # dispatch read queries to the main Ractor, which owns the connection, and
-    # return a shareable ActiveRecord::Result. Limited to simple, synchronous
-    # select queries (no async, eager-load, or contradictions), which the main
-    # relation-loading path uses.
-    module RelationQueryDispatch
-      def exec_main_query(async: false)
+    # Option 1: a Ractor connection proxy. A non-main Ractor can't own a DB
+    # connection, so instead of dispatching individual query methods we hand the
+    # request path a proxy connection whose every method call is executed on the
+    # main Ractor (which owns the real connection) and whose result is returned
+    # Ractor-shareable. This is transparent to the application: with_connection
+    # yields the proxy, and select/insert/update/quote/... all forward to main.
+    module ConnectionProxy
+      def initialize(model_name)
+        @model_name = model_name || "ActiveRecord::Base"
+      end
+
+      # Block-taking methods run their block in *this* Ractor (the block calls
+      # back into the proxy for individual statements).
+      def with_connection(*, **); yield self; end
+      def unprepared_statement; yield; end
+      def lease; end
+      def expire; end
+      def connection; self; end
+      # schema_cache holds a Monitor (unshareable); return a proxy that forwards
+      # its method calls to the main Ractor instead.
+      def schema_cache; SchemaCacheProxyObject.for(@model_name); end
+
+      # EXPERIMENT: a non-main Ractor has no real transaction; run the body
+      # directly. Each forwarded statement is auto-committed on the main Ractor.
+      def transaction(*, **)
+        block_given? ? yield : nil
+      end
+
+      def method_missing(name, *args, **kwargs, &block)
+        if block
+          raise ArgumentError, "ConnectionProxy can't forward ##{name} with a block across Ractors"
+        end
+        model_name = @model_name
+        # Some connection methods accept an ActiveRecord::Relation (which the
+        # real connection converts via arel_from_relation). A Relation isn't
+        # cleanly shareable and re-triggers query building when shipped, so
+        # convert it to its Arel here (built in this Ractor) before dispatching.
+        args = args.map { |a| a.is_a?(ActiveRecord::Relation) ? a.arel : a }
+        shareable_args = Ractor.make_shareable(args, copy: true)
+        shareable_kwargs = Ractor.make_shareable(kwargs, copy: true)
+        Ractor::Dispatch.main.run do
+          Object.const_get(model_name).with_connection do |conn|
+            Ractor.make_shareable(conn.public_send(name, *shareable_args, **shareable_kwargs))
+          end
+        end
+      end
+
+      def respond_to_missing?(*)
+        true
+      end
+    end
+
+    # Minimal proxy for connection_pool (used e.g. by AliasTracker and
+    # connection_db_config); forwards to the main Ractor's pool.
+    module ConnectionPoolProxy
+      def initialize(model_name)
+        @model_name = model_name || "ActiveRecord::Base"
+      end
+
+      def with_connection(*, **); yield ConnectionProxyObject.for(@model_name); end
+      def lease_connection; ConnectionProxyObject.for(@model_name); end
+      def db_config; ActiveRecord::RactorPatches.main_db_config; end
+      def schema_cache; ActiveRecord::RactorPatches.main_schema_cache; end
+
+      def method_missing(name, *args, **kwargs, &block)
+        raise ArgumentError, "ConnectionPoolProxy can't forward ##{name} with a block" if block
+        model_name = @model_name
+        shareable_args = Ractor.make_shareable(args, copy: true)
+        shareable_kwargs = Ractor.make_shareable(kwargs, copy: true)
+        Ractor::Dispatch.main.run do
+          Object.const_get(model_name).connection_pool.public_send(name, *shareable_args, **shareable_kwargs).then { |r| Ractor.make_shareable(r) }
+        end
+      end
+
+      def respond_to_missing?(*)
+        true
+      end
+    end
+
+    # In a non-main Ractor, hand out the proxy connection/pool instead of
+    # touching the (unshareable) connection handler.
+    module ConnectionHandlingProxy
+      def with_connection(prevent_permanent_checkout: false, &block)
         return super if Ractor.main?
-        return super if @none || async || eager_loading? || where_clause.contradiction?
+        block.call(ConnectionProxyObject.for(name))
+      end
 
-        shareable_arel = Ractor.make_shareable(arel, copy: true)
-        model_name = model.name
+      def lease_connection
+        return super if Ractor.main?
+        ConnectionProxyObject.for(name)
+      end
 
+      def connection
+        return super if Ractor.main?
+        ConnectionProxyObject.for(name)
+      end
+
+      def connection_pool
+        return super if Ractor.main?
+        ConnectionPoolProxyObject.for(name)
+      end
+    end
+
+    # Forwards schema_cache queries (columns, primary_keys, ...) to the main
+    # Ractor's connection.
+    module SchemaCacheProxy
+      def initialize(model_name); @model_name = model_name || "ActiveRecord::Base"; end
+
+      def method_missing(name, *args, **kwargs, &block)
+        raise ArgumentError, "SchemaCacheProxy can't forward ##{name} with a block" if block
+        model_name = @model_name
+        shareable_args = Ractor.make_shareable(args, copy: true)
+        shareable_kwargs = Ractor.make_shareable(kwargs, copy: true)
         Ractor::Dispatch.main.run do
-          klass = Object.const_get(model_name)
-          klass.with_connection do |c|
-            Ractor.make_shareable(klass._query_by_sql(c, shareable_arel))
+          Object.const_get(model_name).with_connection do |conn|
+            Ractor.make_shareable(conn.schema_cache.public_send(name, *shareable_args, **shareable_kwargs))
           end
         end
       end
 
-      # exists? (also backs empty?/none?/any?) runs a SELECT via the connection;
-      # dispatch the no-argument case to the main Ractor.
-      def exists?(conditions = :none)
-        return super if Ractor.main? || @none
-        # Reduce conditional exists? (e.g. has_secure_token's uniqueness check)
-        # to the dispatched no-argument form.
-        return where(conditions).exists? if conditions != :none
-
-        shareable_arel = Ractor.make_shareable(limit(1).arel, copy: true)
-        model_name = model.name
-        Ractor::Dispatch.main.run do
-          klass = Object.const_get(model_name)
-          klass.with_connection { |c| !c.select_all(shareable_arel).empty? }
-        end
+      def respond_to_missing?(*)
+        true
       end
+    end
 
-      # Building an association scope needs an AliasTracker, whose factory opens
-      # a connection just to read table_alias_length (a static per-adapter
-      # value) when there are no joins. Use the captured value in a non-main
-      # Ractor so scopes can be built without a connection.
-      def alias_tracker(joins = [], aliases = nil)
-        return super if Ractor.main? || !joins.empty?
+    # Small object classes that mix in the proxy behavior (BasicObject-like:
+    # method_missing forwards everything).
+    class ConnectionProxyObject
+      include ConnectionProxy
+      def self.for(model_name); new(model_name); end
+    end
 
-        length = ActiveRecord::RactorPatches.table_alias_length
-        return super if length.nil?
+    class SchemaCacheProxyObject
+      include SchemaCacheProxy
+      def self.for(model_name); new(model_name); end
+    end
 
-        aliases ||= Hash.new(0)
-        aliases[table.name] = 1
-        ActiveRecord::Associations::AliasTracker.new(length, aliases)
-      end
-
-      # ids selects the primary key column(s) via the connection; dispatch it.
-      def ids
-        return super if Ractor.main? || @none || @async
-        return super if has_include?(primary_key)
-
-        columns = arel_columns(Array(primary_key))
-        relation = spawn
-        relation.select_values = columns
-        shareable_arel = Ractor.make_shareable(relation.arel, copy: true)
-        model_name = model.name
-        Ractor::Dispatch.main.run do
-          klass = Object.const_get(model_name)
-          klass.with_connection do |c|
-            Ractor.make_shareable(c.select_all(shareable_arel, "#{klass.name} Ids").cast_values(klass.attribute_types))
-          end
-        end
-      end
-
-      # to_sql (used e.g. for collection cache keys) compiles the arel via the
-      # connection; dispatch that compilation to the main Ractor.
-      def to_sql
-        return super if Ractor.main? || @to_sql || eager_loading?
-
-        shareable_arel = Ractor.make_shareable(arel, copy: true)
-        model_name = model.name
-        @to_sql = Ractor::Dispatch.main.run do
-          klass = Object.const_get(model_name)
-          klass.with_connection do |c|
-            Ractor.make_shareable(c.unprepared_statement { c.to_sql(shareable_arel) })
-          end
-        end
-      end
+    class ConnectionPoolProxyObject
+      include ConnectionPoolProxy
+      def self.for(model_name); new(model_name); end
     end
     # Association reflections hold a scope Proc (invoked via instance_exec, so
     # self-detaching is safe) and Concurrent::Map caches. Make them shareable so
@@ -151,52 +207,7 @@ module ActiveRecord
     end
 
     class << self
-      attr_accessor :table_alias_length
-    end
-
-    # A non-main Ractor can't own a connection, so it can't execute the INSERT
-    # for a new record. Dispatch the write to the main Ractor: ship a shareable
-    # {column => value_for_database} payload, build and run the INSERT there,
-    # and copy the returning values (e.g. the new id) back onto the record.
-    module PersistenceWriteDispatch
-      def _create_record(attribute_names = self.attribute_names)
-        return super if Ractor.main?
-
-        attribute_names = attributes_for_create(attribute_names)
-        values = attributes_with_values(attribute_names)
-        payload = {}
-        values.each { |name, attr| payload[name] = attr.value_for_database }
-        Ractor.make_shareable(payload)
-        model_name = self.class.name
-
-        columns, returning_values = Ractor::Dispatch.main.run do
-          klass = Object.const_get(model_name)
-          klass.with_connection do |connection|
-            returning = klass._returning_columns_for_insert(connection)
-            im = Arel::InsertManager.new(klass.arel_table)
-            if payload.empty?
-              im.insert(connection.empty_insert_statement_value(klass.primary_key))
-            else
-              im.insert(payload.transform_keys { |name| klass.arel_table[name] })
-            end
-            rv = connection.insert(im, "#{klass} Create", klass.primary_key || false, nil, returning: returning)
-            Ractor.make_shareable([returning, rv])
-          end
-        end
-
-        if returning_values
-          columns.zip(returning_values).each do |column, value|
-            _write_attribute(column, type_for_attribute(column).deserialize(value)) if !_read_attribute(column)
-          end
-        end
-
-        @new_record = false
-        @previously_new_record = true
-
-        yield(self) if block_given?
-
-        id
-      end
+      attr_accessor :table_alias_length, :main_db_config, :main_schema_cache
     end
 
     # current_time_from_proper_timezone only opens a connection to read the
@@ -253,10 +264,16 @@ module ActiveRecord
 end
 
 ActiveSupport::Ractors.before_freeze do
-  ActiveRecord::Relation.prepend(ActiveRecord::RactorPatches::RelationQueryDispatch)
-  ActiveRecord::Persistence.prepend(ActiveRecord::RactorPatches::PersistenceWriteDispatch)
+  ActiveRecord::Base.singleton_class.prepend(ActiveRecord::RactorPatches::ConnectionHandlingProxy)
   ActiveRecord::Transactions.prepend(ActiveRecord::RactorPatches::TransactionDispatch)
   ActiveRecord::Timestamp::ClassMethods.prepend(ActiveRecord::RactorPatches::TimestampDispatch)
+
+  # Capture shareable connection metadata served by the pool proxy.
+  begin
+    ActiveRecord::RactorPatches.main_db_config = ActiveRecord::Base.connection_pool.db_config
+    ActiveRecord::RactorPatches.main_schema_cache = ActiveRecord::Base.connection_pool.schema_cache
+  rescue StandardError
+  end
 
   # Delegation.uncacheable_methods memoizes a class ivar the first time a
   # relation delegates a method; warm it on the main Ractor.
@@ -285,10 +302,13 @@ ActiveSupport::Ractors.before_freeze do
        define_attribute_methods all_timestamp_attributes_in_model
        timestamp_attributes_for_create_in_model timestamp_attributes_for_update_in_model
        _returning_columns_for_insert content_columns].each { |m| warm.call(klass, m) }
-    # symbol_column_to_string(sym) memoizes @symbol_column_to_string_name_hash;
-    # warm it with a throwaway argument.
+    # These memoize class ivars but take a connection argument, so the no-arg
+    # warm above skips them; warm them explicitly on the main Ractor.
     begin
-      klass.symbol_column_to_string(:id) if klass.respond_to?(:symbol_column_to_string) && klass.table_exists?
+      if klass.respond_to?(:symbol_column_to_string) && klass.table_exists?
+        klass.symbol_column_to_string(:id)
+        klass.with_connection { |c| klass._returning_columns_for_insert(c) }
+      end
     rescue StandardError
     end
 
