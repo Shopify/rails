@@ -159,6 +159,30 @@ module ActiveRecord
         def define_non_cyclic_method(name, &block)
           return if method_defined?(name, false)
 
+          # Build the method body as a Ractor-shareable Proc so the generated
+          # autosave save/validation methods can be invoked from a non-main
+          # Ractor. This works because the blocks passed here capture only the
+          # (Symbol) association name and look the reflection up at call time
+          # (see #add_autosave_association_callbacks). If the block can't be made
+          # shareable, fall back to the original definition.
+          begin
+            shareable_block = ActiveSupport::Ractors.shareable_proc(&block)
+            body = ActiveSupport::Ractors.shareable_proc do |*args|
+              result = true; @_already_called ||= {}
+              unless @_already_called[name]
+                begin
+                  @_already_called[name] = true
+                  result = instance_eval(&shareable_block)
+                ensure
+                  @_already_called[name] = false
+                end
+              end
+              result
+            end
+            return define_method(name, &body)
+          rescue ::Ractor::Error, ::Ractor::IsolationError, NoMethodError
+          end
+
           define_method(name) do |*args|
             result = true; @_already_called ||= {}
             # Loop prevention for validation of associations
@@ -188,16 +212,20 @@ module ActiveRecord
         # before actually defining them.
         def add_autosave_association_callbacks(reflection)
           save_method = :"autosave_associated_records_for_#{reflection.name}"
+          # Capture the association name (a Symbol), not the reflection object,
+          # so the generated method's Proc is Ractor-shareable; resolve the
+          # reflection at call time.
+          reflection_name = reflection.name
 
           if reflection.collection?
             around_save :around_save_collection_association
 
-            define_non_cyclic_method(save_method) { save_collection_association(reflection) }
+            define_non_cyclic_method(save_method) { save_collection_association(self.class._reflect_on_association(reflection_name)) }
             # Doesn't use after_save as that would save associations added in after_create/after_update twice
             after_create save_method
             after_update save_method
           elsif reflection.has_one?
-            define_non_cyclic_method(save_method) { save_has_one_association(reflection) }
+            define_non_cyclic_method(save_method) { save_has_one_association(self.class._reflect_on_association(reflection_name)) }
             # Configures two callbacks instead of a single after_save so that
             # the model may rely on their execution order relative to its
             # own callbacks.
@@ -209,7 +237,7 @@ module ActiveRecord
             after_create save_method
             after_update save_method
           else
-            define_non_cyclic_method(save_method) { throw(:abort) if save_belongs_to_association(reflection) == false }
+            define_non_cyclic_method(save_method) { throw(:abort) if save_belongs_to_association(self.class._reflect_on_association(reflection_name)) == false }
             before_save save_method
           end
 
@@ -218,16 +246,19 @@ module ActiveRecord
 
         def define_autosave_validation_callbacks(reflection)
           validation_method = :"validate_associated_records_for_#{reflection.name}"
+          reflection_name = reflection.name
           if reflection.validate? && !method_defined?(validation_method)
-            if reflection.collection?
-              method = :validate_collection_association
+            # Single assignment so the captured value is not "reassignable"
+            # (required for the block to be made a shareable Proc).
+            validate_method = if reflection.collection?
+              :validate_collection_association
             elsif reflection.has_one?
-              method = :validate_has_one_association
+              :validate_has_one_association
             else
-              method = :validate_belongs_to_association
+              :validate_belongs_to_association
             end
 
-            define_non_cyclic_method(validation_method) { send(method, reflection) }
+            define_non_cyclic_method(validation_method) { send(validate_method, self.class._reflect_on_association(reflection_name)) }
             validate validation_method
             after_validation :_ensure_no_duplicate_errors
           end

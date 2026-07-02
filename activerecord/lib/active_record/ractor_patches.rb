@@ -63,6 +63,24 @@ module ActiveRecord
         ActiveRecord::Associations::AliasTracker.new(length, aliases)
       end
 
+      # ids selects the primary key column(s) via the connection; dispatch it.
+      def ids
+        return super if Ractor.main? || @none || @async
+        return super if has_include?(primary_key)
+
+        columns = arel_columns(Array(primary_key))
+        relation = spawn
+        relation.select_values = columns
+        shareable_arel = Ractor.make_shareable(relation.arel, copy: true)
+        model_name = model.name
+        Ractor::Dispatch.main.run do
+          klass = Object.const_get(model_name)
+          klass.with_connection do |c|
+            Ractor.make_shareable(c.select_all(shareable_arel, "#{klass.name} Ids").cast_values(klass.attribute_types))
+          end
+        end
+      end
+
       # to_sql (used e.g. for collection cache keys) compiles the arel via the
       # connection; dispatch that compilation to the main Ractor.
       def to_sql
