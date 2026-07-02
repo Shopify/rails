@@ -55,24 +55,27 @@ module ActiveRecord
           raise MinimumLengthError, "Token requires a minimum length of #{MINIMUM_TOKEN_LENGTH} characters."
         end
 
-        prefix = "#{attribute}_" if prefix == true
-
-        if prefix
-          generate_token = -> do
-            token = self.generate_unique_secure_token(length: length)
-
-            "#{prefix}#{token}"
-          end
-        else
-          generate_token = -> { self.generate_unique_secure_token(length: length) }
-        end
+        # Assign each captured value exactly once: a Ractor-shareable Proc (used
+        # when the callback chain is frozen for a non-main Ractor) can't close
+        # over a reassignable outer variable. The callback also avoids capturing
+        # a lambda bound to the class; it calls self.class.generate_unique_secure_token
+        # at run time (self is the record via the callback's instance_exec).
+        token_attribute = attribute
+        token_length = length
+        token_prefix = (prefix == true ? "#{attribute}_" : prefix) || nil
 
         # Load securerandom only when has_secure_token is used.
         require "active_support/core_ext/securerandom"
-        define_method("regenerate_#{attribute}") { update! attribute => generate_token.call }
+        define_method("regenerate_#{token_attribute}") do
+          value = self.class.generate_unique_secure_token(length: token_length)
+          value = "#{token_prefix}#{value}" if token_prefix
+          update!(token_attribute => value)
+        end
         set_callback on, on == :initialize ? :after : :before do
-          if new_record? && !query_attribute(attribute)
-            send("#{attribute}=", generate_token.call)
+          if new_record? && !query_attribute(token_attribute)
+            value = self.class.generate_unique_secure_token(length: token_length)
+            value = "#{token_prefix}#{value}" if token_prefix
+            send("#{token_attribute}=", value)
           end
         end
       end

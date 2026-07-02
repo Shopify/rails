@@ -40,8 +40,11 @@ module ActiveModel
 
     def value(&)
       # `defined?` is cheaper than `||=` when we get back falsy values
-      @value = type_cast(value_before_type_cast) unless defined?(@value)
-      @value
+      return @value if defined?(@value)
+      # A frozen attribute can't memoize; this happens for the shared, deep-frozen
+      # default attributes read from a non-main Ractor. Compute without caching.
+      return type_cast(value_before_type_cast) if frozen?
+      @value = type_cast(value_before_type_cast)
     end
 
     def original_value
@@ -53,10 +56,14 @@ module ActiveModel
     end
 
     def value_for_database
-      if !defined?(@value_for_database) || type.changed_in_place?(@value_for_database, value)
+      if defined?(@value_for_database) && !type.changed_in_place?(@value_for_database, value)
+        @value_for_database
+      elsif frozen?
+        # See #value: frozen shared attributes recompute instead of memoizing.
+        _value_for_database
+      else
         @value_for_database = _value_for_database
       end
-      @value_for_database
     end
 
     def serializable?(&block)

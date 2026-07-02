@@ -109,6 +109,17 @@ ActiveSupport::Ractors.on_freeze do
   Ractor.make_shareable(Concurrent::NO_VALUE) if defined?(Concurrent::NO_VALUE)
 end
 
+# Time.zone falls back to Time.zone_default (an ActiveSupport::TimeZone kept in a
+# class ivar) when no per-execution zone is set. A non-main Ractor can't read an
+# unshareable class ivar, so freeze the default zone (warming its lazy tzinfo
+# first) for timezone conversions on the request/write path.
+ActiveSupport::Ractors.on_freeze do
+  if defined?(Time) && Time.respond_to?(:zone_default) && (zone = Time.zone_default)
+    Time.now.in_time_zone(zone) rescue nil # warm lazy tzinfo period caches
+    Ractor.make_shareable(zone)
+  end
+end
+
 # Inflector memoizes the inflections singleton in a class ivar (@__en_instance__)
 # read by String#camelize/underscore on the request path.
 ActiveSupport::Ractors.on_freeze do

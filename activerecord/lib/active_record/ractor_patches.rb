@@ -35,7 +35,10 @@ module ActiveRecord
       # exists? (also backs empty?/none?/any?) runs a SELECT via the connection;
       # dispatch the no-argument case to the main Ractor.
       def exists?(conditions = :none)
-        return super if Ractor.main? || conditions != :none || @none
+        return super if Ractor.main? || @none
+        # Reduce conditional exists? (e.g. has_secure_token's uniqueness check)
+        # to the dispatched no-argument form.
+        return where(conditions).exists? if conditions != :none
 
         shareable_arel = Ractor.make_shareable(limit(1).arel, copy: true)
         model_name = model.name
@@ -43,6 +46,21 @@ module ActiveRecord
           klass = Object.const_get(model_name)
           klass.with_connection { |c| !c.select_all(shareable_arel).empty? }
         end
+      end
+
+      # Building an association scope needs an AliasTracker, whose factory opens
+      # a connection just to read table_alias_length (a static per-adapter
+      # value) when there are no joins. Use the captured value in a non-main
+      # Ractor so scopes can be built without a connection.
+      def alias_tracker(joins = [], aliases = nil)
+        return super if Ractor.main? || !joins.empty?
+
+        length = ActiveRecord::RactorPatches.table_alias_length
+        return super if length.nil?
+
+        aliases ||= Hash.new(0)
+        aliases[table.name] = 1
+        ActiveRecord::Associations::AliasTracker.new(length, aliases)
       end
 
       # to_sql (used e.g. for collection cache keys) compiles the arel via the
@@ -63,13 +81,16 @@ module ActiveRecord
     # Association reflections hold a scope Proc (invoked via instance_exec, so
     # self-detaching is safe) and Concurrent::Map caches. Make them shareable so
     # the whole _reflections hash can be read from a non-main Ractor.
-    def self.make_reflection_shareable!(reflection)
-      # Warm lazily-computed reflection state that consults the connection/schema
-      # (inverse_of walks the associated class and calls #inspect -> table_exists?).
-      # Doing it here on the main Ractor memoizes it before the reflection is
-      # frozen, so a non-main Ractor never triggers the connection.
-      %i[inverse_of klass foreign_key active_record_primary_key join_primary_key
-         join_foreign_key type].each do |m|
+    # Warm lazily-computed reflection state that consults the connection/schema
+    # (class_name/inverse_of walk the associated class and call #inspect ->
+    # table_exists?). This must run for ALL reflections of ALL models before any
+    # reflection is frozen, because a reflection's inverse lookup reaches into
+    # another model's (possibly not-yet-warmed) reflections. Once warmed, a
+    # non-main Ractor never triggers the connection, and freezing won't try to
+    # memoize onto a frozen reflection.
+    def self.warm_reflection!(reflection)
+      %i[class_name inverse_of klass foreign_key active_record_primary_key
+         join_primary_key join_foreign_key type].each do |m|
         reflection.public_send(m) if reflection.respond_to?(m)
       rescue StandardError
       end
@@ -104,10 +125,84 @@ module ActiveRecord
           reflection.instance_variable_set(ivar, nil)
         end
       end
+    end
 
-      begin
-        Ractor.make_shareable(reflection)
-      rescue Ractor::Error, Ractor::IsolationError, StandardError
+    def self.freeze_reflection!(reflection)
+      Ractor.make_shareable(reflection)
+    rescue Ractor::Error, Ractor::IsolationError, StandardError
+    end
+
+    class << self
+      attr_accessor :table_alias_length
+    end
+
+    # A non-main Ractor can't own a connection, so it can't execute the INSERT
+    # for a new record. Dispatch the write to the main Ractor: ship a shareable
+    # {column => value_for_database} payload, build and run the INSERT there,
+    # and copy the returning values (e.g. the new id) back onto the record.
+    module PersistenceWriteDispatch
+      def _create_record(attribute_names = self.attribute_names)
+        return super if Ractor.main?
+
+        attribute_names = attributes_for_create(attribute_names)
+        values = attributes_with_values(attribute_names)
+        payload = {}
+        values.each { |name, attr| payload[name] = attr.value_for_database }
+        Ractor.make_shareable(payload)
+        model_name = self.class.name
+
+        columns, returning_values = Ractor::Dispatch.main.run do
+          klass = Object.const_get(model_name)
+          klass.with_connection do |connection|
+            returning = klass._returning_columns_for_insert(connection)
+            im = Arel::InsertManager.new(klass.arel_table)
+            if payload.empty?
+              im.insert(connection.empty_insert_statement_value(klass.primary_key))
+            else
+              im.insert(payload.transform_keys { |name| klass.arel_table[name] })
+            end
+            rv = connection.insert(im, "#{klass} Create", klass.primary_key || false, nil, returning: returning)
+            Ractor.make_shareable([returning, rv])
+          end
+        end
+
+        if returning_values
+          columns.zip(returning_values).each do |column, value|
+            _write_attribute(column, type_for_attribute(column).deserialize(value)) if !_read_attribute(column)
+          end
+        end
+
+        @new_record = false
+        @previously_new_record = true
+
+        yield(self) if block_given?
+
+        id
+      end
+    end
+
+    # current_time_from_proper_timezone only opens a connection to read the
+    # (global) default timezone; read it directly in a non-main Ractor.
+    module TimestampDispatch
+      def current_time_from_proper_timezone
+        return super if Ractor.main?
+        ActiveRecord.default_timezone == :utc ? Time.now.utc : Time.now
+      end
+    end
+
+    # A non-main Ractor has no connection to open a real DB transaction. Run the
+    # body without one; the dispatched INSERT/UPDATE is itself atomic.
+    # EXPERIMENT: transactional (after_commit/after_rollback) callbacks and
+    # multi-statement rollback safety are not supported here.
+    module TransactionDispatch
+      def with_transaction_returning_status
+        return super if Ractor.main?
+
+        status = yield
+        raise ActiveRecord::Rollback unless status
+        status
+      rescue ActiveRecord::Rollback
+        nil
       end
     end
 
@@ -117,7 +212,17 @@ module ActiveRecord
       klass.predicate_builder if klass.respond_to?(:predicate_builder)
 
       if klass.respond_to?(:reflections)
-        klass._reflections.each_value { |r| make_reflection_shareable!(r) }
+        klass._reflections.each_value { |r| freeze_reflection!(r) }
+      end
+
+      # Make the model's callback chains shareable so before/after callbacks
+      # (has_secure_token, timestamps, custom before_create, ...) run inside a
+      # non-main Ractor instead of being skipped.
+      if klass.respond_to?(:__callbacks)
+        begin
+          klass.__callbacks = ActiveSupport::Ractors.make_shareable(klass.__callbacks)
+        rescue Ractor::Error, Ractor::IsolationError
+        end
       end
 
       # Make model class-level state (class_attribute values in @__class_attr_*,
@@ -139,10 +244,21 @@ end
 
 ActiveSupport::Ractors.before_freeze do
   ActiveRecord::Relation.prepend(ActiveRecord::RactorPatches::RelationQueryDispatch)
+  ActiveRecord::Persistence.prepend(ActiveRecord::RactorPatches::PersistenceWriteDispatch)
+  ActiveRecord::Transactions.prepend(ActiveRecord::RactorPatches::TransactionDispatch)
+  ActiveRecord::Timestamp::ClassMethods.prepend(ActiveRecord::RactorPatches::TimestampDispatch)
 
   # Delegation.uncacheable_methods memoizes a class ivar the first time a
   # relation delegates a method; warm it on the main Ractor.
   ActiveRecord::Delegation.uncacheable_methods if defined?(ActiveRecord::Delegation)
+
+  # Capture the (static, per-adapter) table alias length so association scopes
+  # can build an AliasTracker without a connection in a non-main Ractor.
+  begin
+    ActiveRecord::RactorPatches.table_alias_length =
+      ActiveRecord::Base.with_connection { |c| c.table_alias_length }
+  rescue StandardError
+  end
 
   # Warm model schema/relation state BEFORE anything is frozen (load_schema!
   # loads columns from the DB and memoizes class state; it must not run for the
@@ -155,13 +271,24 @@ ActiveSupport::Ractors.before_freeze do
   ActiveRecord::Base.descendants.each do |klass|
     next if klass.respond_to?(:abstract_class?) && klass.abstract_class?
     %i[load_schema finder_needs_type_condition? primary_key query_constraints_list
-       columns_hash attribute_types arel_table predicate_builder].each { |m| warm.call(klass, m) }
+       columns_hash columns column_names attribute_types arel_table predicate_builder
+       define_attribute_methods all_timestamp_attributes_in_model
+       timestamp_attributes_for_create_in_model timestamp_attributes_for_update_in_model
+       _returning_columns_for_insert content_columns].each { |m| warm.call(klass, m) }
     # Exercise the finder path to warm remaining lazily-memoized class state
     # (order columns, ...). Runs on the main Ractor where the connection exists.
     begin
       klass.first if klass.table_exists?
     rescue StandardError
     end
+  end
+
+  # Warm every reflection of every model before any are frozen (inverse lookups
+  # cross model boundaries).
+  (ActiveRecord::Base.descendants + [ActiveRecord::Base]).uniq.each do |klass|
+    next unless klass.respond_to?(:_reflections)
+    klass._reflections.each_value { |r| ActiveRecord::RactorPatches.warm_reflection!(r) }
+  rescue StandardError
   end
 end
 

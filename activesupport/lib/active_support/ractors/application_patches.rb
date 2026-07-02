@@ -14,6 +14,12 @@ ActiveSupport::Ractors.on_freeze do
   Rails::Railtie::Configuration.capture_ractor_options! if defined?(Rails::Railtie::Configuration)
 end
 
+# Rails::Application#revision memoizes onto the application (read by the error
+# reporter's context middleware); warm it before the app is frozen.
+ActiveSupport::Ractors.before_freeze do
+  Rails.application.revision if defined?(Rails) && Rails.application.respond_to?(:revision)
+end
+
 require "active_record/ractor_patches" if defined?(ActiveRecord::Base)
 require "action_dispatch/ractor_patches" if defined?(ActionDispatch)
 require "action_view/ractor_patches" if defined?(ActionView) && defined?(ActionView::Base)
