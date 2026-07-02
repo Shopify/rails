@@ -25,6 +25,7 @@ require "active_storage/ractor_patches" if defined?(ActiveStorage)
 require "action_dispatch/ractor_patches" if defined?(ActionDispatch)
 require "action_view/ractor_patches" if defined?(ActionView) && defined?(ActionView::Base)
 require "action_cable/ractor_patches" if defined?(ActionCable) && defined?(ActionCable::Server::Base)
+require "action_text/ractor_patches" if defined?(ActionText)
 
 # Root pass: make every callback chain (controllers, models, the executor,
 # ActionDispatch::Callbacks, CurrentAttributes, ...) Ractor-shareable in one go,

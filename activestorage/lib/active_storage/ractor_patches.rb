@@ -37,12 +37,71 @@ if defined?(ActiveStorage::Blob)
           return super if Ractor.main? || !persisted?
 
           blob_id = id
+          # During a fresh upload the analysis runs from a local io *before* the
+          # bytes are written to the store (see Attachment#uploaded). Forward
+          # that io's path so the main Ractor analyzes the same local file
+          # instead of downloading a not-yet-uploaded blob.
+          # Single assignment: a shareable Proc can't capture a reassigned local.
+          io_path = begin
+            candidate = (local_io.path if local_io.respond_to?(:path)) rescue nil
+            candidate && File.exist?(candidate) ? -candidate.to_s : nil
+          end
+
           Ractor::Dispatch.main.run do
-            metadata = ActiveStorage::Blob.find(blob_id).send(:extract_metadata_via_analyzer)
+            blob = ActiveStorage::Blob.find(blob_id)
+            metadata =
+              if io_path
+                File.open(io_path, "rb") do |file|
+                  blob.local_io = file
+                  begin
+                    blob.send(:extract_metadata_via_analyzer)
+                  ensure
+                    blob.local_io = nil
+                  end
+                end
+              else
+                blob.send(:extract_metadata_via_analyzer)
+              end
             Ractor.make_shareable(metadata)
           end
         end
     end
   end
   ActiveStorage::Blob.prepend(ActiveStorage::RactorAnalyzeDispatch)
+
+  # Enqueuing jobs (SyncMetadataJob, AnalyzeJob, PurgeJob, MirrorJob) reads
+  # ActiveJob class_attributes (queue_name and friends) whose defaults are Procs
+  # -- unreadable from a non-main Ractor. Dispatch the enqueue to the main
+  # Ractor, reconstructing the blob by id there.
+  module ActiveStorage
+    module RactorJobEnqueueDispatch
+      def sync_metadata_later
+        dispatch_blob_job_to_main(:sync_metadata_later) { super }
+      end
+
+      def analyze_later
+        dispatch_blob_job_to_main(:analyze_later) { super }
+      end
+
+      def purge_later
+        dispatch_blob_job_to_main(:purge_later) { super }
+      end
+
+      def mirror_later
+        dispatch_blob_job_to_main(:mirror_later) { super }
+      end
+
+      private
+        def dispatch_blob_job_to_main(meth)
+          return yield if Ractor.main? || !persisted?
+
+          blob_id = id
+          Ractor::Dispatch.main.run do
+            ActiveStorage::Blob.find(blob_id).public_send(meth)
+            nil
+          end
+        end
+    end
+  end
+  ActiveStorage::Blob.prepend(ActiveStorage::RactorJobEnqueueDispatch)
 end
