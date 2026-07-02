@@ -229,7 +229,6 @@ module ActiveRecord
 
         # def self.statuses() statuses end
         detect_enum_conflict!(name, name.pluralize, true)
-        singleton_class.define_method(name.pluralize) { enum_values }
         defined_enums[name] = enum_values
 
         detect_enum_conflict!(name, name)
@@ -284,6 +283,16 @@ module ActiveRecord
         end
 
         enum_values.freeze
+
+        # Define the pluralized values reader (e.g. Book.themes) with a shareable
+        # proc capturing only the frozen, Ractor-shareable values, so it can be
+        # called from a non-main Ractor (the early define_method captured the
+        # whole -- unshareable -- enum binding).
+        singleton_class.define_method(name.pluralize, &enum_values_reader(Ractor.make_shareable(enum_values)))
+      end
+
+      def enum_values_reader(values)
+        ActiveSupport::Ractors.shareable_proc { values }
       end
 
       def inherited(base)
