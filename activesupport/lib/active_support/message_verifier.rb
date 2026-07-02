@@ -361,7 +361,11 @@ module ActiveSupport
         # hence we multiply the digest's length (in bytes) by 8 to get it in
         # bits and divide by 4 to get its number of characters it hex. Well, 8
         # divided by 4 is 2.
-        @digest_length_in_hex ||= OpenSSL::Digest.new(@digest).digest_length * 2
+        return @digest_length_in_hex if defined?(@digest_length_in_hex)
+        length = OpenSSL::Digest.new(@digest).digest_length * 2
+        # A verifier deep-frozen for Ractor sharing can't memoize.
+        @digest_length_in_hex = length unless frozen?
+        length
       end
 
       def separator_at?(signed_message, index)

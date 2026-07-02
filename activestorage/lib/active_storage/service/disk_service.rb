@@ -214,7 +214,11 @@ module ActiveStorage
       end
 
       def url_helpers
-        @url_helpers ||= Rails.application.routes.url_helpers
+        return @url_helpers if defined?(@url_helpers)
+        helpers = Rails.application.routes.url_helpers
+        # The service is deep-frozen for Ractor sharing; skip memoization then.
+        @url_helpers = helpers unless frozen?
+        helpers
       end
 
       def url_options
