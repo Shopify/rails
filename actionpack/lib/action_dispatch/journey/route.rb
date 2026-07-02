@@ -101,6 +101,7 @@ module ActionDispatch
       def eager_load!
         path.eager_load!
         parts
+        required_parts
         required_defaults
         nil
       end

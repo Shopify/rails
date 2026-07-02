@@ -112,6 +112,14 @@ module ActionDispatch
 end
 
 ActiveSupport::Ractors.before_freeze do
+  # URL generation lazily memoizes on Journey routes/AST and the formatter cache
+  # (Route#parts/required_parts/required_defaults, Node#to_s, Formatter#cache).
+  # Warm them on the main Ractor before the route set is frozen so generation
+  # works from a non-main Ractor.
+  if defined?(Rails) && Rails.application
+    Rails.application.routes.eager_load! rescue nil
+  end
+
   ActionDispatch::Routing::RouteSet.prepend(ActionDispatch::RactorPatches::RouteSet)
   ActionDispatch::Routing::RouteSet::CustomUrlHelper.prepend(ActionDispatch::RactorPatches::CustomUrlHelper)
   ActionDispatch::ServerTiming::Subscriber.prepend(ActionDispatch::RactorPatches::ServerTimingSubscriber)
@@ -136,7 +144,34 @@ ActiveSupport::Ractors.on_freeze do
   if defined?(Rails) && Rails.application
     app_routes = Rails.application.routes
     shareable_routes = app_routes
-    app_routes.url_helpers.define_method(:_routes, &Ractor.shareable_proc { @_routes || shareable_routes })
+    mod = app_routes.url_helpers
+    mod.define_method(:_routes, &Ractor.shareable_proc { @_routes || shareable_routes })
+
+    # `Rails.application.routes.url_helpers.some_path` calls the helper as a
+    # singleton method of the url_helpers module, whose singleton `_routes`
+    # reads @_proxy (a module ivar). Redefine it to return the frozen route set
+    # and make @_proxy shareable so the other singleton delegators work too.
+    mod.singleton_class.define_method(:_routes, &Ractor.shareable_proc { shareable_routes })
+    # UrlFor gives each including module/class a `default_url_options` class
+    # attribute defaulting to a mutable {}. Freeze it so url_options can read it
+    # from a non-main Ractor.
+    freeze_default_url_options = lambda do |obj|
+      next unless obj.respond_to?(:default_url_options) && obj.respond_to?(:default_url_options=)
+      val = obj.default_url_options
+      next if val.nil? || Ractor.shareable?(val)
+      obj.default_url_options = Ractor.make_shareable(val.dup)
+    rescue Ractor::Error, Ractor::IsolationError, FrozenError
+    end
+
+    freeze_default_url_options.call(mod)
+    if mod.instance_variable_defined?(:@_proxy)
+      proxy = mod.instance_variable_get(:@_proxy)
+      freeze_default_url_options.call(proxy.class)
+      begin
+        mod.instance_variable_set(:@_proxy, Ractor.make_shareable(proxy))
+      rescue Ractor::Error, Ractor::IsolationError
+      end
+    end
   end
 end
 

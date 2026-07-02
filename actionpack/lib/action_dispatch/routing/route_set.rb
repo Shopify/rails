@@ -178,17 +178,22 @@ module ActionDispatch
           path_name = :"#{name}_path"
           url_name = :"#{name}_url"
 
-          @path_helpers_module.module_eval do
-            redefine_method(path_name) do |*args|
-              helper.call(self, args, true)
-            end
+          # Register the helper by name and define the methods with shareable
+          # procs that look it up at call time (via _routes) instead of
+          # capturing it, so direct/resolve/polymorphic helpers can be called
+          # from a non-main Ractor. (Mirrors #define_url_helper.)
+          @helpers_by_name[path_name] = helper
+          @helpers_by_name[url_name]  = helper
+
+          path_body = ActiveSupport::Ractors.shareable_proc do |*args|
+            _routes.named_routes.helper_for(path_name).call(self, args, true)
+          end
+          url_body = ActiveSupport::Ractors.shareable_proc do |*args|
+            _routes.named_routes.helper_for(url_name).call(self, args, false)
           end
 
-          @url_helpers_module.module_eval do
-            redefine_method(url_name) do |*args|
-              helper.call(self, args, false)
-            end
-          end
+          @path_helpers_module.module_eval { define_method(path_name, &path_body) }
+          @url_helpers_module.module_eval { define_method(url_name, &url_body) }
 
           @path_helpers << path_name
           @url_helpers << url_name
