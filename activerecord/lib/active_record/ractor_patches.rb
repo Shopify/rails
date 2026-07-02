@@ -32,6 +32,19 @@ module ActiveRecord
         end
       end
 
+      # exists? (also backs empty?/none?/any?) runs a SELECT via the connection;
+      # dispatch the no-argument case to the main Ractor.
+      def exists?(conditions = :none)
+        return super if Ractor.main? || conditions != :none || @none
+
+        shareable_arel = Ractor.make_shareable(limit(1).arel, copy: true)
+        model_name = model.name
+        Ractor::Dispatch.main.run do
+          klass = Object.const_get(model_name)
+          klass.with_connection { |c| !c.select_all(shareable_arel).empty? }
+        end
+      end
+
       # to_sql (used e.g. for collection cache keys) compiles the arel via the
       # connection; dispatch that compilation to the main Ractor.
       def to_sql
