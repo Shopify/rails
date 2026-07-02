@@ -117,6 +117,34 @@ class HasManyThroughAssociationsTest < ActiveRecord::TestCase
                  club1.members.sort_by(&:id)
   end
 
+  def test_preloading_scoped_through_association_does_not_set_source_association_on_through_records
+    author = Author.create!(name: "has many through preloader")
+    book1 = Book.create!(name: "through preloader 1", author: author)
+    book2 = Book.create!(name: "through preloader 2", author: author)
+    subscriber1 = Subscriber.create!(nick: "through-preloader-1", name: "Through Preloader 1")
+    subscriber2 = Subscriber.create!(nick: "through-preloader-2", name: "Through Preloader 2")
+    Subscription.create!(book: book1, subscriber: subscriber1)
+    Subscription.create!(book: book2, subscriber: subscriber2)
+
+    author = Author.find(author.id)
+    subscriptions = author.subscriptions.to_a
+
+    subscriptions.each do |subscription|
+      assert_not_predicate subscription.association(:subscriber), :loaded?
+    end
+
+    ActiveRecord::Associations::Preloader.new(
+      records: [author],
+      associations: :distinct_subscribers
+    ).call
+
+    assert_predicate author.association(:distinct_subscribers), :loaded?
+
+    subscriptions.each do |subscription|
+      assert_not_predicate subscription.association(:subscriber), :loaded?
+    end
+  end
+
   def test_preload_multiple_instances_of_the_same_record
     club = Club.create!(name: "Aaron cool banana club")
     Membership.create! club: club, member: Member.create!(name: "Aaron")

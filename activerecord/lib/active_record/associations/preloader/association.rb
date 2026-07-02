@@ -305,7 +305,9 @@ module ActiveRecord
             # Processing only the first owner
             # because the record is modified but not an owner
             association = owners.first.association(reflection.name)
-            association.set_inverse_instance(record)
+            association.set_inverse_instance(record) do |inverse|
+              mark_preload_write(inverse)
+            end
           end
         end
 
@@ -352,7 +354,9 @@ module ActiveRecord
               mark_preload_write(association)
 
               if i == 0 # Set inverse on first owner
-                association.set_inverse_instance(record)
+                association.set_inverse_instance(record) do |inverse|
+                  mark_preload_write(inverse)
+                end
               end
             end
           end
