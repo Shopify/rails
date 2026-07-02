@@ -303,11 +303,11 @@ module ActiveRecord
             if instance_methods
               # def active?() status_for_database == 0 end
               klass.send(:detect_enum_conflict!, name, "#{value_method_name}?")
-              define_method("#{value_method_name}?") { public_send(:"#{name}_for_database") == value }
+              define_method("#{value_method_name}?", &enum_predicate_body(Ractor.make_shareable(name), Ractor.make_shareable(value)))
 
               # def active!() update!(status: 0) end
               klass.send(:detect_enum_conflict!, name, "#{value_method_name}!")
-              define_method("#{value_method_name}!") { update!(name => value) }
+              define_method("#{value_method_name}!", &enum_bang_body(Ractor.make_shareable(name), Ractor.make_shareable(value)))
             end
 
             if scopes
@@ -331,6 +331,17 @@ module ActiveRecord
 
           def enum_not_scope_body(column, value)
             -> { where(predicate_builder[column, value, :is_distinct_from]) }
+          end
+
+          # Instance predicate/bang bodies, built in a clean binding whose only
+          # locals (name and value) are shareable, then frozen so the generated
+          # methods can be invoked from a non-main Ractor.
+          def enum_predicate_body(name, value)
+            ActiveSupport::Ractors.shareable_proc { public_send(:"#{name}_for_database") == value }
+          end
+
+          def enum_bang_body(name, value)
+            ActiveSupport::Ractors.shareable_proc { update!(name => value) }
           end
       end
       private_constant :EnumMethods

@@ -176,6 +176,13 @@ ActiveSupport::Ractors.on_freeze do
 end
 
 ActiveSupport::Ractors.on_freeze do
+  # PolymorphicRoutes builds url_for(record) helpers via a class-level CACHE that
+  # is frozen at the top level but holds mutable inner hashes of builder objects
+  # (each carrying an isolated key-strategy lambda). Deep-freeze it so url_for
+  # with a model can run in a non-main Ractor; get() builds any uncached action
+  # locally without mutating the cache.
+  Ractor.make_shareable(ActionDispatch::Routing::PolymorphicRoutes::HelperMethodBuilder::CACHE)
+
   Ractor.make_shareable(Mime::SET)
   Ractor.make_shareable(Mime::LOOKUP)
   Ractor.make_shareable(Mime::EXTENSION_LOOKUP)

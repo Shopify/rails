@@ -179,7 +179,12 @@ module ActionView
         #     config.action_view.full_sanitizer = MySpecialSanitizer.new
         #   end
         def full_sanitizer
-          @full_sanitizer ||= sanitizer_vendor.full_sanitizer.new
+          return @full_sanitizer if defined?(@full_sanitizer) && @full_sanitizer
+          sanitizer = sanitizer_vendor.full_sanitizer.new
+          # Class instance variables can't be set from a non-main Ractor; only
+          # memoize on main, otherwise build a fresh (cheap) sanitizer.
+          @full_sanitizer = sanitizer if Ractor.main?
+          sanitizer
         end
 
         # Gets the Rails::HTML::LinkSanitizer instance used by +strip_links+.
@@ -189,7 +194,10 @@ module ActionView
         #     config.action_view.link_sanitizer = MySpecialSanitizer.new
         #   end
         def link_sanitizer
-          @link_sanitizer ||= sanitizer_vendor.link_sanitizer.new
+          return @link_sanitizer if defined?(@link_sanitizer) && @link_sanitizer
+          sanitizer = sanitizer_vendor.link_sanitizer.new
+          @link_sanitizer = sanitizer if Ractor.main?
+          sanitizer
         end
 
         # Gets the Rails::HTML::SafeListSanitizer instance used by sanitize and +sanitize_css+.
@@ -199,7 +207,10 @@ module ActionView
         #     config.action_view.safe_list_sanitizer = MySpecialSanitizer.new
         #   end
         def safe_list_sanitizer
-          @safe_list_sanitizer ||= sanitizer_vendor.safe_list_sanitizer.new
+          return @safe_list_sanitizer if defined?(@safe_list_sanitizer) && @safe_list_sanitizer
+          sanitizer = sanitizer_vendor.safe_list_sanitizer.new
+          @safe_list_sanitizer = sanitizer if Ractor.main?
+          sanitizer
         end
       end
     end

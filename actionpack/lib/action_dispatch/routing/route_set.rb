@@ -636,9 +636,13 @@ module ActionDispatch
           # extra conveniences for working with @_routes.
           define_method(:_routes) { @_routes || routes }
 
-          define_method(:_generate_paths_by_default) do
-            supports_path
-          end
+          # Use a shareable proc (it only closes over the boolean supports_path)
+          # so url_for can call it from a non-main Ractor.
+          generates_paths_by_default = supports_path ? true : false
+          define_method(
+            :_generate_paths_by_default,
+            &ActiveSupport::Ractors.shareable_proc { generates_paths_by_default }
+          )
 
           private :_generate_paths_by_default
 

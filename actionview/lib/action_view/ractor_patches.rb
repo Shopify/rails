@@ -150,6 +150,7 @@ ActiveSupport::Ractors.before_freeze do
   ActionView::Rendering::ClassMethods.prepend(ActionView::RactorPatches::RenderingClassMethods)
 end
 
+ActiveSupport::Ractors.capture_class_reader(ActionView::Helpers::SanitizeHelper, :sanitizer_vendor)
 ActiveSupport::Ractors.capture_class_reader(ActionView::Base, :default_formats)
 ActiveSupport::Ractors.capture_class_reader(ActionView::Template::Handlers::ERB, :escape_ignore_list)
 ActiveSupport::Ractors.capture_class_reader(ActionView::Base, :annotate_rendered_view_with_filenames)
