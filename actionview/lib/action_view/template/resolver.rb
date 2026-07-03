@@ -33,9 +33,12 @@ module ActionView
         }x
       end
 
-      def parse(path)
+      def path_regex
         @regex ||= build_path_regex
-        match = @regex.match(path)
+      end
+
+      def parse(path)
+        match = path_regex.match(path)
         path = TemplatePath.build(match[:action], match[:prefix] || "", !!match[:partial])
         details = TemplateDetails.new(
           match[:locale]&.to_sym,
@@ -44,6 +47,11 @@ module ActionView
           match[:variant]&.to_sym
         )
         ParsedPath.new(path, details)
+      end
+
+      def freeze
+        path_regex
+        super
       end
     end
 
@@ -111,6 +119,18 @@ module ActionView
       end
     end
 
+    def freeze
+      @path.freeze
+      @path_parser.freeze
+      @unbound_templates = @unbound_templates.each_pair.to_h unless @unbound_templates.is_a?(::Hash)
+      @unbound_templates.each_value do |unbound_templates|
+        unbound_templates.each(&:freeze)
+        unbound_templates.freeze
+      end
+      @unbound_templates.freeze
+      super
+    end
+
     def to_s
       @path.to_s
     end
@@ -147,7 +167,9 @@ module ActionView
       def unbound_templates_for(name, prefix, partial, cache)
         virtual = TemplatePath.virtual(name, prefix, partial)
 
-        if cache
+        if frozen?
+          @unbound_templates[virtual] || [].freeze
+        elsif cache
           @unbound_templates.compute_if_absent(virtual) do
             unbound_templates_from_path(TemplatePath.build(name, prefix, partial))
           end

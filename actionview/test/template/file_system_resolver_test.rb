@@ -38,4 +38,47 @@ class FileSystemResolverTest < ActiveSupport::TestCase
     assert_not_same a, b
     assert_not r.frozen?
   end
+
+  def test_freeze_after_eager_load_makes_resolver_shareable
+    with_file "test/hello_world.html.erb", "<%# locals: () %>Hi"
+    r = resolver
+    r.eager_load_templates
+    r.freeze
+
+    assert_predicate r, :frozen?
+    assert Ractor.shareable?(r)
+
+    templates = find_all(r)
+    assert_equal 1, templates.size
+    assert_predicate templates[0], :frozen?
+  end
+
+  def test_freeze_raises_for_non_strict_partial
+    with_file "test/_card.html.erb", "<%= post %>"
+    r = resolver
+    r.eager_load_templates
+
+    error = assert_raises(ArgumentError) { r.freeze }
+    assert_match "test/_card", error.message
+    assert_match "strict locals", error.message
+  end
+
+  def test_freeze_raises_for_non_strict_template
+    with_file "test/hello_world.html.erb", "no locals here"
+    r = resolver
+    r.eager_load_templates
+
+    error = assert_raises(ArgumentError) { r.freeze }
+    assert_match "test/hello_world", error.message
+    assert_match "strict locals", error.message
+  end
+
+  def test_frozen_resolver_returns_empty_for_missing_template
+    with_file "test/hello_world.html.erb", "<%# locals: () %>Hi"
+    r = resolver
+    r.eager_load_templates
+    r.freeze
+
+    assert_empty find_all(r, "nonexistent")
+  end
 end
