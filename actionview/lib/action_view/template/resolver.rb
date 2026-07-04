@@ -118,6 +118,25 @@ module ActionView
       super
     end
 
+    def eager_load_templates
+      template_glob("**/*").each do |file|
+        unbound = build_unbound_template(file)
+        (@unbound_templates[unbound.virtual_path] ||= []) << unbound
+      end
+    end
+
+    def freeze
+      @path.freeze
+      @path_parser.freeze
+      @unbound_templates = @unbound_templates.each_pair.to_h unless @unbound_templates.is_a?(::Hash)
+      @unbound_templates.each_value do |unbound_templates|
+        unbound_templates.each(&:freeze)
+        unbound_templates.freeze
+      end
+      @unbound_templates.freeze
+      super
+    end
+
     def to_s
       @path.to_s
     end
@@ -157,8 +176,15 @@ module ActionView
       end
 
       def unbound_templates_for(name, prefix, partial, cache)
-        store = cache ? @unbound_templates : Concurrent::Map.new
-        store.compute_if_absent(TemplatePath.virtual(name, prefix, partial)) do
+        virtual = TemplatePath.virtual(name, prefix, partial)
+
+        if frozen?
+          @unbound_templates[virtual] || [].freeze
+        elsif cache
+          @unbound_templates.compute_if_absent(virtual) do
+            unbound_templates_from_path(TemplatePath.build(name, prefix, partial))
+          end
+        else
           unbound_templates_from_path(TemplatePath.build(name, prefix, partial))
         end
       end
