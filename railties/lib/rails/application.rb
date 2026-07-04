@@ -630,7 +630,6 @@ module Rails
       # ActionController::Base.descendants.each below — autoloading
       # ActionController::Base triggers ActionView::ViewPaths' Concern
       # `included do` block, which mutates @view_paths_by_class.
-      ::ActionView::LookupContext.default_procs.make_shareable!
       ::ActiveRecord::Relation::WhereClause.empty
       ::ActiveRecord::Relation::FromClause.empty
       ::ActionView::Template::Handlers.extensions
@@ -708,37 +707,6 @@ module Rails
       ::AbstractController::Base.action_methods if defined?(::AbstractController::Base)
       ::ActionController::Base.action_methods   if defined?(::ActionController::Base)
 
-      # ActionView::LookupContext.register_detail uses `define_method`
-      # with the registered &block — those become Procs bound to the
-      # main Ractor, so worker Ractors raise "defined with an
-      # un-shareable Proc in a different Ractor" the first time they
-      # invoke `default_locale` / `default_formats` / `default_variants`
-      # / `default_handlers`. Re-define them using module_eval with a
-      # string body so the resulting method isn't Proc-backed.
-      if defined?(::ActionView::LookupContext::Accessors)
-        ::ActionView::LookupContext::Accessors.module_eval(<<~RUBY, __FILE__, __LINE__ + 1)
-          def default_locale
-            locales = [I18n.locale]
-            locales.concat(I18n.fallbacks[I18n.locale]) if I18n.respond_to?(:fallbacks)
-            locales << I18n.default_locale
-            locales.uniq!
-            locales
-          end
-
-          def default_formats
-            ActionView::Base.default_formats || [:html, :text, :js, :css, :xml, :json]
-          end
-
-          def default_variants
-            []
-          end
-
-          def default_handlers
-            ActionView::Template::Handlers.extensions
-          end
-        RUBY
-      end
-
       # Now ActionController::Base and all descendants are loaded,
       # so any `included do` blocks that mutate PathRegistry have run.
       ::ActionView::PathRegistry.make_shareable!
@@ -795,7 +763,8 @@ module Rails
       # directly in the middleware chain.
       [::ActionDispatch::Response, ::ActionDispatch::Request,
        ::ActionView::Base, ::ActionView::LookupContext,
-       ::ActionView::LookupContext::DetailsKey,
+       ::ActionView::Digestor,
+       ::ActionView::DependencyTracker,
        ::ActionView::Template,
        ::ActionView::Template::Handlers,
        ::ActionView::Helpers::TagHelper,

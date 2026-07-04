@@ -5,20 +5,17 @@ require "action_view/dependency_tracker"
 
 module ActionView
   class Digestor
-    @@digest_mutex = Mutex.new
-    @cache = Concurrent::Map.new
-
     class << self
       def cache(details_key)
-        @cache[details_key] ||= Concurrent::Map.new
+        digest_cache_store[details_key] ||= Concurrent::Map.new
       end
 
       def digest_caches
-        @cache.values
+        digest_cache_store.values
       end
 
       def clear_cache
-        @cache.clear
+        digest_cache_store.clear
       end
 
       # Supported options:
@@ -37,7 +34,7 @@ module ActionView
 
         # this is a correctly done double-checked locking idiom
         # (Concurrent::Map's lookups have volatile semantics)
-        finder.digest_cache[cache_key] || @@digest_mutex.synchronize do
+        finder.digest_cache[cache_key] || digest_mutex.synchronize do
           finder.digest_cache.fetch(cache_key) do # re-check under lock
             path = TemplatePath.parse(name)
             root = tree(path.to_s, finder, path.partial?)
@@ -86,6 +83,18 @@ module ActionView
           finder.disable_cache do
             finder.find(name, prefixes, partial, keys)
           end
+        end
+
+        # The digest cache holds non-shareable Concurrent::Maps and the mutex
+        # isn't Ractor-shareable, so both live in Ractor-local storage: each
+        # request-serving Ractor owns its own copy, cold-filled once and reused
+        # across the requests that Ractor serves.
+        def digest_cache_store
+          Ractor[:av_digest_cache] ||= Concurrent::Map.new
+        end
+
+        def digest_mutex
+          Ractor[:av_digest_mutex] ||= Mutex.new
         end
     end
 
