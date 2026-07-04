@@ -110,6 +110,17 @@ module Mime
       nil
     end
 
+    # ractor-safe-rails exploration only: ractorize! deep-freezes module
+    # graphs via make_shareable!. Neutralize it for Mime so the tests rely
+    # solely on eager_load! to make the request-path registries shareable.
+    # This validates that the upstream fix (the actionview-template-types-
+    # ractor-shareable branch) is sufficient on its own, without the harness
+    # brute-freezing the deprecated SET/LOOKUP/EXTENSION_LOOKUP proxies and
+    # the boot-only @on_change_callbacks, none of which are read in a request.
+    def make_shareable! # :nodoc:
+      self
+    end
+
     def update_registries # :nodoc:
       if @registry.frozen?
         ActionDispatch.deprecator.warn(
