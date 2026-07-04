@@ -93,6 +93,7 @@ module ActiveJob
     def enqueue(options = {})
       set(options)
       self.successfully_enqueued = false
+      self.enqueue_error = nil
 
       raw_enqueue
 

@@ -130,7 +130,7 @@ module ActiveRecord
       # it is preferred to use {update_all}[rdoc-ref:Relation#update_all]
       # for updating all records in a single query.
       def update(id = :all, attributes)
-        if id.is_a?(Array)
+        if update_multiple_ids?(id)
           if id.any?(ActiveRecord::Base)
             raise ArgumentError,
               "You are passing an array of ActiveRecord::Base instances to `update`. " \
@@ -156,7 +156,7 @@ module ActiveRecord
       # Updates the object (or multiple objects) just like #update but calls #update! instead
       # of +update+, so an exception is raised if the record is invalid and saving will fail.
       def update!(id = :all, attributes)
-        if id.is_a?(Array)
+        if update_multiple_ids?(id)
           if id.any?(ActiveRecord::Base)
             raise ArgumentError,
               "You are passing an array of ActiveRecord::Base instances to `update!`. " \
@@ -301,6 +301,18 @@ module ActiveRecord
           subclass.class_eval do
             @_query_constraints_list = nil
             @has_query_constraints = false
+          end
+        end
+
+        # +update+/+update!+ accept either a single id or an array of ids. For a
+        # composite primary key a single id is itself an array, so an array of
+        # ids is an array of arrays, mirroring how +Relation#destroy+ tells the
+        # two apart.
+        def update_multiple_ids?(id)
+          if composite_primary_key?
+            id.is_a?(Array) && id.first.is_a?(Array)
+          else
+            id.is_a?(Array)
           end
         end
 
@@ -694,7 +706,9 @@ module ActiveRecord
 
       increment(attribute, by)
       change = public_send(attribute) - (public_send(:"#{attribute}_in_database") || 0)
-      self.class.update_counters(id, attribute => change, touch: touch)
+      counters = { attribute => change, touch: touch }
+
+      self.class.unscoped.where!(_query_constraints_hash).update_counters(counters)
       public_send(:"clear_#{attribute}_change")
       self
     end

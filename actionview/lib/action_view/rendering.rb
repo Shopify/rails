@@ -80,7 +80,7 @@ module ActionView
       end
 
       def view_context_class
-        klass = ActionView::LookupContext::DetailsKey.view_context_class
+        klass = ActionView::LookupContext.view_context_class
 
         # The per-controller view-context subclass is shared across all
         # request-serving Ractors. Reading the memoized class is safe from any

@@ -42,6 +42,15 @@ module ActiveSupport
           @pattern = nil
         end
 
+        def freeze
+          build_pattern
+          @members.each(&:freeze)
+          @members.freeze
+          @pattern.freeze
+
+          super
+        end
+
         def delete(entry)
           @members.delete(entry)
           @pattern = nil
@@ -67,11 +76,16 @@ module ActiveSupport
 
         def uncountable?(str)
           if @pattern.nil?
-            members_pattern = Regexp.union(@members.map { |w| /#{Regexp.escape(w)}/i })
-            @pattern = /\b#{members_pattern}\Z/i
+            build_pattern
           end
           @pattern.match?(str)
         end
+
+        private
+          def build_pattern
+            members_pattern = Regexp.union(@members.map { |w| /#{Regexp.escape(w)}/i })
+            @pattern = /\b#{members_pattern}\Z/i
+          end
       end
 
       def self.instance(locale = :en)
@@ -80,9 +94,13 @@ module ActiveSupport
         @__instance__[locale] ||= new
       end
 
+      def self.all_instances # :nodoc:
+        [@__en_instance__] + @__instance__.values
+      end
+
       def self.make_shareable! # :nodoc:
-        instance(:en).make_shareable!
-        @__instance__.each_value(&:make_shareable!)
+        instance(:en)
+        all_instances.each(&:make_shareable!)
         @__instance__.make_shareable!
         self
       end
@@ -104,6 +122,17 @@ module ActiveSupport
       def initialize
         @plurals, @singulars, @uncountables, @humans, @acronyms = [], [], Uncountables.new, [], {}
         define_acronym_regex_patterns
+      end
+
+      def freeze
+        freeze_rules(@plurals)
+        freeze_rules(@singulars)
+        freeze_rules(@humans)
+
+        @uncountables.freeze
+        @acronyms.freeze
+
+        super
       end
 
       # Private, for the test suite.
@@ -276,6 +305,14 @@ module ActiveSupport
           @acronym_regex             = sorted_acronyms.empty? ? /(?=a)b/ : /#{sorted_acronyms.join("|")}/
           @acronyms_camelize_regex   = /^(?:#{@acronym_regex}(?=\b|[A-Z_])|\w)/
           @acronyms_underscore_regex = /(?:(?<=([A-Za-z\d]))|\b)(#{@acronym_regex})(?=\b|[^a-z])/
+        end
+
+        def freeze_rules(rules)
+          rules.each do |pair|
+            pair.each(&:freeze)
+            pair.freeze
+          end
+          rules.freeze
         end
     end
 

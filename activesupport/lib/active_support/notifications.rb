@@ -185,8 +185,8 @@ module ActiveSupport
   #
   #   subscriber = ActiveSupport::Notifications.subscribe(/render/) { }
   #   ActiveSupport::Notifications.unsubscribe('render_template.action_view')
-  #   subscriber.matches?('render_template.action_view') # => false
-  #   subscriber.matches?('render_partial.action_view') # => true
+  #   subscriber.subscribed_to?('render_template.action_view') # => false
+  #   subscriber.subscribed_to?('render_partial.action_view') # => true
   #
   # == Default Queue
   #
@@ -212,9 +212,9 @@ module ActiveSupport
         notifier.publish_event(event)
       end
 
-      def instrument(name, payload = {})
-        if Ractor.main? && notifier.listening?(name)
-          instrumenter.instrument(name, payload) { yield payload if block_given? }
+      def instrument(name, payload = {}, &block)
+        if notifier.listening?(name)
+          instrumenter.instrument(name, payload, &block)
         else
           yield payload if block_given?
         end

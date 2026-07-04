@@ -63,17 +63,14 @@ module ActiveJob
       #      # Might raise Net::OpenTimeout or Timeout::Error when the remote service is down
       #    end
       #  end
-      def retry_on(*exceptions, wait: 3.seconds, attempts: 5, queue: nil, priority: nil, jitter: JITTER_DEFAULT, report: false, &retry_block)
-        # Assign to fresh locals so Ruby doesn't consider them
-        # "reassignable" (method params are, locals aren't).
-        r_wait = wait
-        r_attempts = attempts
-        r_queue = queue
-        r_priority = priority
-        r_jitter = jitter
-        r_report = report
-        r_block = retry_block
-        r_exceptions = exceptions.freeze
+      def retry_on(*exceptions, wait: 3.seconds, attempts: 5, queue: nil, priority: nil, jitter: JITTER_DEFAULT, report: false)
+        case wait
+        when :polynomially_longer, Integer, Float, ActiveSupport::Duration, Proc
+          # Supported wait type, continue.
+        else
+          raise ArgumentError, "Unsupported argument type for :wait, expected an Integer, Float, " \
+            "ActiveSupport::Duration, Proc, or :polynomially_longer, but got #{wait.inspect}"
+        end
 
         rescue_from(*exceptions) do |error|
           executions = executions_for(r_exceptions)
@@ -193,13 +190,13 @@ module ActiveJob
           delay = executions**4
           delay_jitter = determine_jitter_for_delay(delay, jitter)
           delay + delay_jitter + 2
-        when ActiveSupport::Duration, Integer
-          delay = seconds_or_duration_or_algorithm.to_i
+        when ActiveSupport::Duration, Integer, Float
+          delay = seconds_or_duration_or_algorithm.to_f
           delay_jitter = determine_jitter_for_delay(delay, jitter)
           delay + delay_jitter
         when Proc
           algorithm = seconds_or_duration_or_algorithm
-          algorithm.arity == 1 ? algorithm.call(executions) : algorithm.call(executions, error)
+          algorithm.arity == 2 || algorithm.arity < -1 ? algorithm.call(executions, error) : algorithm.call(executions)
         else
           raise "Couldn't determine a delay based on #{seconds_or_duration_or_algorithm.inspect}"
         end

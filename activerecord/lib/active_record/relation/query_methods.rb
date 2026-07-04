@@ -597,6 +597,7 @@ module ActiveRecord
 
     # Same as #regroup but operates on relation in-place instead of copying.
     def regroup!(*args) # :nodoc:
+      args.uniq!
       self.group_values = args
       self
     end
@@ -736,7 +737,9 @@ module ActiveRecord
       else
         arel_column = order_column(column.to_s)
 
-        values = cast_values_for_in_order_of(values, arel_column.type_caster)
+        unless arel_column.is_a?(Arel::Nodes::SqlLiteral)
+          values = cast_values_for_in_order_of(values, arel_column.type_caster)
+        end
         return spawn.none! if values.empty?
       end
 
@@ -803,6 +806,7 @@ module ActiveRecord
     # Same as #default_order but operates on relation in-place instead of copying.
     def default_order!(*args) # :nodoc:
       preprocess_order_args(args)
+      args.uniq!
       self.default_order_values = args
       self
     end
@@ -1292,6 +1296,7 @@ module ActiveRecord
     end
 
     def offset!(value) # :nodoc:
+      value = Integer(value) unless value.nil?
       self.offset_value = value
       self
     end
@@ -1656,8 +1661,8 @@ module ActiveRecord
     alias :without :excluding
 
     def excluding!(records) # :nodoc:
-      predicates = [ predicate_builder[primary_key, records].invert ]
-      self.where_clause += Relation::WhereClause.new(predicates)
+      ids = records.map { |record| record.is_a?(model) ? record.id : record }
+      self.where_clause += build_where_clause(primary_key => ids).invert
       self
     end
 
@@ -2020,7 +2025,7 @@ module ActiveRecord
       end
 
       def build_with_join_node(name, kind = Arel::Nodes::InnerJoin)
-        with_table = Arel::Table.new(name)
+        with_table = Arel::Table.new(name: name)
 
         table.join(with_table, kind).on(
           with_table[model.model_name.to_s.foreign_key].eq(table[model.primary_key])
@@ -2084,8 +2089,8 @@ module ActiveRecord
 
       def reverse_sql_order(order_query)
         if order_query.empty?
-          if !_reverse_order_columns.empty?
-            return _reverse_order_columns.map { |column| table[column].desc }
+          if !_order_columns.empty?
+            return _order_columns.map { |column| table[column].desc }
           end
 
           raise IrreversibleOrderError, <<~MSG.squish
@@ -2115,13 +2120,6 @@ module ActiveRecord
             o
           end
         end
-      end
-
-      def _reverse_order_columns
-        roc = []
-        roc << model.implicit_order_column if model.implicit_order_column
-        roc << model.primary_key if model.primary_key
-        roc.flatten.uniq.compact
       end
 
       def does_not_support_reverse?(order)

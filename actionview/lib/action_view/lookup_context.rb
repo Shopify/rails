@@ -63,7 +63,8 @@ module ActionView
     class DetailsKey # :nodoc:
       alias :eql? :equal?
 
-      @view_context_mutex = Mutex.new
+      @details_keys = Concurrent::Map.new
+      @digest_cache = Concurrent::Map.new
 
       # The details/digest caches hold values that are not Ractor-shareable
       # (TemplateDetails::Requested instances and Concurrent::Maps), and a
@@ -83,9 +84,9 @@ module ActionView
         cache = (Ractor[:av_details_keys] ||= {})
         cache.fetch(details) do
           if formats = details[:formats]
-            unless Template::Types.valid_symbols?(formats)
+            if normalized = Template.normalized_formats(formats)
               details = details.dup
-              details[:formats] &= Template::Types.symbols
+              details[:formats] = normalized
             end
           end
           cache[details] = TemplateDetails::Requested.new(**details)
@@ -96,38 +97,29 @@ module ActionView
         ActionView::PathRegistry.all_resolvers.each do |resolver|
           resolver.clear_cache
         end
-        Ractor[:av_details_keys] = {}
-        Ractor[:av_digest_cache] = {}
-        ActiveSupport::Ractors.on_main(self) do
-          @view_context_mutex.synchronize { @view_context_class = nil }
-        end
+        ActionView::LookupContext.reset_view_context_class
+        @details_keys.clear
+        @digest_cache.clear
       end
 
       def self.digest_caches
         (Ractor[:av_digest_cache] || {}).values
       end
+    end
 
-      # The view-context class owns the compiled-method container that every
-      # template is compiled into. It is built once and shared with all
-      # request-serving Ractors, so templates compile a single time for the
-      # whole process.
-      #
-      # The leading read returns the memoized class with no lock and no Ractor
-      # hop (a Class is always Ractor-shareable, so the read is valid from any
-      # Ractor). Only the first, building call pays for the rest: the build is
-      # delegated to the main Ractor because it mutates shared state, and it is
-      # guarded by a mutex so that concurrent first callers — threads on a
-      # non-Ractor server, including runtimes without a GVL — don't each build
-      # and discard a container. The mutex is only ever taken on the main
-      # Ractor, so it never needs to be shareable.
-      def self.view_context_class
-        @view_context_class || ActiveSupport::Ractors.on_main(self) do
-          @view_context_mutex.synchronize do
-            @view_context_class ||= ActionView::Base.with_empty_template_cache
-          end
-        end
+    def self.reset_view_context_class
+      @view_context_mutex.synchronize { @view_context_class = nil }
+    end
+
+    def self.view_context_class
+      return @view_context_class if @view_context_class
+      base = ActionView::Base # prevent recursive locking
+      @view_context_mutex.synchronize do
+        @view_context_class = base.with_empty_template_cache
       end
     end
+    @view_context_mutex = Mutex.new
+    ActiveSupport.on_load(:action_view) { ActionView::LookupContext.view_context_class }
 
     # Add caching behavior on top of Details.
     module DetailsCache
@@ -165,7 +157,12 @@ module ActionView
         details, details_key = detail_args_for(options)
         @view_paths.find(name, prefixes, partial, details, details_key, keys)
       end
-      alias :find_template :find
+
+      def find!(name, prefixes = [], partial = false, keys = [], options = {})
+        name, prefixes = normalize_name(name, prefixes)
+        details, details_key = detail_args_for(options)
+        @view_paths.find!(name, prefixes, partial, details, details_key, keys)
+      end
 
       def find_all(name, prefixes = [], partial = false, keys = [], options = {})
         name, prefixes = normalize_name(name, prefixes)
@@ -186,6 +183,10 @@ module ActionView
         @view_paths.exists?(name, prefixes, partial, details, details_key, [])
       end
       alias :any_templates? :any?
+
+      def any_formats?(name, prefixes = [], partial = false, keys = [], options = {})
+        exists?(name, prefixes, partial, keys, **options, formats: default_formats)
+      end
 
       def append_view_paths(paths)
         @view_paths = build_view_paths(@view_paths.to_a + paths)
@@ -301,10 +302,7 @@ module ActionView
         values.concat(default_formats) if values.delete "*/*"
         values.uniq!
 
-        unless Template::Types.valid_symbols?(values)
-          invalid_values = values - Template::Types.symbols
-          raise ArgumentError, "Invalid formats: #{invalid_values.map(&:inspect).join(", ")}"
-        end
+        Template.validate_formats(values)
 
         if (values.length == 1) && (values[0] == :js)
           values << :html

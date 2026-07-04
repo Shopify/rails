@@ -226,6 +226,15 @@ class PrimaryKeysTest < ActiveRecord::TestCase
     assert_equal k.lease_connection.quote_column_name("foo"), k.quoted_primary_key
   end
 
+  def test_primary_key_inherited
+    k = Class.new(ActiveRecord::Base)
+    k.primary_key = "foo"
+    subclass = Class.new(k)
+
+    assert_equal "foo", k._primary_key_definition&.name
+    assert_equal "foo", subclass._primary_key_definition&.name
+  end
+
   def test_auto_detect_primary_key_from_schema
     MixedCaseMonkey.reset_primary_key
     assert_equal "monkeyID", MixedCaseMonkey.primary_key

@@ -151,7 +151,7 @@ module ActiveSupport::Cache::RedisCacheStoreTests
     end
 
     def lookup_store(options = {})
-      ActiveSupport::Cache.lookup_store(:redis_cache_store, { url: REDIS_URL, timeout: 0.1, namespace: @namespace, pool: false }.merge(options))
+      ActiveSupport::Cache.lookup_store(:redis_cache_store, { url: REDIS_URL, timeout: 0.1, namespace: @namespace, pool: false, error_handler: ->(method:, returning:, exception:) { raise exception } }.merge(options))
     end
 
     teardown do
@@ -325,10 +325,6 @@ module ActiveSupport::Cache::RedisCacheStoreTests
 
     def capture_redis_commands(&block)
       capture_notifications("redis_query.active_support_test", &block).flat_map { |e| e.payload.fetch(:commands) }
-    end
-
-    def lookup_store(options = {})
-      super(options.merge(error_handler: ->(method:, returning:, exception:) { raise exception }))
     end
   end
 
@@ -582,7 +578,7 @@ module ActiveSupport::Cache::RedisCacheStoreTests
       @cache.with_local_cache do
         @cache.write("foo", "bar")
         # Overwrite in remote behind local cache's back
-        @cache.send(:bypass_local_cache) { @cache.write("foo", "baz") }
+        @cache.send(:use_temporary_local_cache, nil) { @cache.write("foo", "baz") }
         # Without delete, local cache returns stale value
         assert_equal "bar", @cache.read("foo")
         # With delete, it should bypass local cache and hit remote
