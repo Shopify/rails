@@ -308,20 +308,10 @@ module ActionView
               end
             RUBY
           when Proc
-            # The layout Proc is installed as the _layout_from_proc method via
-            # define_method, so it is dispatched as a bmethod. For the layout to
-            # be resolvable from non-main Ractors the backing Proc must be
-            # Ractor-shareable; otherwise calling _layout_from_proc raises
-            # "defined with an un-shareable Proc in a different Ractor". Detach
-            # self via shareable_proc (define_method rebinds it to the instance
-            # at call time) and store the shareable copy as the layout. On
-            # Rubies without Ractor support this returns the Proc unchanged.
-            shareable_layout = ActiveSupport::Ractors.shareable_proc(&_layout)
-            self._layout = shareable_layout
-            define_method(:_layout_from_proc, shareable_layout)
+            define_method :_layout_from_proc, &_layout
             private :_layout_from_proc
             <<-RUBY
-              result = _layout_from_proc(#{shareable_layout.arity == 0 ? '' : 'self'})
+              result = _layout_from_proc(#{_layout.arity == 0 ? '' : 'self'})
               return #{default_behavior} if result.nil?
               result
             RUBY

@@ -82,21 +82,13 @@ module ActionView
       def view_context_class
         klass = ActionView::LookupContext.view_context_class
 
-        # The per-controller view-context subclass is shared across all
-        # request-serving Ractors. Reading the memoized class is safe from any
-        # Ractor (a Class is Ractor-shareable); building it (Class.new +
-        # include) mutates state, so it is delegated to the main Ractor.
-        return @view_context_class if @view_context_class && !klass.changed?(@view_context_class)
+        @view_context_class ||= build_view_context_class(klass, supports_path?, _routes, _helpers)
 
-        ActiveSupport::Ractors.on_main(self) do
-          @view_context_class ||= build_view_context_class(klass, supports_path?, _routes, _helpers)
-
-          if klass.changed?(@view_context_class)
-            @view_context_class = build_view_context_class(klass, supports_path?, _routes, _helpers)
-          end
-
-          @view_context_class
+        if klass.changed?(@view_context_class)
+          @view_context_class = build_view_context_class(klass, supports_path?, _routes, _helpers)
         end
+
+        @view_context_class
       end
     end
 

@@ -422,18 +422,7 @@ module ActionView
 
     def method_name # :nodoc:
       @method_name ||= begin
-        # The suffix identifies the compiled method by the template's *logical*
-        # identity (source file, locals, format, variant, handler) rather than
-        # by object id. This keeps the generated method name stable across
-        # Ractors and across the ephemeral Template objects produced on cache
-        # misses, so a template compiles exactly once for the whole process:
-        # the first render defines the method on the shared container (on the
-        # main Ractor) and every later render — even from a different Ractor
-        # with a freshly-built Template — sees it already defined and skips
-        # recompilation. Under dev reloads the compiled-method container is
-        # rebuilt wholesale, so stale methods are discarded with it.
-        key = [@identifier, @locals, @format, @variant, @handler].hash
-        m = +"_#{identifier_method_name}__#{@identifier.hash}_#{key}"
+        m = +"_#{identifier_method_name}__#{@identifier.hash}_#{__id__}"
         m.tr!("-", "_")
         m
       end
@@ -536,43 +525,17 @@ module ActionView
       # In general, this means that templates will be UTF-8 inside of Rails,
       # regardless of the original source encoding.
       def compile(mod)
-        # Defining a method by evaluating the compiled source mutates the
-        # shared compiled-method container (a Ractor-shareable class). Class
-        # mutation may only happen on the main Ractor, so the +module_eval+ is
-        # delegated there via ActiveSupport::Ractors.on_main. The expensive
-        # source generation (compiled_source) runs on the calling Ractor, and
-        # the eval is skipped entirely when the method is already defined, so a
-        # template is compiled exactly once for the whole process regardless of
-        # how many Ractors render it.
-        unless mod.method_defined?(method_name) || mod.private_method_defined?(method_name)
-          # Capture only Ractor-shareable values in the on_main block.
-          source = compiled_source.freeze
-          mod_identifier = identifier.dup.freeze
-          mod_offset = offset
-
-          result = ActiveSupport::Ractors.on_main do
-            begin
-              mod.module_eval(source, mod_identifier, mod_offset)
-              :ok
-            rescue SyntaxError
-              :syntax_error
-            end
-          end
-
-          if result == :syntax_error
-            # Account for when code in the template is not syntactically valid; e.g. if we're using
-            # ERB and the user writes <%= foo( %>, attempting to call a helper `foo` and interpolate
-            # the result into the template, but missing an end parenthesis.
-            raise SyntaxErrorInTemplate.new(self, encode!)
-          end
+        begin
+          mod.module_eval(compiled_source, identifier, offset)
+        rescue SyntaxError
+          # Account for when code in the template is not syntactically valid; e.g. if we're using
+          # ERB and the user writes <%= foo( %>, attempting to call a helper `foo` and interpolate
+          # the result into the template, but missing an end parenthesis.
+          raise SyntaxErrorInTemplate.new(self, encode!)
         end
 
         return unless strict_locals?
 
-        # Reading the compiled method's parameters is a read-only operation and
-        # is safe from any Ractor. It is recomputed per Template object so that
-        # @strict_local_keys is populated even when the method was already
-        # defined by a previous compile.
         parameters = mod.instance_method(method_name).parameters
         parameters -= [[:req, :local_assigns], [:req, :output_buffer]]
 
@@ -586,8 +549,7 @@ module ActionView
         non_kwarg_parameters.pop if non_kwarg_parameters.last == %i(block _)
 
         unless non_kwarg_parameters.empty?
-          undef_method_name = method_name.dup.freeze
-          ActiveSupport::Ractors.on_main { mod.undef_method(undef_method_name) }
+          mod.undef_method(method_name)
 
           raise ArgumentError.new(
             "#{non_kwarg_parameters.map { |_, name| "`#{name}`" }.to_sentence} set as non-keyword " \
@@ -620,7 +582,7 @@ module ActionView
         end
       end
 
-      RUBY_RESERVED_KEYWORDS = ::ActiveSupport::Delegation::RUBY_RESERVED_KEYWORDS.freeze
+      RUBY_RESERVED_KEYWORDS = ::ActiveSupport::Delegation::RUBY_RESERVED_KEYWORDS
       private_constant :RUBY_RESERVED_KEYWORDS
 
       def locals_code
