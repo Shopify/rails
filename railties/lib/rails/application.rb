@@ -726,6 +726,13 @@ module Rails
       # so any `included do` blocks that mutate PathRegistry have run.
       ::ActionView::PathRegistry.make_shareable!
 
+      # Deep-freeze the dependency tracker registry (read on the digest path
+      # from worker Ractors). freeze_registry already ran from the railtie's
+      # after_initialize hook; share_registry is the opt-in step reserved for
+      # the application, so the branch's own mechanism carries the load rather
+      # than the make_shareable! harness.
+      ::ActionView::DependencyTracker.share_registry if defined?(::ActionView::DependencyTracker)
+
       # Now that all framework log subscribers have registered (most
       # via file-load-time `ActiveSupport.event_reporter.subscribe`
       # in their respective log_subscriber.rb files, plus the lazy
@@ -779,7 +786,6 @@ module Rails
       [::ActionDispatch::Response, ::ActionDispatch::Request,
        ::ActionView::Base, ::ActionView::LookupContext,
        ::ActionView::Digestor,
-       ::ActionView::DependencyTracker,
        ::ActionView::Template,
        ::ActionView::Template::Handlers,
        ::ActionView::Helpers::TagHelper,
