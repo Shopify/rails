@@ -22,7 +22,7 @@ module ActionCable
     def initialize
       @log_tags = []
 
-      @connection_class = -> { ActionCable::Connection::Base }
+      @connection_class = shareable_proc { ActionCable::Connection::Base }
       @worker_pool_size = 4
       @executor_pool_size = 10
 
@@ -30,7 +30,7 @@ module ActionCable
       @allow_same_origin_as_host = true
       @filter_parameters = []
 
-      @health_check_application = ->(env) {
+      @health_check_application = shareable_proc { |env|
         [200, { Rack::CONTENT_TYPE => "text/html", "date" => Time.now.httpdate }, []]
       }
     end

@@ -224,12 +224,12 @@ module ActiveRecord
         def define_autosave_validation_callbacks(reflection)
           validation_method = :"validate_associated_records_for_#{reflection.name}"
           if reflection.validate? && !method_defined?(validation_method)
-            validation_impl = if reflection.collection?
-              :validate_collection_association
+            if reflection.collection?
+              method = :validate_collection_association
             elsif reflection.has_one?
-              :validate_has_one_association
+              method = :validate_has_one_association
             else
-              :validate_belongs_to_association
+              method = :validate_belongs_to_association
             end
 
             define_non_cyclic_method(validation_method, reflection, method)

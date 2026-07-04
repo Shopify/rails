@@ -624,8 +624,8 @@ module Rails
       # Warm up the I18n transliterator cache so it's populated before
       # the backend gets frozen. Otherwise, lazy init fails in Ractors.
       I18n.transliterate("test")
-      ::ActiveSupport::Messages::Metadata::ENVELOPE_SERIALIZERS.freeze
-      ::ActiveSupport::Messages::Metadata::TIMESTAMP_SERIALIZERS.freeze
+      ::ActiveSupport::Messages::Metadata.envelope_serializers.freeze
+      ::ActiveSupport::Messages::Metadata.timestamp_serializers.freeze
       # PathRegistry.make_shareable! is deferred until after
       # ActionController::Base.descendants.each below — autoloading
       # ActionController::Base triggers ActionView::ViewPaths' Concern
