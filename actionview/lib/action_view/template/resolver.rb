@@ -118,10 +118,15 @@ module ActionView
       super
     end
 
-    def eager_load_templates
+    def eager_load_templates(view = nil)
       template_glob("**/*").each do |file|
         unbound = build_unbound_template(file)
         (@unbound_templates[unbound.virtual_path] ||= []) << unbound
+        # When a view context is given, compile each template into its shared
+        # compiled-method container up front (on the main Ractor). Worker
+        # Ractors can't mutate the shared container, so a template must be
+        # compiled before the resolver is frozen and shared.
+        unbound.bind_locals([]).send(:compile!, view) if view
       end
     end
 

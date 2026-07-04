@@ -31,21 +31,38 @@ module ActionView
     end
 
     def freeze # :nodoc:
-      unless bind_locals([]).strict_locals?
-        raise ArgumentError, "Cannot freeze #{@virtual_path.inspect}: templates must declare strict locals (e.g. `<%# locals: () %>`) to be frozen."
-      end
+      # Ensure at least one template is built so a strict template collapses to
+      # @strict_locals_template before we freeze.
+      bind_locals([])
       @source.freeze
       @identifier.freeze
       @virtual_path.freeze
       @details.freeze
-      @strict_locals_template.freeze
-      @templates = nil
+      if @strict_locals_template
+        # Strict templates ignore render-time locals, so a single template
+        # serves every key and is fully shareable.
+        @strict_locals_template.freeze
+        @templates = nil
+      else
+        # Non-strict templates compile a distinct method per locals set, which
+        # a worker Ractor can't do against the frozen shared container. Freeze
+        # the boot-compiled variants; only those locals combinations are
+        # available after sharing (partials with new locals would need to
+        # compile and are unsupported on a frozen template).
+        @templates = @templates.each_pair.to_h
+        @templates.each_value(&:freeze)
+        @templates.freeze
+      end
       @write_lock = nil
       super
     end
 
     private
       def build_bound_template(locals)
+        if frozen?
+          return @strict_locals_template || @templates[locals] || @templates[normalize_locals(locals)]
+        end
+
         @write_lock.synchronize do
           return @strict_locals_template if @strict_locals_template
           normalized_locals = normalize_locals(locals)

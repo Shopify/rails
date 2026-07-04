@@ -701,11 +701,26 @@ module Rails
         klass._prefixes      if klass.respond_to?(:_prefixes)
         klass.view_context_class if klass.respond_to?(:view_context_class)
         klass.action_methods if klass.respond_to?(:action_methods)
+        klass.controller_name if klass.respond_to?(:controller_name)
       end
       # Also warm AC::Base itself (it has internal_methods used as the
       # diff base for action_methods).
       ::AbstractController::Base.action_methods if defined?(::AbstractController::Base)
       ::ActionController::Base.action_methods   if defined?(::ActionController::Base)
+
+      # Eager-load and compile every view template on the main Ractor. Worker
+      # Ractors can't compile (they can't mutate the shared compiled-method
+      # container), so each template is parsed, bound, and compiled here before
+      # the resolvers are frozen and shared below. Templates must declare strict
+      # locals to be frozen (a non-strict template compiles a distinct method
+      # per locals set, so it can't collapse to one shareable template).
+      if defined?(::ActionView::PathRegistry)
+        container = ::ActionView::LookupContext.view_context_class
+        compile_view = container.new(::ActionView::LookupContext.new([]), {}, nil)
+        ::ActionView::PathRegistry.all_file_system_resolvers.each do |resolver|
+          resolver.eager_load_templates(compile_view)
+        end
+      end
 
       # Now ActionController::Base and all descendants are loaded,
       # so any `included do` blocks that mutate PathRegistry have run.
