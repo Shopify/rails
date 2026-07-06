@@ -198,7 +198,8 @@ module ActiveRecord
         @last_activity = nil
         @verified = false
         @needs_reconnect = false
-
+        @unfinalized_intents = []
+        @pipelining_locked = false
         @pool_jitter = rand * max_jitter
       end
 
@@ -355,6 +356,7 @@ module ActiveRecord
             @owner = nil
             enable_lazy_transactions!
             unset_query_cache!
+            finalize_remaining_intents
           end
         else
           raise ActiveRecordError, "Cannot expire connection, it is not currently leased."
@@ -455,6 +457,24 @@ module ActiveRecord
       # Does this adapter support application-enforced advisory locking?
       def supports_advisory_locks?
         false
+      end
+
+      def pipeline_active?
+        false
+      end
+
+      def pipeline_pending?
+        false
+      end
+
+      def enter_pipeline_mode
+        raise NotImplementedError
+      end
+
+      def exit_pipeline_mode(waiting_on: nil)
+      end
+
+      def flush_pipeline(waiting_on: nil)
       end
 
       # Should primary key values be selected from their corresponding
@@ -905,7 +925,7 @@ module ActiveRecord
       # this client. If that is the case, generally you'll want to invalidate
       # the query cache using +ActiveRecord::Base.clear_query_cache+.
       def raw_connection
-        with_raw_connection do |conn|
+        with_raw_connection(pipeline_mode: false) do |conn|
           disable_lazy_transactions!
           @raw_connection_dirty = true
           conn
@@ -1089,55 +1109,63 @@ module ActiveRecord
         # still-yielded connection in the outer block), but we currently
         # provide no special enforcement there.
         #
-        def with_raw_connection(allow_retry: false, materialize_transactions: true)
+        def with_raw_connection(allow_retry: false, materialize_transactions: true, pipeline_mode: nil)
           @lock.synchronize do
-            connect! if !connected? && reconnect_can_restore_state?
+            # Save pipeline state before any nested queries (connect!, materialize_transactions,
+            # verify! can all run nested queries that might change pipeline mode)
+            was_in_pipeline = pipeline_active?
 
-            self.materialize_transactions if materialize_transactions
+            reconnectable = ensure_connection_ready(
+              allow_retry: allow_retry,
+              materialize_transactions: materialize_transactions
+            )
 
             retries_available = allow_retry ? connection_retries : 0
             deadline = retry_deadline && Process.clock_gettime(Process::CLOCK_MONOTONIC) + retry_deadline
-            reconnectable = reconnect_can_restore_state?
-
-            if @verified && !@needs_reconnect
-              # Cool, we're confident the connection's ready to use. (Note this might have
-              # become true during the above #materialize_transactions.)
-            elsif !@needs_reconnect && (last_activity = seconds_since_last_activity) && last_activity < verify_timeout
-              # We haven't actually verified the connection since we acquired it, but it
-              # has been used very recently. We're going to assume it's still okay.
-            elsif reconnectable
-              if @needs_reconnect
-                # This connection has been flagged for replacement; don't trust
-                # it even when the upcoming query would be retryable.
-                verify!
-              elsif allow_retry
-                # Not sure about the connection yet, but if anything goes wrong we can
-                # just reconnect and re-run our query
-              else
-                # We can reconnect if needed, but we don't trust the upcoming query to be
-                # safely re-runnable: let's verify the connection to be sure
-                verify!
-              end
-            else
-              # We don't know whether the connection is okay, but it also doesn't matter:
-              # we wouldn't be able to reconnect anyway. We're just going to run our query
-              # and hope for the best.
-            end
+            replay_intents = nil
 
             begin
-              yield @raw_connection
+              # Handle pipeline mode: explicit request, or restore original state
+              if pipeline_mode == true
+                enter_pipeline_mode
+              elsif pipeline_mode == false
+                exit_pipeline_mode
+              elsif !was_in_pipeline && pipeline_active?
+                # Nested queries entered pipeline mode - exit to restore state
+                exit_pipeline_mode
+              end
+
+              # Re-queue any intents saved for replay from a previous attempt
+              if replay_intents
+                replay_intents.each { |intent| pipeline_add_query(intent) }
+                replay_intents = nil
+              end
+
+              # Lock pipelining while yielding to prevent nested queries from changing mode
+              was_pipelining_locked = @pipelining_locked
+              @pipelining_locked = true
+
+              begin
+                yield @raw_connection
+              ensure
+                @pipelining_locked = was_pipelining_locked
+              end
             rescue => original_exception
               translated_exception = translate_exception_class(original_exception, nil, nil)
               invalidate_transaction(translated_exception)
               retry_deadline_exceeded = deadline && deadline < Process.clock_gettime(Process::CLOCK_MONOTONIC)
 
               if !retry_deadline_exceeded && retries_available > 0
-                retries_available -= 1
-
-                if retryable_query_error?(translated_exception)
+                case classify_retry_action(translated_exception, reconnectable: reconnectable)
+                when :retry_query
+                  retries_available -= 1
                   backoff(connection_retries - retries_available)
                   retry
-                elsif reconnectable && retryable_connection_error?(translated_exception)
+                when :retry_after_reconnect
+                  retries_available -= 1
+                  replay_intents = pipeline_mode &&
+                    abandon_pipelined_intents(translated_exception, allow_recovery: true)
+                  abandon_pipelined_intents(translated_exception) unless replay_intents
                   reconnect!(restore_transactions: true)
                   # Only allowed to reconnect once, because reconnect! has its own retry
                   # loop
@@ -1150,7 +1178,9 @@ module ActiveRecord
 
               raise translated_exception
             ensure
-              dirty_current_transaction if materialize_transactions
+              # Pipeline enqueue only queues intent(s); transaction dirtiness should
+              # be decided when intents are actually resolved.
+              dirty_current_transaction if materialize_transactions && pipeline_mode != true
             end
           end
         end
@@ -1196,12 +1226,56 @@ module ActiveRecord
           end
         end
 
+        # Classify an exception to determine what retry action to take.
+        # Returns :retry_query, :retry_after_reconnect, or nil when no retry should occur.
+        def classify_retry_action(exception, reconnectable:)
+          if retryable_query_error?(exception)
+            :retry_query
+          elsif reconnectable && retryable_connection_error?(exception)
+            :retry_after_reconnect
+          end
+        end
+
+        # Decide whether the connection can be used without verification.
+        def skip_verification?(allow_retry:, reconnectable:)
+          if @verified && connected? && !@needs_reconnect
+            true
+          elsif !@needs_reconnect && (last_activity = seconds_since_last_activity) && last_activity < verify_timeout
+            true
+          elsif reconnectable
+            if @needs_reconnect
+              false
+            elsif allow_retry
+              true
+            else
+              false
+            end
+          else
+            true
+          end
+        end
+
+        # Ensure the connection is ready to execute a query.
+        # Returns whether reconnect-and-restore is available for retry decisions.
+        def ensure_connection_ready(allow_retry:, materialize_transactions:)
+          connect! if !connected? && reconnect_can_restore_state?
+          self.materialize_transactions if materialize_transactions
+
+          reconnectable = reconnect_can_restore_state?
+          verify! unless skip_verification?(allow_retry: allow_retry, reconnectable: reconnectable)
+          reconnectable
+        end
+
         def backoff(counter)
           sleep 0.1 * counter
         end
 
         def reconnect
           raise NotImplementedError.new("#{self.class} should define `reconnect` to implement adapter-specific logic for reconnecting to the database")
+        end
+
+        def abandon_pipelined_intents(connection_error = nil, allow_recovery: false)
+          # Override in adapters that support pipelining
         end
 
         # Returns a raw connection for internal use with methods that are known
@@ -1250,6 +1324,15 @@ module ActiveRecord
           )
           active_record_error.set_backtrace(native_error.backtrace)
           active_record_error
+        end
+
+        # Translate an exception and establish the cause chain by raising/rescuing.
+        # Use this when storing an exception to be raised later.
+        def translate_exception_with_cause(native_error, sql, binds)
+          translated = translate_exception_class(native_error, sql, binds)
+          raise translated
+        rescue => error
+          error
         end
 
         def log(intent_or_sql, name = "SQL", binds = [], type_casted_binds = [], async: false, allow_retry: false, &block)

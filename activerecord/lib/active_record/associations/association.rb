@@ -132,6 +132,7 @@ module ActiveRecord
       def set_inverse_instance(record)
         if inverse = inverse_association_for(record)
           inverse.inversed_from(owner)
+          yield inverse if block_given?
         end
         record
       end

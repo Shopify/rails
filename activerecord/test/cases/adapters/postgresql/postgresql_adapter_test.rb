@@ -978,7 +978,7 @@ module ActiveRecord
 
       def test_raise_error_when_cannot_translate_exception
         assert_raise TypeError do
-          @connection.execute(:not_a_query)
+          @connection.execute([:not_a_query])
         end
       end
 
@@ -1041,6 +1041,7 @@ module ActiveRecord
 
       def test_fatal_via_notice_channel_recovers_before_the_next_query
         pid = connection_id_from_server(@connection)
+        @connection.exit_pipeline_mode if @connection.pipeline_active?
         kill_connection_from_server(pid)
 
         # Force the FATAL through the notice channel rather than as a result:
@@ -1064,7 +1065,6 @@ module ActiveRecord
 
       def test_fatal_via_notice_channel_preserves_typed_cause_when_unrecoverable
         pid = connection_id_from_server(@connection)
-        kill_connection_from_server(pid)
 
         # Same notice-channel delivery as above, but reach the raw connection via
         # the #raw_connection accessor, which marks it dirty -> non-recoverable.
@@ -1072,6 +1072,7 @@ module ActiveRecord
         # -- and it must carry the captured FATAL as its cause, not the generic
         # socket error that merely tripped over the already-dead connection.
         raw = @connection.raw_connection
+        kill_connection_from_server(pid)
         raw.socket_io.wait_readable(1)
         raw.consume_input
         assert_nil raw.get_result
@@ -1462,6 +1463,73 @@ module ActiveRecord
           assert_nothing_raised do
             @connection.exec_query("SELECT 1")
           end
+        end
+      end
+
+      def test_delivered_query_intent_warnings_are_handled_when_result_is_observed
+        warning_sql = "do $$ BEGIN RAISE WARNING 'PostgreSQL SQL warning'; END; $$"
+        warnings = []
+        warning_action = ->(warning) do
+          warnings << [warning.message, warning.sql]
+          raise warning
+        end
+        intent = ActiveRecord::ConnectionAdapters::QueryIntent.new(
+          adapter: @connection,
+          raw_sql: warning_sql,
+          name: "WARNING"
+        )
+
+        with_db_warnings_action(warning_action) do
+          assert_nothing_raised do
+            intent.execute!
+          end
+          assert_equal [], warnings
+          assert intent.raw_result_available?
+
+          error = assert_raises(ActiveRecord::SQLWarning) do
+            intent.cast_result
+          end
+          assert_equal "PostgreSQL SQL warning", error.message
+          assert_equal [["PostgreSQL SQL warning", warning_sql]], warnings
+
+          assert_same error, assert_raises(ActiveRecord::SQLWarning) { intent.cast_result }
+          assert_equal [["PostgreSQL SQL warning", warning_sql]], warnings
+        end
+      ensure
+        raw_result = intent&.instance_variable_get(:@raw_result)
+        if raw_result.respond_to?(:clear) && (!raw_result.respond_to?(:cleared?) || !raw_result.cleared?)
+          raw_result.clear
+        end
+      end
+
+      def test_delivered_query_intent_warnings_do_not_mask_query_failure
+        warning_sql = "do $$ BEGIN RAISE WARNING 'PostgreSQL SQL warning'; " \
+          "RAISE EXCEPTION 'PostgreSQL SQL error'; END; $$"
+        warnings = []
+        warning_action = ->(warning) do
+          warnings << [warning.message, warning.sql]
+          raise warning
+        end
+        intent = ActiveRecord::ConnectionAdapters::QueryIntent.new(
+          adapter: @connection,
+          raw_sql: warning_sql,
+          name: "WARNING FAILURE"
+        )
+
+        with_db_warnings_action(warning_action) do
+          assert_nothing_raised do
+            intent.execute!
+          end
+          assert_equal [], warnings
+
+          error = assert_raises(ActiveRecord::StatementInvalid) do
+            intent.cast_result
+          end
+          assert_match(/PostgreSQL SQL error/, error.message)
+          assert_equal [["PostgreSQL SQL warning", warning_sql]], warnings
+
+          assert_raises(ActiveRecord::StatementInvalid) { intent.cast_result }
+          assert_equal [["PostgreSQL SQL warning", warning_sql]], warnings
         end
       end
 

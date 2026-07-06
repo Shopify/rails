@@ -16,6 +16,7 @@ require "active_record/connection_adapters/postgresql/schema_creation"
 require "active_record/connection_adapters/postgresql/schema_definitions"
 require "active_record/connection_adapters/postgresql/schema_dumper"
 require "active_record/connection_adapters/postgresql/schema_statements"
+require "active_record/connection_adapters/postgresql/pipeline_context"
 require "active_record/connection_adapters/postgresql/type_metadata"
 require "active_record/connection_adapters/postgresql/utils"
 
@@ -207,6 +208,7 @@ module ActiveRecord
       include PostgreSQL::ReferentialIntegrity
       include PostgreSQL::SchemaStatements
       include PostgreSQL::DatabaseStatements
+      include PostgreSQL::PipelineContext
 
       def supports_bulk_alter?
         true
@@ -369,6 +371,7 @@ module ActiveRecord
             # accessed while holding the connection's lock. (And we
             # don't need the complication of with_raw_connection because
             # a reconnect would invalidate the entire statement pool.)
+            @connection.exit_pipeline_mode
             if (conn = @connection.instance_variable_get(:@raw_connection)) && conn.status == PG::CONNECTION_OK
               if @connection.supports_close_prepared?
                 conn.close_prepared key
@@ -414,11 +417,17 @@ module ActiveRecord
       def active?
         @lock.synchronize do
           return false unless connected?
-          @raw_connection.query ";"
+
+          if pipeline_active?
+            return false unless active_pipeline_connection?
+          else
+            @raw_connection.query ";"
+          end
+
           verified!
+          true
         end
-        true
-      rescue PG::Error
+      rescue PG::Error, IOError, SystemCallError
         false
       end
 
@@ -439,6 +448,8 @@ module ActiveRecord
         @lock.synchronize do
           return connect! unless @raw_connection
 
+          exit_pipeline_mode
+
           unless @raw_connection.transaction_status == ::PG::PQTRANS_IDLE
             @raw_connection.query "ROLLBACK"
           end
@@ -457,6 +468,9 @@ module ActiveRecord
       # method does nothing.
       def disconnect!
         @lock.synchronize do
+          exit_pipeline_mode rescue nil
+          discard_pipeline_buffer
+
           super
           @raw_connection&.close rescue nil
           @raw_connection = nil
@@ -465,10 +479,13 @@ module ActiveRecord
       end
 
       def discard! # :nodoc:
+        discard_pipeline_buffer
         super
         @raw_connection&.socket_io&.reopen(IO::NULL) rescue nil
         @raw_connection = nil
       end
+
+      set_callback :checkin, :before, :exit_pipeline_mode
 
       def self.native_database_types # :nodoc:
         @native_database_types ||= begin
@@ -1078,6 +1095,7 @@ module ActiveRecord
         # Prepare the statement if it hasn't been prepared, return
         # the statement key.
         def prepare_statement(sql, binds, conn)
+          raise "pipeline mode does not support prepared statements" if pipeline_active?
           sql_key = sql_key(sql)
           unless @statements.key? sql_key
             nextkey = @statements.next_key
@@ -1102,6 +1120,8 @@ module ActiveRecord
         end
 
         def reconnect
+          abandon_pipelined_intents
+
           begin
             @raw_connection&.reset
           rescue PG::ConnectionBad
