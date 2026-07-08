@@ -9,10 +9,15 @@ module Sharded
     belongs_to :blog_post_by_id, class_name: "Sharded::BlogPost", foreign_key: :blog_post_id, primary_key: :id
     belongs_to :blog_post_with_inverse,
       class_name: "Sharded::BlogPost",
-      foreign_key: [:blog_id, :blog_post_id],
-      primary_key: [:blog_id, :id],
+      foreign_key: :blog_post_id,
+      query_constraints: :blog_id,
       inverse_of: :comments_with_inverse
     belongs_to :blog_post_with_decoupled_qc, class_name: "Sharded::BlogPost", foreign_key: :blog_post_id, query_constraints: :blog_id
+    belongs_to :blog_post_composite_fk_with_qc,
+      class_name: "Sharded::BlogPost",
+      foreign_key: [:blog_id, :blog_post_id],
+      primary_key: [:blog_id, :id],
+      query_constraints: [:region_id]
     belongs_to :blog
   end
 end

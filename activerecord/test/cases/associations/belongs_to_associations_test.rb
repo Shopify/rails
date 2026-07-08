@@ -2167,12 +2167,14 @@ class BelongsToPolymorphicShardedPrimaryKeyTest < ActiveRecord::TestCase
     assert_equal "id", reflection.association_primary_key(Sharded::BlogPost)
   end
 
-  def test_inverse_with_composite_query_constraints_resolves_single_primary_key
+  def test_inverse_with_decoupled_query_constraints_resolves_single_primary_key
     reflection = Adjustment.reflect_on_association(:adjustable)
     inverse = Shipment.reflect_on_association(:adjustments)
 
-    assert_equal [:region_id, :adjustable_id], inverse.options[:query_constraints]
-    assert_equal [:region_id, :id], inverse.options[:primary_key]
+    # Decoupled form: foreign_key handles the writable join (adjustable_id -> id),
+    # query_constraints scopes by the tenant column (region_id) without being written.
+    assert_equal :adjustable_id, inverse.options[:foreign_key]
+    assert_equal [:region_id], inverse.options[:query_constraints]
     assert_equal "id", reflection.association_primary_key(Shipment)
   end
 end

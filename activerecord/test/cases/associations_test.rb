@@ -485,6 +485,29 @@ class AssociationsTest < ActiveRecord::TestCase
     assert_empty(blog_post.reload.tags)
     assert_not_predicate Sharded::BlogPostTag.where(blog_post_id: blog_post.id, blog_id: blog_post.blog_id), :exists?
   end
+  def test_has_many_through_with_decoupled_query_constraints_uses_all_constraints_in_join
+    blog_post = sharded_blog_posts(:great_post_blog_one)
+    expected_tag_ids = [
+      sharded_tags(:short_read_blog_one).id,
+      sharded_tags(:technical_blog_one).id,
+    ].sort
+
+    sql = capture_sql do
+      loaded_tags = blog_post.tags_with_decoupled_qc.to_a
+      assert_equal expected_tag_ids, loaded_tags.map(&:id).sort
+    end.first
+
+    # The through join between sharded_tags and sharded_blog_posts_tags must
+    # scope on blog_id (the decoupled query constraint), not just tag_id —
+    # otherwise tags from other blogs could match on tag_id alone.
+    tags_col = Regexp.escape(Sharded::Tag.lease_connection.quote_table_name("sharded_tags.blog_id"))
+    join_col = Regexp.escape(Sharded::BlogPostTag.lease_connection.quote_table_name("sharded_blog_posts_tags.blog_id"))
+    assert_match(/#{tags_col} = #{join_col}/, sql)
+
+    tags_col = Regexp.escape(Sharded::Tag.lease_connection.quote_table_name("sharded_tags.id"))
+    join_col = Regexp.escape(Sharded::BlogPostTag.lease_connection.quote_table_name("sharded_blog_posts_tags.tag_id"))
+    assert_match(/#{tags_col} = #{join_col}/, sql)
+  end
 
   def test_using_query_constraints_is_allowed
     assert_nothing_raised do

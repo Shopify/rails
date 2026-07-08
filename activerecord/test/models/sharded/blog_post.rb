@@ -13,6 +13,13 @@ module Sharded
 
     has_many :blog_post_tags
     has_many :tags, through: :blog_post_tags
+    has_many :blog_post_tags_with_decoupled_qc,
+      class_name: "Sharded::BlogPostTag",
+      foreign_key: :blog_post_id,
+      query_constraints: :blog_id
+    has_many :tags_with_decoupled_qc,
+      through: :blog_post_tags_with_decoupled_qc,
+      source: :tag_with_decoupled_qc
 
     has_and_belongs_to_many :tags_with_composite_fk,
       class_name: "Sharded::Tag",
