@@ -673,6 +673,7 @@ module Rails
 
       env_config
       routes
+      revision
 
       @autoloaders, @reloaders, @routes_reloader = nil, nil, nil
 
