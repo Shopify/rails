@@ -33,9 +33,12 @@ module ActionView
         }x
       end
 
-      def parse(path)
+      def path_regex
         @regex ||= build_path_regex
-        match = @regex.match(path)
+      end
+
+      def parse(path)
+        match = path_regex.match(path)
         path = TemplatePath.build(match[:action], match[:prefix] || "", !!match[:partial])
         details = TemplateDetails.new(
           match[:locale]&.to_sym,
@@ -44,6 +47,11 @@ module ActionView
           match[:variant]&.to_sym
         )
         ParsedPath.new(path, details)
+      end
+
+      def freeze
+        path_regex
+        super
       end
     end
 
@@ -104,6 +112,25 @@ module ActionView
       super
     end
 
+    def eager_load_templates
+      template_glob("**/*").each do |file|
+        unbound = build_unbound_template(file)
+        (@unbound_templates[unbound.virtual_path] ||= []) << unbound
+      end
+    end
+
+    def freeze
+      @path.freeze
+      @path_parser.freeze
+      @unbound_templates = @unbound_templates.each_pair.to_h unless @unbound_templates.is_a?(::Hash)
+      @unbound_templates.each_value do |unbound_templates|
+        unbound_templates.each(&:freeze)
+        unbound_templates.freeze
+      end
+      @unbound_templates.freeze
+      super
+    end
+
     def to_s
       @path.to_s
     end
@@ -130,16 +157,24 @@ module ActionView
     private
       def _find_all(name, prefix, partial, details, key, locals)
         requested_details = key || TemplateDetails::Requested.new(**details)
-        cache = key ? @unbound_templates : Concurrent::Map.new
-
-        unbound_templates =
-          cache.compute_if_absent(TemplatePath.virtual(name, prefix, partial)) do
-            path = TemplatePath.build(name, prefix, partial)
-            unbound_templates_from_path(path)
-          end
+        unbound_templates = unbound_templates_for(name, prefix, partial, !key.nil?)
 
         filter_and_sort_by_details(unbound_templates, requested_details).map do |unbound_template|
           unbound_template.bind_locals(locals)
+        end
+      end
+
+      def unbound_templates_for(name, prefix, partial, cache)
+        virtual = TemplatePath.virtual(name, prefix, partial)
+
+        if frozen?
+          @unbound_templates[virtual] || [].freeze
+        elsif cache
+          @unbound_templates.compute_if_absent(virtual) do
+            unbound_templates_from_path(TemplatePath.build(name, prefix, partial))
+          end
+        else
+          unbound_templates_from_path(TemplatePath.build(name, prefix, partial))
         end
       end
 
