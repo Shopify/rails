@@ -377,6 +377,8 @@ ActiveRecord::Schema.define do
     t.integer :blog_id
     t.integer :blog_post_id
     t.integer :tag_id
+    t.string :taggable_type
+    t.integer :taggable_id
   end
 
   create_table :shipments, force: true do |t|

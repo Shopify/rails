@@ -509,6 +509,49 @@ class AssociationsTest < ActiveRecord::TestCase
     assert_match(/#{tags_col} = #{join_col}/, sql)
   end
 
+  def test_has_many_through_with_polymorphic_decoupled_query_constraints_source_uses_all_constraints_in_join
+    blog_post = sharded_blog_posts(:great_post_blog_one)
+    expected_tag_ids = [
+      sharded_tags(:short_read_blog_one).id,
+      sharded_tags(:technical_blog_one).id,
+    ].sort
+
+    # A join row of a *different* polymorphic type, colliding on id with a tag in
+    # the same shard that is not otherwise linked to this post. The source_type
+    # discriminator must exclude it; were that filter dropped, the join would
+    # surface long_read_blog_one and fail the assert_equal below. This gives the
+    # type scope behavioral teeth (rolled back with the test transaction), rather
+    # than relying on the SQL-shape assertion alone.
+    Sharded::BlogPostTag.create!(
+      blog_id: blog_post.blog_id,
+      blog_post_id: blog_post.id,
+      taggable_type: "Sharded::BlogPost",
+      taggable_id: sharded_tags(:long_read_blog_one).id,
+    )
+
+    sql = capture_sql do
+      loaded_tags = blog_post.taggables_with_decoupled_qc.to_a
+      assert_equal expected_tag_ids, loaded_tags.map(&:id).sort
+    end.first
+
+    # Polymorphic source_type through whose source belongs_to carries decoupled
+    # query_constraints (the tenant/shard column). The middle->target join must
+    # scope on blog_id, not just taggable_id, or a row from another shard could
+    # match on id alone (cross-shard scatter).
+    tags_col = Regexp.escape(Sharded::Tag.lease_connection.quote_table_name("sharded_tags.blog_id"))
+    join_col = Regexp.escape(Sharded::BlogPostTag.lease_connection.quote_table_name("sharded_blog_posts_tags.blog_id"))
+    assert_match(/#{tags_col} = #{join_col}/, sql)
+
+    tags_col = Regexp.escape(Sharded::Tag.lease_connection.quote_table_name("sharded_tags.id"))
+    join_col = Regexp.escape(Sharded::BlogPostTag.lease_connection.quote_table_name("sharded_blog_posts_tags.taggable_id"))
+    assert_match(/#{tags_col} = #{join_col}/, sql)
+
+    # The polymorphic source_type must also scope the join on the type
+    # discriminator, so a same-id row of a different taggable_type cannot leak in.
+    type_col = Regexp.escape(Sharded::BlogPostTag.lease_connection.quote_table_name("sharded_blog_posts_tags.taggable_type"))
+    assert_match(/#{type_col} = /, sql)
+  end
+
   def test_using_query_constraints_is_allowed
     assert_nothing_raised do
       Sharded::BlogPost.has_many :qc_configured_comments,

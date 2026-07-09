@@ -20,6 +20,10 @@ module Sharded
     has_many :tags_with_decoupled_qc,
       through: :blog_post_tags_with_decoupled_qc,
       source: :tag_with_decoupled_qc
+    has_many :taggables_with_decoupled_qc,
+      through: :blog_post_tags_with_decoupled_qc,
+      source: :taggable_with_decoupled_qc,
+      source_type: "Sharded::Tag"
 
     has_and_belongs_to_many :tags_with_composite_fk,
       class_name: "Sharded::Tag",
