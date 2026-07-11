@@ -755,6 +755,40 @@ module ActiveRecord
         intent.deliver_result(result, warnings: warnings)
       end
 
+      # Executes +intent+ below the public query pipeline — no logging, query
+      # transformers, transaction bookkeeping, or retries — and materializes
+      # the outcome.
+      def execute_raw_intent(intent) # :nodoc:
+        raw_result = nil
+        begin
+          @lock.synchronize do
+            ensure_connection_ready(allow_retry: intent.allow_retry, materialize_transactions: false)
+            raw_result = perform_query(@raw_connection, intent)
+          end
+        rescue ::RangeError
+          # Re-raised untranslated: the calling pipeline handles RangeError
+          # with the empty-result fast path (see QueryIntent#run_query!).
+          raise
+        rescue => error
+          raise translate_exception_class(error, intent.processed_sql, intent.binds)
+        end
+
+        warnings = begin
+          collect_warnings(raw_result)
+        rescue StandardError
+          nil
+        end
+
+        result = cast_result(raw_result)
+        last_id = begin
+          last_inserted_id(result)
+        rescue StandardError
+          nil
+        end
+
+        [result, warnings, last_id]
+      end
+
       def start_intent_log(intent) # :nodoc:
         return if intent.log_handle
 
