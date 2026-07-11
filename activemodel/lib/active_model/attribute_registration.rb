@@ -40,8 +40,10 @@ module ActiveModel
       end
 
       def attribute_types # :nodoc:
-        @attribute_types ||= _default_attributes.cast_types.tap do |hash|
-          hash.default = Type.default_value
+        @attribute_types || ActiveSupport::Ractors.on_main(self) do
+          @attribute_types ||= _default_attributes.cast_types.tap do |hash|
+            hash.default = Type.default_value
+          end
         end
       end
 

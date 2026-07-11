@@ -289,14 +289,16 @@ module ActiveRecord
 
       # Computes the table name, (re)sets it internally, and returns it.
       def reset_table_name # :nodoc:
-        self.table_name = if self == Base
-          nil
-        elsif abstract_class?
-          superclass.table_name
-        elsif superclass.abstract_class?
-          superclass.table_name || compute_table_name
-        else
-          compute_table_name
+        ActiveSupport::Ractors.on_main(self) do
+          self.table_name = if self == Base
+            nil
+          elsif abstract_class?
+            superclass.table_name
+          elsif superclass.abstract_class?
+            superclass.table_name || compute_table_name
+          else
+            compute_table_name
+          end
         end
       end
 
@@ -510,7 +512,9 @@ module ActiveRecord
       end
 
       def symbol_column_to_string(name_symbol) # :nodoc:
-        @symbol_column_to_string_name_hash ||= column_names.index_by(&:to_sym)
+        @symbol_column_to_string_name_hash || ActiveSupport::Ractors.on_main(self) do
+          @symbol_column_to_string_name_hash ||= column_names.index_by(&:to_sym)
+        end
         @symbol_column_to_string_name_hash[name_symbol]
       end
 

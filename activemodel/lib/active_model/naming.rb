@@ -267,11 +267,13 @@ module ActiveModel
     #   Person.model_name.singular # => "person"
     #   Person.model_name.plural   # => "people"
     def model_name
-      @_model_name ||= begin
-        namespace = module_parents.detect do |n|
-          n.respond_to?(:use_relative_model_naming?) && n.use_relative_model_naming?
+      @_model_name || ActiveSupport::Ractors.on_main(self) do
+        @_model_name ||= begin
+          namespace = module_parents.detect do |n|
+            n.respond_to?(:use_relative_model_naming?) && n.use_relative_model_naming?
+          end
+          ActiveModel::Name.new(self, namespace)
         end
-        ActiveModel::Name.new(self, namespace)
       end
     end
 
