@@ -2,6 +2,7 @@
 
 require "active_support/core_ext/enumerable"
 require "active_support/parameter_filter"
+require "active_support/ractors"
 require "concurrent/map"
 
 module ActiveRecord
@@ -132,11 +133,19 @@ module ActiveRecord
       self.filter_attributes = []
 
       def self.connection_handler
-        ActiveSupport::IsolatedExecutionState[:active_record_connection_handler] || default_connection_handler
+        ActiveSupport::IsolatedExecutionState[:active_record_connection_handler] ||
+          ractor_connection_handler ||
+          default_connection_handler
       end
 
       def self.connection_handler=(handler)
         ActiveSupport::IsolatedExecutionState[:active_record_connection_handler] = handler
+      end
+
+      def self.ractor_connection_handler # :nodoc:
+        unless ActiveSupport::Ractors.main?
+          ConnectionAdapters::RactorConnectionHandler.instance
+        end
       end
 
       def self.asynchronous_queries_session # :nodoc:
