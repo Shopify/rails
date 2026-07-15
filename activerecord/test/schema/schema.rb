@@ -357,12 +357,15 @@ ActiveRecord::Schema.define do
     t.references :parent, polymorphic: true
     t.integer :blog_id
     t.integer :revision
+    t.integer :featured_comment_id
+    t.integer :region_id
   end
 
   create_table :sharded_comments, force: true do |t|
     t.string :body
     t.integer :blog_post_id
     t.integer :blog_id
+    t.integer :region_id
   end
 
   create_table :sharded_tags, force: true do |t|

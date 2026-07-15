@@ -5,6 +5,7 @@ great_comment_blog_post_one:
   body: "I really enjoyed the post!"
   blog_post_id: <%= ActiveRecord::FixtureSet.identify(:great_post_blog_one) %>
   blog_id: <%= ActiveRecord::FixtureSet.identify(:sharded_blog_one) %>
+  region_id: 1
 
 wow_comment_blog_post_one:
   body: "Wow!"
