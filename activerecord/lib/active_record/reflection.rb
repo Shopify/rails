@@ -529,6 +529,7 @@ module ActiveRecord
         @association_foreign_key = nil
         @association_primary_key = nil
 
+
         # If the foreign key is an array, set query constraints options
         if options[:foreign_key].is_a?(Array) && !options[:query_constraints]
           options[:query_constraints] = options.delete(:foreign_key)
@@ -564,9 +565,12 @@ module ActiveRecord
       #   query_constraints: [:blog_id, { id: :blog_post_id }] => [["blog_id", "blog_id"], ["id", "blog_post_id"]]
       def normalized_query_constraints_mapping
         return unless options[:query_constraints]
-        return unless options[:foreign_key] || Array(options[:query_constraints]).any?(Hash)
 
-        @normalized_query_constraints_mapping ||= Array(options[:query_constraints]).flat_map { |element|
+        query_constraints = options[:query_constraints]
+        query_constraints = [query_constraints] unless query_constraints.is_a?(Array)
+        return unless options[:foreign_key] || query_constraints.any?(Hash)
+
+        @normalized_query_constraints_mapping ||= query_constraints.flat_map { |element|
           case element
           when Symbol, String
             [[element.to_s, element.to_s]]
@@ -574,6 +578,15 @@ module ActiveRecord
             element.map { |self_col, target_col| [self_col.to_s, target_col.to_s] }
           end
         }.freeze
+      end
+
+      def join_query_constraints_mapping
+        return unless (mapping = normalized_query_constraints_mapping)
+
+        @join_query_constraints_mapping ||= begin
+          foreign_keys = Array(foreign_key)
+          mapping.uniq.reject { |_, target_column| foreign_keys.include?(target_column) }.freeze
+        end
       end
 
       # The set of columns used to query association targets (loading, preloading).
@@ -597,13 +610,14 @@ module ActiveRecord
         @foreign_key ||= if options[:foreign_key]
           ActiveRecord::Key.for(options[:foreign_key]).name
         elsif options[:query_constraints]
-          qc = Array(options[:query_constraints])
-          if qc.any?(Hash)
+          query_constraints = options[:query_constraints]
+          query_constraints = [query_constraints] unless query_constraints.is_a?(Array)
+          if query_constraints.any?(Hash)
             raise ArgumentError,
               "`query_constraints` with column mapping (Hash) on `#{active_record}.#{macro} :#{name}` " \
               "requires an explicit `foreign_key` option."
           end
-          qc.map { |fk| -fk.to_s.freeze }.freeze
+          query_constraints.map { |fk| -fk.to_s.freeze }.freeze
         else
           derived_fk = derive_foreign_key(infer_from_inverse_of: infer_from_inverse_of)
 
@@ -647,9 +661,9 @@ module ActiveRecord
       end
 
       def join_query_constraints_primary_key(klass = nil)
-        if (mapping = normalized_query_constraints_mapping)
+        if (mapping = join_query_constraints_mapping)
           # target (child) columns: mapping values + foreign_key
-          [*mapping.map(&:last), *Array(foreign_key)].uniq.freeze
+          [*mapping.map(&:last), *Array(foreign_key)].freeze
         else
           query_constraints_foreign_key
         end
@@ -664,9 +678,9 @@ module ActiveRecord
       end
 
       def join_query_constraints_foreign_key
-        if (mapping = normalized_query_constraints_mapping)
+        if (mapping = join_query_constraints_mapping)
           # self (parent) columns: mapping keys + active_record_primary_key
-          [*mapping.map(&:first), *Array(active_record_primary_key)].uniq.freeze
+          [*mapping.map(&:first), *Array(active_record_primary_key)].freeze
         else
           active_record_query_constraints_primary_key
         end
@@ -1058,11 +1072,20 @@ module ActiveRecord
         derive_primary_key(klass) { |model| model.composite_query_constraints_list }
       end
 
+      def join_query_constraints_mapping
+        return unless (mapping = normalized_query_constraints_mapping)
+
+        @join_query_constraints_mapping ||= begin
+          foreign_keys = Array(foreign_key)
+          mapping.uniq.reject { |self_column, _| foreign_keys.include?(self_column) }.freeze
+        end
+      end
+
       def join_query_constraints_primary_key(klass = nil)
-        if (mapping = normalized_query_constraints_mapping)
+        if (mapping = join_query_constraints_mapping)
           # target (parent) columns: mapping values + association_primary_key
           target_klass = polymorphic? ? klass : (klass || self.klass)
-          [*mapping.map(&:last), *Array(association_primary_key(target_klass))].uniq.freeze
+          [*mapping.map(&:last), *Array(association_primary_key(target_klass))].freeze
         else
           polymorphic? ? association_query_constraints_primary_key(klass) : association_query_constraints_primary_key
         end
@@ -1073,9 +1096,9 @@ module ActiveRecord
       end
 
       def join_query_constraints_foreign_key
-        if (mapping = normalized_query_constraints_mapping)
+        if (mapping = join_query_constraints_mapping)
           # self (child) columns: mapping keys + foreign_key
-          [*mapping.map(&:first), *Array(foreign_key)].uniq.freeze
+          [*mapping.map(&:first), *Array(foreign_key)].freeze
         else
           query_constraints_foreign_key
         end

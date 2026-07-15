@@ -1,9 +1,10 @@
 *   Support `query_constraints` on associations, decoupled from `foreign_key`.
 
     `query_constraints` declares *additional* columns to match when querying an
-    association's targets (loading and preloading), layered on top of the foreign
-    key. When both `foreign_key` and `query_constraints` are given, the foreign key
-    handles writes while querying matches on the foreign key plus the extra columns.
+    association's targets (loading, preloading, eager loading, and joins), layered
+    on top of the foreign key. When both `foreign_key` and `query_constraints` are
+    given, the foreign key handles writes while querying matches on the foreign key
+    plus the extra columns.
 
     A column may map to a different name on the other side using a Hash, and
     listing the foreign key itself is allowed (it is de-duplicated):

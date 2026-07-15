@@ -566,8 +566,11 @@ module ActiveRecord
             end
 
             if association.updated?
-              primary_key = Array(reflection.association_primary_key(record.class)).map(&:to_s)
+              primary_key = Array(reflection.association_primary_key(record.class))
               foreign_key = Array(reflection.foreign_key)
+              if primary_key.size != foreign_key.size
+                primary_key = Array(reflection.join_query_constraints_primary_key(record.class))
+              end
 
               primary_key_foreign_key_pairs = primary_key.zip(foreign_key)
               primary_key_foreign_key_pairs.each do |primary_key, foreign_key|

@@ -2318,6 +2318,62 @@ class BelongsToWithDecoupledQueryConstraintsTest < ActiveRecord::TestCase
     assert_match(/#{Regexp.escape(Sharded::Comment.lease_connection.quote_table_name("sharded_comments.id"))} =/, sql)
   end
 
+  def test_belongs_to_with_fk_listed_in_query_constraints_queries_using_base_pk_fk_pair
+    comment = sharded_comments(:great_comment_blog_post_one)
+    expected_blog_post = sharded_blog_posts(:great_post_blog_one)
+
+    sql = capture_sql do
+      assert_equal expected_blog_post, comment.blog_post_with_fk_in_qc
+    end.first
+
+    # The query must use the base PK/FK pair on the target table:
+    # sharded_blog_posts.blog_id and sharded_blog_posts.id.
+    # It must NOT reference sharded_blog_posts.blog_post_id (which is not even
+    # a column on that table) — the FK listed in query_constraints is de-duplicated.
+    assert_match(/#{Regexp.escape(Sharded::BlogPost.lease_connection.quote_table_name("sharded_blog_posts.blog_id"))} =/, sql)
+    assert_match(/#{Regexp.escape(Sharded::BlogPost.lease_connection.quote_table_name("sharded_blog_posts.id"))} =/, sql)
+    assert_no_match(/#{Regexp.escape(Sharded::BlogPost.lease_connection.quote_table_name("sharded_blog_posts.blog_post_id"))} =/, sql)
+  end
+
+  def test_belongs_to_with_bare_hash_query_constraints_loads_correctly
+    blog_post = sharded_blog_posts(:great_post_blog_one)
+    expected_comment = sharded_comments(:great_comment_blog_post_one)
+
+    assert_equal expected_comment.id, blog_post.featured_comment_id
+
+    sql = capture_sql do
+      loaded_comment = blog_post.featured_comment_bare_hash_qc
+      assert_equal expected_comment, loaded_comment
+    end.first
+
+    # A bare Hash { blog_id: :blog_id } normalizes to a single constraint pair,
+    # combined with the foreign_key for the base PK/FK join.
+    assert_match(/#{Regexp.escape(Sharded::Comment.lease_connection.quote_table_name("sharded_comments.blog_id"))} =/, sql)
+    assert_match(/#{Regexp.escape(Sharded::Comment.lease_connection.quote_table_name("sharded_comments.id"))} =/, sql)
+  end
+
+  def test_changing_query_constraint_column_invalidates_cached_belongs_to
+    comment = sharded_comments(:great_comment_blog_post_one)
+    expected_blog_post = sharded_blog_posts(:great_post_blog_one)
+
+    # Load the association once — caches the target and records stale_state.
+    assert_equal expected_blog_post, comment.blog_post_with_decoupled_qc
+    assert_predicate comment.association(:blog_post_with_decoupled_qc), :loaded?
+
+    # Change ONLY the query-constraint column (blog_id), NOT the foreign_key
+    # (blog_post_id). The cached target must become stale.
+    comment.blog_id = comment.blog_id + 1_000_000
+
+    # The reader must reload — issuing exactly one query — rather than serving
+    # the stale cache.
+    assert_queries_count(1) do
+      comment.blog_post_with_decoupled_qc
+    end
+
+    # With a non-existent blog_id the query finds no matching BlogPost.
+    assert_nil comment.blog_post_with_decoupled_qc
+  end
+
   private
     def assert_sql_join_constraint(sql, left_model, left_column_name, right_model, right_column_name)
       left_column = Regexp.escape(left_model.lease_connection.quote_table_name(left_column_name))

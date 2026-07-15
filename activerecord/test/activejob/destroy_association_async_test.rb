@@ -169,12 +169,20 @@ class DestroyAssociationAsyncTest < ActiveRecord::TestCase
   end
 
   test "belongs to associated by composite primary key" do
-    blog = Sharded::Blog.create!
-    blog_post = Sharded::BlogPostDestroyAsync.create!(blog_id: blog.id)
+    blog = Sharded::Blog.create!(id: 100)
+    blog_post = Sharded::BlogPostDestroyAsync.create!(id: 200, blog_id: blog.id)
     comment = Sharded::CommentDestroyAsync.create!(body: "Great post! :clap:")
 
     comment.blog_post = blog_post
     comment.save!
+
+    # With a standalone symbol-array query_constraints belongs_to, the owner's
+    # [blog_id, blog_post_id] must map to the target's [blog_id, id]. Using
+    # distinct explicit IDs (blog.id=100, blog_post.id=200) guarantees a
+    # misaligned replace_keys/autosave cannot hide behind equal values when this
+    # file runs in isolation.
+    assert_equal blog_post.blog_id, comment.blog_id
+    assert_equal blog_post.id, comment.blog_post_id
 
     assert_enqueued_jobs 1, only: ActiveRecord::DestroyAssociationAsyncJob do
       comment.destroy

@@ -803,6 +803,50 @@ class ReflectionTest < ActiveRecord::TestCase
     assert_equal ["blog_id", "blog_post_id"], reflection.query_constraints_foreign_key
   end
 
+  def test_belongs_to_query_constraints_allows_fk_listed_keeps_pairs_aligned
+    # Listing the writable foreign_key in query_constraints must not misalign the
+    # join key arrays. The FK is de-duplicated, so the belongs_to query still uses
+    # the base PK/FK pair: target [blog_id, id] ↔ owner [blog_id, blog_post_id].
+    reflection = ActiveRecord::Reflection.create(
+      :belongs_to, :blog_post, nil,
+      { foreign_key: :blog_post_id, query_constraints: [:blog_id, :blog_post_id], class_name: "Sharded::BlogPost" },
+      Sharded::Comment
+    )
+
+    assert_equal ["blog_id", "id"], reflection.join_query_constraints_primary_key
+    assert_equal ["blog_id", "blog_post_id"], reflection.join_query_constraints_foreign_key
+  end
+
+  def test_normalized_query_constraints_mapping_with_bare_hash
+    # A bare Hash (not wrapped in an Array) normalizes the same as the array form.
+    reflection = Sharded::BlogPost.reflect_on_association(:featured_comment_bare_hash_qc)
+
+    assert_equal [["blog_id", "blog_id"]], reflection.normalized_query_constraints_mapping
+  end
+
+  def test_belongs_to_bare_hash_query_constraints_join_keys_aligned
+    reflection = Sharded::BlogPost.reflect_on_association(:featured_comment_bare_hash_qc)
+
+    # target (Comment) columns: blog_id (from mapping) + id (association_primary_key)
+    assert_equal ["blog_id", "id"], reflection.join_query_constraints_primary_key
+    # self (BlogPost) columns: blog_id (from mapping) + featured_comment_id (foreign_key)
+    assert_equal ["blog_id", "featured_comment_id"], reflection.join_query_constraints_foreign_key
+  end
+
+  def test_belongs_to_standalone_symbol_array_query_constraints_returns_nil_mapping
+    # Standalone symbol-array query_constraints (no explicit foreign_key, no Hash)
+    # is the legacy form: normalized mapping returns nil, foreign_key is derived
+    # from the query_constraints array itself.
+    reflection = ActiveRecord::Reflection.create(
+      :belongs_to, :blog_post, nil,
+      { query_constraints: [:blog_id, :blog_post_id], class_name: "Sharded::BlogPost" },
+      Sharded::Comment
+    )
+
+    assert_nil reflection.normalized_query_constraints_mapping
+    assert_equal ["blog_id", "blog_post_id"], reflection.foreign_key
+  end
+
   def test_counter_cache_column_defaults_when_counter_cache_is_true
     model = Class.new(ActiveRecord::Base) do
       def self.name = "CounterCacheTrueAuthor"

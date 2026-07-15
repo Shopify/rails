@@ -509,6 +509,41 @@ class AssociationsTest < ActiveRecord::TestCase
     assert_match(/#{tags_col} = #{join_col}/, sql)
   end
 
+  def test_has_many_through_with_decoupled_query_constraints_disable_joins_uses_all_constraints_in_each_hop
+    blog_post = sharded_blog_posts(:great_post_blog_one)
+    expected_tag_ids = [
+      sharded_tags(:short_read_blog_one).id,
+      sharded_tags(:technical_blog_one).id,
+    ].sort
+
+    sqls = capture_sql do
+      loaded_tags = blog_post.tags_with_decoupled_qc_without_joins.to_a
+      assert_equal expected_tag_ids, loaded_tags.map(&:id).sort
+    end
+
+    # disable_joins issues one query per hop: the through table, then the target.
+    assert_equal 2, sqls.size
+
+    join_blog_id_col   = Sharded::BlogPostTag.lease_connection.quote_table_name("sharded_blog_posts_tags.blog_id")
+    join_blog_post_col = Sharded::BlogPostTag.lease_connection.quote_table_name("sharded_blog_posts_tags.blog_post_id")
+    tags_blog_id_col   = Sharded::Tag.lease_connection.quote_table_name("sharded_tags.blog_id")
+    tags_id_col        = Sharded::Tag.lease_connection.quote_table_name("sharded_tags.id")
+
+    through_sql = sqls.find { |sql| sql.include?(join_blog_id_col) }
+    target_sql  = sqls.find { |sql| sql.include?(tags_blog_id_col) }
+    assert(through_sql, "through-table query missing blog_id constraint in: #{sqls.inspect}")
+    assert(target_sql,  "target query missing blog_id constraint in: #{sqls.inspect}")
+
+    # The through-table hop must scope on blog_id (the decoupled query
+    # constraint) in addition to blog_post_id, not just blog_post_id alone.
+    assert_match(/#{Regexp.escape(join_blog_id_col)} =/, through_sql)
+    assert_match(/#{Regexp.escape(join_blog_post_col)} =/, through_sql)
+
+    # The target hop must also scope on blog_id in addition to id.
+    assert_match(/#{Regexp.escape(tags_blog_id_col)} =/, target_sql)
+    assert_match(/#{Regexp.escape(tags_id_col)} =/, target_sql)
+  end
+
   def test_using_query_constraints_is_allowed
     assert_nothing_raised do
       Sharded::BlogPost.has_many :qc_configured_comments,

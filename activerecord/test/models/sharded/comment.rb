@@ -13,6 +13,10 @@ module Sharded
       query_constraints: :blog_id,
       inverse_of: :comments_with_inverse
     belongs_to :blog_post_with_decoupled_qc, class_name: "Sharded::BlogPost", foreign_key: :blog_post_id, query_constraints: :blog_id
+    belongs_to :blog_post_with_fk_in_qc,
+      class_name: "Sharded::BlogPost",
+      foreign_key: :blog_post_id,
+      query_constraints: [:blog_id, :blog_post_id]
     belongs_to :blog_post_composite_fk_with_qc,
       class_name: "Sharded::BlogPost",
       foreign_key: [:blog_id, :blog_post_id],
