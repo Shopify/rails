@@ -393,12 +393,14 @@ module ActiveRecord
         pool.with_connection do |connection|
           tables = tables_to_cache(pool)
           tables.each { |table| @data_sources[deep_deduplicate(table)] = true }
+          columns_by_table = connection.columns_for_tables(tables)
           indexes_by_table = connection.indexes_for_tables(tables)
           tables.each do |table|
             table = deep_deduplicate(table)
             primary_keys(pool, table)
-            columns(pool, table)
-            columns_hash(pool, table)
+            table_columns = deep_deduplicate(columns_by_table[table.to_s])
+            @columns[table] = table_columns
+            @columns_hash[table] = table_columns.index_by(&:name).freeze
             @indexes[table] = deep_deduplicate(indexes_by_table[table.to_s])
           end
 
