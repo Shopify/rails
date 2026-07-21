@@ -1,3 +1,10 @@
+*   Use `information_schema` to query MySQL indexes.
+
+    Results will now be returned in alphabetical order by index name, which
+    may result in a one-time reordering of indexes in `schema.rb`.
+
+    *Hartley McGuire*
+
 *   Deprecate the `insert_returning` option in PostgreSQL database
     configurations, and the `PostgreSQLAdapter#use_insert_returning?` method.
 
