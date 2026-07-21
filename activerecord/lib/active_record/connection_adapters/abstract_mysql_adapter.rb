@@ -1116,7 +1116,23 @@ module ActiveRecord
         end
 
         def column_definitions(table_name) # :nodoc:
-          fields = query_all("SHOW FULL FIELDS FROM #{quote_table_name(table_name)}")
+          scope = quoted_scope(table_name)
+          fields = query_all(<<~SQL)
+            SELECT COLUMN_NAME AS 'Field',
+                   COLUMN_TYPE AS 'Type',
+                   COLLATION_NAME AS 'Collation',
+                   IS_NULLABLE AS 'Null',
+                   COLUMN_KEY AS 'Key',
+                   COLUMN_DEFAULT AS 'Default',
+                   EXTRA AS 'Extra',
+                   PRIVILEGES AS 'Privileges',
+                   COLUMN_COMMENT AS 'Comment'
+            FROM information_schema.columns
+            WHERE table_schema = #{scope[:schema]} AND table_name = #{scope[:name]}
+            ORDER BY ORDINAL_POSITION
+          SQL
+
+          raise ActiveRecord::StatementInvalid.new("Could not find table '#{table_name}'", connection_pool: @pool) if fields.empty?
 
           update_fields_for_mariadb(table_name, fields) if mariadb?
 
