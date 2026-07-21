@@ -1,3 +1,10 @@
+*   Return `[]`/`nil` instead of raising when querying primary keys for a
+    missing PostgreSQL table.
+
+    Aligns PostgreSQL with the MySQL adapter's existing behavior.
+
+    *Hartley McGuire*
+
 *   Batch schema cache dump queries for MySQL and PostgreSQL.
 
     `SchemaCache#add_all` now loads primary keys, columns, and indexes for

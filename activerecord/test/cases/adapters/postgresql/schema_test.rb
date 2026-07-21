@@ -291,6 +291,40 @@ class SchemaTest < ActiveRecord::PostgreSQLTestCase
     end
   end
 
+  def test_primary_keys_for_multiple_tables
+    @connection.create_table(:pg_pk_multi_a, primary_key: :custom_id) { |t| t.string :name }
+    @connection.create_table(:pg_pk_multi_b) { |t| t.string :name }
+    @connection.execute "CREATE TABLE pg_pk_multi_c (a int NOT NULL, b int NOT NULL, c int NOT NULL, PRIMARY KEY (c, a, b))"
+    @connection.create_table(:pg_pk_multi_none, id: false) { |t| t.string :name }
+
+    # A single table name returns an Array of primary key columns (backward compatible).
+    assert_equal %w[custom_id], @connection.primary_keys("pg_pk_multi_a")
+    assert_equal %w[id], @connection.primary_keys("pg_pk_multi_b")
+    # Composite key columns arrive in PRIMARY KEY ordinal order, not column order.
+    assert_equal %w[c a b], @connection.primary_keys("pg_pk_multi_c")
+    # A table without a primary key returns an empty Array, not a missing key.
+    assert_equal [], @connection.primary_keys("pg_pk_multi_none")
+
+    # primary_keys_for_tables returns a Hash keyed by the requested table name.
+    multi = @connection.primary_keys_for_tables([
+      "pg_pk_multi_a", "pg_pk_multi_b", "pg_pk_multi_c", "pg_pk_multi_none",
+      "#{SCHEMA_NAME}.#{PK_TABLE_NAME}",
+    ])
+    assert_kind_of Hash, multi
+    assert_equal %w[pg_pk_multi_a pg_pk_multi_b pg_pk_multi_c pg_pk_multi_none test_schema.table_with_pk], multi.keys.sort
+    assert_equal %w[custom_id], multi["pg_pk_multi_a"]
+    assert_equal %w[id], multi["pg_pk_multi_b"]
+    assert_equal %w[c a b], multi["pg_pk_multi_c"]
+    assert_equal [], multi["pg_pk_multi_none"]
+    # A schema-qualified request is keyed by the requested string, not the relname.
+    assert_equal %w[id], multi["#{SCHEMA_NAME}.#{PK_TABLE_NAME}"]
+  ensure
+    @connection.drop_table :pg_pk_multi_a, if_exists: true
+    @connection.drop_table :pg_pk_multi_b, if_exists: true
+    @connection.drop_table :pg_pk_multi_c, if_exists: true
+    @connection.drop_table :pg_pk_multi_none, if_exists: true
+  end
+
   def test_with_schema_prefixed_table_name
     assert_nothing_raised do
       assert_equal COLUMNS, columns("#{SCHEMA_NAME}.#{TABLE_NAME}")
