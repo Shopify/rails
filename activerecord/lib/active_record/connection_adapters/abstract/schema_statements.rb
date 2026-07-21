@@ -161,6 +161,12 @@ module ActiveRecord
         pk
       end
 
+      def primary_keys_for_tables(table_names) # :nodoc:
+        table_names.each_with_object({}) do |table_name, hash|
+          hash[table_name.to_s] = primary_keys(table_name)
+        end
+      end
+
       # Creates a new table with the name +table_name+. +table_name+ may either
       # be a String or a Symbol.
       #

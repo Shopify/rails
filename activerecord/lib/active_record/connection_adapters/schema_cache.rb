@@ -422,11 +422,15 @@ module ActiveRecord
       private
         def add_tables(pool, table_names)
           pool.with_connection do |connection|
+            primary_keys_by_table = connection.primary_keys_for_tables(table_names)
             columns_by_table = connection.columns_for_tables(table_names)
             indexes_by_table = connection.indexes_for_tables(table_names)
 
             table_names.each do |table|
-              primary_keys(pool, table)
+              table_primary_keys = primary_keys_by_table[table.to_s]
+              # Mirrors #primary_key, unwraps singular keys.
+              table_primary_keys = table_primary_keys.size > 1 ? table_primary_keys : table_primary_keys.first
+              @primary_keys[deep_deduplicate(table)] = deep_deduplicate(table_primary_keys)
               table_columns = deep_deduplicate(columns_by_table.fetch(table.to_s))
               @columns[deep_deduplicate(table)] = table_columns
               @columns_hash[deep_deduplicate(table)] = table_columns.index_by(&:name).freeze

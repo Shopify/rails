@@ -170,6 +170,58 @@ module ActiveRecord
         @connection.drop_table :cols_multi_b, if_exists: true
       end
 
+      def test_primary_keys_for_multiple_tables
+        @connection.create_table(:pk_multi_a, primary_key: :custom_id) { |t| t.string :name }
+        @connection.create_table(:pk_multi_b) { |t| t.string :name }
+        @connection.execute "CREATE TABLE pk_multi_c (a int NOT NULL, b int NOT NULL, c int NOT NULL, PRIMARY KEY (c, a, b))"
+        @connection.create_table(:pk_multi_none, id: false) { |t| t.string :name }
+
+        # A single table name returns an Array of primary key columns (backward compatible).
+        assert_equal %w[custom_id], @connection.primary_keys("pk_multi_a")
+        assert_equal %w[id], @connection.primary_keys("pk_multi_b")
+        # Composite key columns arrive in PRIMARY KEY ordinal order (seq_in_index),
+        # not the table's column order.
+        assert_equal %w[c a b], @connection.primary_keys("pk_multi_c")
+        # A table without a primary key returns an empty Array, not a missing key.
+        assert_equal [], @connection.primary_keys("pk_multi_none")
+
+        # primary_keys_for_tables returns a Hash of table name => Array of pk columns.
+        multi = @connection.primary_keys_for_tables(["pk_multi_a", "pk_multi_b", "pk_multi_c", "pk_multi_none"])
+        assert_kind_of Hash, multi
+        assert_equal %w[pk_multi_a pk_multi_b pk_multi_c], multi.keys.sort
+        assert_equal %w[custom_id], multi["pk_multi_a"]
+        assert_equal %w[id], multi["pk_multi_b"]
+        assert_equal %w[c a b], multi["pk_multi_c"]
+        # No primary key => absent from the hash; the default-proc returns [] on
+        # access (so the cache reduces it to nil, as #primary_key does).
+        assert_not multi.key?("pk_multi_none")
+        assert_equal [], multi["pk_multi_none"]
+      ensure
+        @connection.drop_table :pk_multi_a, if_exists: true
+        @connection.drop_table :pk_multi_b, if_exists: true
+        @connection.drop_table :pk_multi_c, if_exists: true
+        @connection.drop_table :pk_multi_none, if_exists: true
+      end
+
+      def test_primary_keys_for_multiple_tables_with_qualified_and_unqualified_names
+        @connection.create_table(:pk_mix_a) { |t| t.string :name }
+        @connection.create_table("#{@db_name}.pk_mix_b") { |t| t.string :other }
+        @connection.add_index :pk_mix_a, :name, name: "pk_mix_a_name"
+        @connection.add_index "#{@db_name}.pk_mix_b", :other, name: "pk_mix_b_other"
+
+        # Mixing a schema-qualified name with an unqualified one yields a
+        # multi-clause (OR) scope. `index_name = 'PRIMARY' AND <scope>` must
+        # filter every clause; without parenthesizing the scope, AND binds
+        # only to the first clause and the other table's non-primary indexes
+        # leak in as primary key columns.
+        multi = @connection.primary_keys_for_tables(["#{@db_name}.pk_mix_b", :pk_mix_a])
+        assert_equal %w[id], multi["pk_mix_b"]
+        assert_equal %w[id], multi["pk_mix_a"]
+      ensure
+        @connection.drop_table :pk_mix_a, if_exists: true
+        @connection.drop_table "#{@db_name}.pk_mix_b", if_exists: true
+      end
+
       unless mysql_enforcing_gtid_consistency?
         def test_drop_temporary_table
           @connection.transaction do

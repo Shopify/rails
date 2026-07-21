@@ -690,17 +690,23 @@ module ActiveRecord
 
       def primary_keys(table_name) # :nodoc:
         raise ArgumentError unless table_name.present?
+        primary_keys_for_tables([table_name]).each_value.first || []
+      end
 
-        scope = quoted_scope(table_name)
+      def primary_keys_for_tables(table_names) # :nodoc:
+        return {} if table_names.empty?
 
-        query_values(<<~SQL)
-          SELECT column_name
+        result = query_all(<<~SQL)
+          SELECT table_name AS 'table_name', column_name AS 'column_name'
           FROM information_schema.statistics
           WHERE index_name = 'PRIMARY'
-            AND table_schema = #{scope[:schema]}
-            AND table_name = #{scope[:name]}
-          ORDER BY seq_in_index
+            AND (#{statistics_table_scope_sql(table_names)})
+          ORDER BY table_name, seq_in_index
         SQL
+
+        result.each_with_object(Hash.new { |h, k| h[k] = [] }) do |row, primary_keys_by_table|
+          primary_keys_by_table[row["table_name"]] << row["column_name"]
+        end
       end
 
       def case_sensitive_comparison(attribute, value) # :nodoc:
