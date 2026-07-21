@@ -119,6 +119,12 @@ module ActiveRecord
         end
       end
 
+      def columns_for_tables(table_names) # :nodoc:
+        table_names.each_with_object({}) do |table_name, hash|
+          hash[table_name.to_s] = columns(table_name)
+        end
+      end
+
       # Checks to see if a column exists in a given table.
       #
       #   # Check a column exists
