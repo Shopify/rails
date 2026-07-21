@@ -225,7 +225,15 @@ module ActiveRecord
           def new_column_from_field(table_name, field, _definitions)
             type_metadata = fetch_type_metadata(field["Type"], field["Extra"])
             default, default_function = field["Default"], nil
-
+            # MariaDB reports the COLUMN_DEFAULT of a nullable column with no
+            # default as the string "NULL" rather than SQL NULL; normalize it so
+            # the column is treated as having no default. MySQL already returns
+            # SQL NULL for a no-default column, and leaves a literal "NULL"
+            # string default unquoted, so this must be MariaDB-only — otherwise
+            # MySQL's literal "NULL" defaults would be wiped to nil. A literal
+            # "NULL" string default on MariaDB is quoted ('NULL') and is handled
+            # by the strip branch below.
+            default = nil if mariadb? && default == "NULL"
             if type_metadata.type == :datetime && /\ACURRENT_TIMESTAMP(?:\([0-6]?\))?\z/i.match?(default)
               default = "#{default} ON UPDATE #{default}" if /on update CURRENT_TIMESTAMP/i.match?(field["Extra"])
               default, default_function = nil, default
@@ -237,9 +245,15 @@ module ActiveRecord
                 default = default.gsub("\\'", "'")
                 default, default_function = nil, default
               end
-            elsif type_metadata.type == :text && default&.start_with?("'")
-              # strip and unescape quotes
-              default = default[1...-1].gsub("\\'", "'")
+            elsif mariadb? && default&.start_with?("'")
+              # MariaDB quotes string literal defaults in information_schema
+              # COLUMN_DEFAULT (e.g. `'abc'`, `'O''Connor'`) and escapes
+              # embedded single quotes — by doubling them in varchar defaults
+              # (`''`) but with a backslash in text defaults (`\'`). MySQL leaves
+              # string defaults unquoted, so this only runs on MariaDB. Strip the
+              # wrapping quotes and undo both escape forms so the default matches
+              # what SHOW FULL FIELDS reported.
+              default = default[1...-1].gsub("''", "'").gsub("\\'", "'")
             end
 
             MySQL::Column.new(

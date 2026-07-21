@@ -182,6 +182,28 @@ class MysqlDefaultExpressionTest < ActiveRecord::TestCase
       end
     end
 
+    test "literal NULL string default is not mistaken for no default" do
+      connection = ActiveRecord::Base.lease_connection
+      connection.create_table :default_null_string, force: true do |t|
+        t.string :name, default: "NULL"
+      end
+      column = connection.columns(:default_null_string).find { |c| c.name == "name" }
+      assert_equal "NULL", column.default
+    ensure
+      connection&.drop_table :default_null_string, if_exists: true
+    end
+
+    test "string default containing a single quote is unescaped correctly" do
+      connection = ActiveRecord::Base.lease_connection
+      connection.create_table :default_quote_string, force: true do |t|
+        t.string :name, default: "O'Connor"
+      end
+      column = connection.columns(:default_quote_string).find { |c| c.name == "name" }
+      assert_equal "O'Connor", column.default
+    ensure
+      connection&.drop_table :default_quote_string, if_exists: true
+    end
+
     test "schema dump datetime includes default expression" do
       output = dump_table_schema("datetime_defaults")
       assert_match %r/t\.datetime\s+"modified_datetime",\s+precision: nil,\s+default: -> { "CURRENT_TIMESTAMP(?:\(\))?" }/i, output
