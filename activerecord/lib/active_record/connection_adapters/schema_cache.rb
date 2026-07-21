@@ -322,7 +322,10 @@ module ActiveRecord
       def add(pool, table_name)
         pool.with_connection do
           if data_source_exists?(pool, table_name)
-            add_tables(pool, [table_name])
+            primary_keys(pool, table_name)
+            columns(pool, table_name)
+            columns_hash(pool, table_name)
+            indexes(pool, table_name)
           end
         end
       end

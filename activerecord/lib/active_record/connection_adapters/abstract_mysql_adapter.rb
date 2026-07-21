@@ -1116,8 +1116,15 @@ module ActiveRecord
         end
 
         def column_definitions(table_name) # :nodoc:
-          scope = quoted_scope(table_name)
-          fields = query_all(<<~SQL)
+          fields = column_definitions_for_tables([table_name]).each_value.first
+          raise ActiveRecord::StatementInvalid.new("Could not find table '#{table_name}'", connection_pool: @pool) unless fields
+          fields
+        end
+
+        def column_definitions_for_tables(table_names) # :nodoc:
+          return {} if table_names.empty?
+
+          result = query_all(<<~SQL)
             SELECT COLUMN_NAME AS 'Field',
                    COLUMN_TYPE AS 'Type',
                    COLLATION_NAME AS 'Collation',
@@ -1126,17 +1133,24 @@ module ActiveRecord
                    COLUMN_DEFAULT AS 'Default',
                    EXTRA AS 'Extra',
                    PRIVILEGES AS 'Privileges',
-                   COLUMN_COMMENT AS 'Comment'
+                   COLUMN_COMMENT AS 'Comment',
+                   TABLE_NAME AS 'table_name'
             FROM information_schema.columns
-            WHERE table_schema = #{scope[:schema]} AND table_name = #{scope[:name]}
-            ORDER BY ORDINAL_POSITION
+            WHERE #{statistics_table_scope_sql(table_names)}
+            ORDER BY table_name, ORDINAL_POSITION
           SQL
 
-          raise ActiveRecord::StatementInvalid.new("Could not find table '#{table_name}'", connection_pool: @pool) if fields.empty?
+          fields_by_table = result.each_with_object(Hash.new { |h, k| h[k] = [] }) do |row, hash|
+            hash[row.delete("table_name")] << row
+          end
 
-          update_fields_for_mariadb(fields) if mariadb?
+          if mariadb?
+            fields_by_table.each_value do |fields|
+              update_fields_for_mariadb(fields)
+            end
+          end
 
-          fields
+          fields_by_table
         end
 
         def update_fields_for_mariadb(fields)

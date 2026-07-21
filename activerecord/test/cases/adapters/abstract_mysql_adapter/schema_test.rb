@@ -149,6 +149,27 @@ module ActiveRecord
         @connection.drop_table "#{@db_name}.idx_mix_b", if_exists: true
       end
 
+      def test_columns_for_multiple_tables
+        @connection.create_table(:cols_multi_a) { |t| t.string :title; t.integer :counter }
+        @connection.create_table(:cols_multi_b) { |t| t.string :name; t.text :body }
+
+        # A single table name returns an Array of columns (backward compatible).
+        assert_kind_of Array, @connection.columns("cols_multi_a")
+
+        # columns_for_tables returns a Hash of table name => Array of columns,
+        # matching #columns for each table (names and sql_types).
+        multi = @connection.columns_for_tables(["cols_multi_a", "cols_multi_b"])
+        assert_kind_of Hash, multi
+        assert_equal %w[cols_multi_a cols_multi_b], multi.keys.sort
+
+        profile = ->(cols) { cols.map { |c| [c.name, c.sql_type] } }
+        assert_equal profile.call(@connection.columns("cols_multi_a")), profile.call(multi["cols_multi_a"])
+        assert_equal profile.call(@connection.columns("cols_multi_b")), profile.call(multi["cols_multi_b"])
+      ensure
+        @connection.drop_table :cols_multi_a, if_exists: true
+        @connection.drop_table :cols_multi_b, if_exists: true
+      end
+
       unless mysql_enforcing_gtid_consistency?
         def test_drop_temporary_table
           @connection.transaction do
