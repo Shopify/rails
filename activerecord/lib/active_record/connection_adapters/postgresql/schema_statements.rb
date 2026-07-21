@@ -615,6 +615,15 @@ module ActiveRecord
           result_by_table
         end
 
+        def columns_for_tables(table_names) # :nodoc:
+          definitions_by_table = column_definitions_for_tables(table_names)
+          definitions_by_table.each_with_object({}) do |(table, definitions), hash|
+            hash[table] = definitions.map do |field|
+              new_column_from_field(table, field, definitions)
+            end
+          end
+        end
+
         # Renames a table.
         # Also renames a table's primary key sequence if the sequence name exists and
         # matches the Active Record default.
@@ -1437,7 +1446,7 @@ module ActiveRecord
           # a missing relation instead of raising — so one bad name can't fail
           # the whole batch.
           def to_regclass_array_sql(table_names)
-            names_sql = table_names.map { |name| quote(name.to_s) }.join(", ")
+            names_sql = table_names.map { |name| quote(quote_table_name(name)) }.join(", ")
             "ANY(ARRAY(SELECT to_regclass(x)::oid FROM unnest(ARRAY[#{names_sql}]) AS x))"
           end
 

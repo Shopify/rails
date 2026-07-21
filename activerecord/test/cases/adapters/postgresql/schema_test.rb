@@ -325,6 +325,30 @@ class SchemaTest < ActiveRecord::PostgreSQLTestCase
     @connection.drop_table :pg_pk_multi_none, if_exists: true
   end
 
+  def test_columns_for_multiple_tables
+    @connection.create_table(:pg_cols_multi_a) { |t| t.string :title; t.integer :counter }
+    @connection.create_table(:pg_cols_multi_b) { |t| t.string :name; t.text :body }
+
+    # A single table name returns an Array of columns (backward compatible).
+    assert_kind_of Array, @connection.columns("pg_cols_multi_a")
+
+    # columns_for_tables returns a Hash of table name => Array of columns,
+    # matching #columns for each table (names and sql_types).
+    multi = @connection.columns_for_tables(["pg_cols_multi_a", "pg_cols_multi_b", "#{SCHEMA_NAME}.#{TABLE_NAME}"])
+    assert_kind_of Hash, multi
+    assert_equal %w[pg_cols_multi_a pg_cols_multi_b test_schema.things], multi.keys.sort
+    assert_equal 6, multi["#{SCHEMA_NAME}.#{TABLE_NAME}"].size
+
+    profile = ->(cols) { cols.map { |c| [c.name, c.sql_type] } }
+    assert_equal profile.call(@connection.columns("pg_cols_multi_a")), profile.call(multi["pg_cols_multi_a"])
+    assert_equal profile.call(@connection.columns("pg_cols_multi_b")), profile.call(multi["pg_cols_multi_b"])
+    # A schema-qualified request is keyed by the requested string and matches #columns.
+    assert_equal profile.call(@connection.columns("#{SCHEMA_NAME}.#{TABLE_NAME}")), profile.call(multi["#{SCHEMA_NAME}.#{TABLE_NAME}"])
+  ensure
+    @connection.drop_table :pg_cols_multi_a, if_exists: true
+    @connection.drop_table :pg_cols_multi_b, if_exists: true
+  end
+
   def test_with_schema_prefixed_table_name
     assert_nothing_raised do
       assert_equal COLUMNS, columns("#{SCHEMA_NAME}.#{TABLE_NAME}")
