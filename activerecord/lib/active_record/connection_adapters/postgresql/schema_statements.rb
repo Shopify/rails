@@ -585,16 +585,34 @@ module ActiveRecord
         end
 
         def primary_keys(table_name) # :nodoc:
-          query_values(<<~SQL)
-            SELECT a.attname
+          primary_keys_for_tables([table_name])[table_name.to_s]
+        end
+
+        def primary_keys_for_tables(table_names) # :nodoc:
+          return {} if table_names.empty?
+
+          result_by_table = table_names.each_with_object({}) do |name, h|
+            h[name.to_s] = []
+          end
+          key_for = table_key_lookup(table_names)
+
+          result = query_all(<<~SQL)
+            SELECT n.nspname AS nspname, t.relname AS relname, a.attname AS column_name
             FROM pg_index i
-            JOIN pg_attribute a
-              ON a.attrelid = i.indrelid
-              AND a.attnum = ANY(i.indkey)
-            WHERE i.indrelid = #{quote(quote_table_name(table_name))}::regclass
-              AND i.indisprimary
+            INNER JOIN pg_class t ON t.oid = i.indrelid
+            INNER JOIN pg_namespace n ON n.oid = t.relnamespace
+            INNER JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
+            WHERE i.indisprimary
+              AND i.indrelid = #{to_regclass_array_sql(table_names)}
             ORDER BY array_position(i.indkey, a.attnum)
           SQL
+
+          result.each do |row|
+            key = key_for.call(row["nspname"], row["relname"])
+            result_by_table[key] << row["column_name"] if key
+          end
+
+          result_by_table
         end
 
         # Renames a table.
@@ -1409,6 +1427,37 @@ module ActiveRecord
           def extract_schema_qualified_name(string)
             name = Utils.extract_schema_qualified_name(string.to_s)
             [name.schema, name.identifier]
+          end
+
+          # Build a SQL expression scoping a relation-OID column (e.g.
+          # +i.indrelid+, +a.attrelid+) to the given table names via
+          # to_regclass. Each name resolves the way casting to regclass does
+          # (an unqualified name picks the first schema on the search path; a
+          # qualified name pins its schema), but to_regclass returns NULL for
+          # a missing relation instead of raising — so one bad name can't fail
+          # the whole batch.
+          def to_regclass_array_sql(table_names)
+            names_sql = table_names.map { |name| quote(name.to_s) }.join(", ")
+            "ANY(ARRAY(SELECT to_regclass(x)::oid FROM unnest(ARRAY[#{names_sql}]) AS x))"
+          end
+
+          # Returns a proc mapping a row's (namespace, relname) back to the
+          # requested table-name string, so results are keyed the way
+          # SchemaCache#add_tables looks them up (by +table.to_s+). Qualified
+          # requests match on (schema, relname); unqualified requests match on
+          # relname alone (resolved via the search path).
+          def table_key_lookup(table_names)
+            qualified = {}
+            unqualified = {}
+            table_names.each do |name|
+              schema, identifier = extract_schema_qualified_name(name)
+              if schema
+                qualified[[schema, identifier]] = name.to_s
+              else
+                unqualified[identifier] = name.to_s
+              end
+            end
+            ->(nsp, rel) { qualified[[nsp, rel]] || unqualified[rel] }
           end
 
           def decode_string_array(value)
