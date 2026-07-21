@@ -615,6 +615,15 @@ module ActiveRecord
           result_by_table
         end
 
+        def columns_for_tables(table_names) # :nodoc:
+          definitions_by_table = column_definitions_for_tables(table_names)
+          definitions_by_table.each_with_object({}) do |(table, definitions), hash|
+            hash[table] = definitions.map do |field|
+              new_column_from_field(table, field, definitions)
+            end
+          end
+        end
+
         # Renames a table.
         # Also renames a table's primary key sequence if the sequence name exists and
         # matches the Active Record default.
