@@ -83,6 +83,12 @@ module ActiveRecord
         raise NotImplementedError, "#indexes is not implemented"
       end
 
+      def indexes_for_tables(table_names) # :nodoc:
+        table_names.each_with_object({}) do |table_name, hash|
+          hash[table_name.to_s] = indexes(table_name)
+        end
+      end
+
       # Checks to see if an index exists on a table for a given index definition.
       #
       #   # Check an index exists

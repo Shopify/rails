@@ -418,12 +418,14 @@ module ActiveRecord
 
       private
         def add_tables(pool, table_names)
-          pool.with_connection do
+          pool.with_connection do |connection|
+            indexes_by_table = connection.indexes_for_tables(table_names)
+
             table_names.each do |table|
               primary_keys(pool, table)
               columns(pool, table)
               columns_hash(pool, table)
-              indexes(pool, table)
+              @indexes[deep_deduplicate(table)] = deep_deduplicate(indexes_by_table[table.to_s])
             end
           end
         end

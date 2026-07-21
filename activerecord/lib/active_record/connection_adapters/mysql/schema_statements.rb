@@ -6,10 +6,11 @@ module ActiveRecord
       module SchemaStatements # :nodoc:
         # Returns an array of indexes for the given table.
         def indexes(table_name)
-          indexes = []
-          current_index = nil
+          indexes_for_tables([table_name]).each_value.first || []
+        end
 
-          scope = quoted_scope(table_name)
+        def indexes_for_tables(table_names) # :nodoc:
+          return {} if table_names.empty?
 
           optional_columns = +""
           optional_columns << ", EXPRESSION AS 'Expression'" if supports_expression_index?
@@ -24,15 +25,21 @@ module ActiveRecord
                    SUB_PART AS 'Sub_part', LOWER(INDEX_TYPE) AS 'Index_type',
                    INDEX_COMMENT AS 'Index_comment'#{optional_columns}
             FROM information_schema.statistics
-            WHERE table_schema = #{scope[:schema]}
-              AND table_name = #{scope[:name]}
+            WHERE (#{statistics_table_scope_sql(table_names)})
               AND index_name != 'PRIMARY'
-            ORDER BY index_name, seq_in_index
+            ORDER BY table_name, index_name, seq_in_index
           SQL
 
+          indexes_by_table = Hash.new { |h, k| h[k] = [] }
+
+          current_index = nil
+
           result.each do |row|
-            if current_index != row["Key_name"]
-              current_index = row["Key_name"]
+            table = row["Table"]
+            index_key = [table, row["Key_name"]]
+
+            if current_index != index_key
+              current_index = index_key
 
               mysql_index_type = row["Index_type"].to_sym
               case mysql_index_type
@@ -43,7 +50,7 @@ module ActiveRecord
               end
 
               index = [
-                row["Table"],
+                table,
                 row["Key_name"],
                 row["Non_unique"].to_i == 0,
                 [],
@@ -58,40 +65,46 @@ module ActiveRecord
                 index[-1][:enabled] = row["enabled"] == "YES"
               end
 
-              indexes << index
+              indexes_by_table[table] << index
             end
+
+            index = indexes_by_table[table].last
 
             if expression = row["Expression"]
               expression = expression.gsub("\\'", "'")
               expression = +"(#{expression})" unless expression.start_with?("(")
-              indexes.last[-2] << expression
-              indexes.last[-1][:expressions] ||= {}
-              indexes.last[-1][:expressions][expression] = expression
-              indexes.last[-1][:orders][expression] = :desc if row["Collation"] == "D"
+              index[-2] << expression
+              index[-1][:expressions] ||= {}
+              index[-1][:expressions][expression] = expression
+              index[-1][:orders][expression] = :desc if row["Collation"] == "D"
             else
-              indexes.last[-2] << row["Column_name"]
-              indexes.last[-1][:lengths][row["Column_name"]] = row["Sub_part"].to_i if row["Sub_part"]
-              indexes.last[-1][:orders][row["Column_name"]] = :desc if row["Collation"] == "D"
+              index[-2] << row["Column_name"]
+              index[-1][:lengths][row["Column_name"]] = row["Sub_part"].to_i if row["Sub_part"]
+              index[-1][:orders][row["Column_name"]] = :desc if row["Collation"] == "D"
             end
           end
 
-          indexes.map do |index|
-            options = index.pop
+          indexes_by_table.transform_values! do |table_indexes|
+            table_indexes.map! do |index|
+              options = index.pop
 
-            if expressions = options.delete(:expressions)
-              orders = options.delete(:orders)
-              lengths = options.delete(:lengths)
+              if expressions = options.delete(:expressions)
+                orders = options.delete(:orders)
+                lengths = options.delete(:lengths)
 
-              columns = index[-1].to_h { |name|
-                [ name.to_sym, expressions[name] || +quote_column_name(name) ]
-              }
+                columns = index[-1].to_h { |name|
+                  [ name.to_sym, expressions[name] || +quote_column_name(name) ]
+                }
 
-              index[-1] = add_options_for_index_columns(
-                columns, order: orders, length: lengths
-              ).values.join(", ")
+                index[-1] = add_options_for_index_columns(
+                  columns, order: orders, length: lengths
+                ).values.join(", ")
+              end
+              MySQL::IndexDefinition.new(*index, **options)
             end
-            MySQL::IndexDefinition.new(*index, **options)
           end
+
+          indexes_by_table
         end
 
         def create_index_definition(table_name, name, unique, columns, **options)
@@ -296,6 +309,19 @@ module ActiveRecord
             schema, name = string.to_s.scan(/[^`.\s]+|`[^`]*`/)
             schema, name = nil, schema unless name
             [schema, name]
+          end
+
+          def statistics_table_scope_sql(table_names)
+            by_schema = table_names.each_with_object(Hash.new { |h, k| h[k] = [] }) do |name, h|
+              schema, tbl = extract_schema_qualified_name(name)
+              h[schema] << tbl
+            end
+
+            by_schema.map do |schema, names|
+              schema_sql = schema ? quote(schema) : "database()"
+              names_sql = names.map { |n| quote(n) }.join(", ")
+              "(table_schema = #{schema_sql} AND table_name IN (#{names_sql}))"
+            end.join(" OR ")
           end
 
           def type_with_size_to_sql(type, size)
