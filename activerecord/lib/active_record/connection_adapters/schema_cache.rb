@@ -322,10 +322,7 @@ module ActiveRecord
       def add(pool, table_name)
         pool.with_connection do
           if data_source_exists?(pool, table_name)
-            primary_keys(pool, table_name)
-            columns(pool, table_name)
-            columns_hash(pool, table_name)
-            indexes(pool, table_name)
+            add_tables(pool, [table_name])
           end
         end
       end
@@ -391,10 +388,9 @@ module ActiveRecord
 
       def add_all(pool) # :nodoc:
         pool.with_connection do
-          tables_to_cache(pool).each do |table|
-            add(pool, table)
-          end
-
+          tables = tables_to_cache(pool)
+          tables.each { |table| @data_sources[deep_deduplicate(table)] = true }
+          add_tables(pool, tables)
           version(pool)
         end
       end
@@ -421,6 +417,17 @@ module ActiveRecord
       end
 
       private
+        def add_tables(pool, table_names)
+          pool.with_connection do
+            table_names.each do |table|
+              primary_keys(pool, table)
+              columns(pool, table)
+              columns_hash(pool, table)
+              indexes(pool, table)
+            end
+          end
+        end
+
         def tables_to_cache(pool)
           pool.with_connection do |connection|
             connection.data_sources.reject do |table|
