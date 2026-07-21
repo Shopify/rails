@@ -390,9 +390,16 @@ module ActiveRecord
       end
 
       def add_all(pool) # :nodoc:
-        pool.with_connection do
-          tables_to_cache(pool).each do |table|
-            add(pool, table)
+        pool.with_connection do |connection|
+          tables = tables_to_cache(pool)
+          tables.each { |table| @data_sources[deep_deduplicate(table)] = true }
+          indexes_by_table = connection.indexes_for_tables(tables)
+          tables.each do |table|
+            table = deep_deduplicate(table)
+            primary_keys(pool, table)
+            columns(pool, table)
+            columns_hash(pool, table)
+            @indexes[table] = deep_deduplicate(indexes_by_table[table.to_s])
           end
 
           version(pool)

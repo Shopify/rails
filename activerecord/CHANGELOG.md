@@ -1,3 +1,12 @@
+*   Batch schema cache dump queries for MySQL and PostgreSQL.
+
+    `SchemaCache#add_all` now loads primary keys, columns, and indexes for
+    every cached table in three batched queries instead of one query per table
+    per type, speeding up the schema cache dump by roughly 25% on databases
+    with many tables.
+
+    *Hartley McGuire*
+
 *   Use `information_schema` to query MySQL indexes.
 
     Results will now be returned in alphabetical order by index name, which
