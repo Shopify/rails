@@ -8,12 +8,33 @@ module ActiveRecord
         def indexes(table_name)
           indexes = []
           current_index = nil
-          query_all("SHOW KEYS FROM #{quote_table_name(table_name)}").each do |row|
+
+          scope = quoted_scope(table_name)
+
+          optional_columns = +""
+          optional_columns << ", EXPRESSION AS 'Expression'" if supports_expression_index?
+          if supports_disabling_indexes?
+            optional_columns << (mariadb? ? ", IF(ignored = 'NO', 'YES', 'NO') AS 'enabled'" : ", is_visible AS 'enabled'")
+          end
+
+          result = query_all(<<~SQL)
+            SELECT TABLE_NAME AS 'Table', INDEX_NAME AS 'Key_name',
+                   NON_UNIQUE AS 'Non_unique', SEQ_IN_INDEX AS 'Seq_in_index',
+                   COLUMN_NAME AS 'Column_name', COLLATION AS 'Collation',
+                   SUB_PART AS 'Sub_part', LOWER(INDEX_TYPE) AS 'Index_type',
+                   INDEX_COMMENT AS 'Index_comment'#{optional_columns}
+            FROM information_schema.statistics
+            WHERE table_schema = #{scope[:schema]}
+              AND table_name = #{scope[:name]}
+              AND index_name != 'PRIMARY'
+            ORDER BY index_name, seq_in_index
+          SQL
+
+          result.each do |row|
             if current_index != row["Key_name"]
-              next if row["Key_name"] == "PRIMARY" # skip the primary key
               current_index = row["Key_name"]
 
-              mysql_index_type = row["Index_type"].downcase.to_sym
+              mysql_index_type = row["Index_type"].to_sym
               case mysql_index_type
               when :fulltext, :spatial
                 index_type = mysql_index_type
@@ -34,7 +55,7 @@ module ActiveRecord
               ]
 
               if supports_disabling_indexes?
-                index[-1][:enabled] = mariadb? ? row["Ignored"] == "NO" : row["Visible"] == "YES"
+                index[-1][:enabled] = row["enabled"] == "YES"
               end
 
               indexes << index
@@ -70,12 +91,6 @@ module ActiveRecord
               ).values.join(", ")
             end
             MySQL::IndexDefinition.new(*index, **options)
-          end
-        rescue StatementInvalid => e
-          if e.message.match?(/Table '.+' doesn't exist/)
-            []
-          else
-            raise
           end
         end
 
