@@ -349,6 +349,40 @@ class SchemaTest < ActiveRecord::PostgreSQLTestCase
     @connection.drop_table :pg_cols_multi_b, if_exists: true
   end
 
+  def test_indexes_for_multiple_tables
+    @connection.create_table(:pg_idx_multi_a) { |t| t.string :email; t.string :name }
+    @connection.create_table(:pg_idx_multi_b) { |t| t.string :email; t.string :other }
+    @connection.add_index :pg_idx_multi_a, :name,  name: "idx_a_name"
+    @connection.add_index :pg_idx_multi_a, :email, name: "idx_a_email"
+    @connection.add_index :pg_idx_multi_b, :email, name: "idx_b_email"
+    @connection.add_index :pg_idx_multi_b, :other, name: "idx_b_other"
+
+    # A single table name returns an Array of indexes (backward compatible).
+    single = @connection.indexes("pg_idx_multi_a")
+    assert_kind_of Array, single
+    assert_equal %w[idx_a_email idx_a_name], single.map(&:name).sort
+
+    # indexes_for_tables returns a Hash of table name => Array of indexes.
+    multi = @connection.indexes_for_tables(["pg_idx_multi_a", "pg_idx_multi_b", "#{SCHEMA_NAME}.#{TABLE_NAME}"])
+    assert_kind_of Hash, multi
+    assert_equal %w[pg_idx_multi_a pg_idx_multi_b test_schema.things], multi.keys.sort
+    assert multi.values.all?(Array)
+    assert_equal %w[idx_a_email idx_a_name], multi["pg_idx_multi_a"].map(&:name).sort
+    assert_equal %w[idx_b_email idx_b_other], multi["pg_idx_multi_b"].map(&:name).sort
+
+    # Each index is attributed to its requested table name.
+    a = multi["pg_idx_multi_a"].find { |i| i.name == "idx_a_email" }
+    assert_equal %w[email], a.columns
+    assert_equal "pg_idx_multi_a", a.table
+
+    # A schema-qualified request is keyed by the requested string and matches #indexes.
+    assert_equal @connection.indexes("#{SCHEMA_NAME}.#{TABLE_NAME}").map(&:name).sort,
+                 multi["#{SCHEMA_NAME}.#{TABLE_NAME}"].map(&:name).sort
+  ensure
+    @connection.drop_table :pg_idx_multi_a, if_exists: true
+    @connection.drop_table :pg_idx_multi_b, if_exists: true
+  end
+
   def test_with_schema_prefixed_table_name
     assert_nothing_raised do
       assert_equal COLUMNS, columns("#{SCHEMA_NAME}.#{TABLE_NAME}")
