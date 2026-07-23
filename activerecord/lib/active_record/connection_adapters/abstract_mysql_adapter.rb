@@ -1134,30 +1134,30 @@ module ActiveRecord
 
           raise ActiveRecord::StatementInvalid.new("Could not find table '#{table_name}'", connection_pool: @pool) if fields.empty?
 
-          update_fields_for_mariadb(table_name, fields) if mariadb?
+          update_fields_for_mariadb(fields) if mariadb?
 
           fields
         end
 
-        def update_fields_for_mariadb(table_name, fields)
+        def update_fields_for_mariadb(fields)
           has_function_default_candidate = fields.any? do |field|
             default = field["Default"]
             default&.match?(/[a-zA-Z_]\w*\(/) && !/\ACURRENT_TIMESTAMP/i.match?(default)
           end
+          return unless has_function_default_candidate
 
-          if has_function_default_candidate
-            table_info = create_table_info(table_name)
-            fields.each do |field|
-              default = field["Default"]
-              next unless default&.match?(/[a-zA-Z_]\w*\(/)
-              next if /\ACURRENT_TIMESTAMP/i.match?(default)
+          # MariaDB quotes string literal defaults in information_schema.COLUMNS.COLUMN_DEFAULT
+          # (e.g. `'uuid()'`) but leaves function/expression defaults unquoted (e.g. `uuid()`),
+          # unlike SHOW FULL FIELDS which reports both as `uuid()`. Use that to distinguish
+          # function defaults from literal strings that merely look like function calls, without
+          # parsing SHOW CREATE TABLE output.
+          fields.each do |field|
+            default = field["Default"]
+            next unless default&.match?(/[a-zA-Z_]\w*\(/)
+            next if /\ACURRENT_TIMESTAMP/i.match?(default)
+            next if default.start_with?("'")
 
-              field_name = field["Field"]
-              match = table_info&.match(/`#{field_name}` .+ DEFAULT ('|\d+|[A-z]+)/)
-              if match && match[1].match?(/\A[A-z]/)
-                field["Extra"] = "DEFAULT_GENERATED"
-              end
-            end
+            field["Extra"] = "DEFAULT_GENERATED"
           end
         end
 
