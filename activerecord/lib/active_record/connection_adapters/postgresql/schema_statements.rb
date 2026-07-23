@@ -96,10 +96,19 @@ module ActiveRecord
 
         # Returns an array of indexes for the given table.
         def indexes(table_name) # :nodoc:
-          scope = quoted_scope(table_name)
+          indexes_for_tables([table_name])[table_name.to_s]
+        end
+
+        def indexes_for_tables(table_names) # :nodoc:
+          return {} if table_names.empty?
+
+          result_by_table = table_names.each_with_object({}) do |name, h|
+            h[name.to_s] = []
+          end
+          key_for = table_key_lookup(table_names)
 
           result = query_rows(<<~SQL)
-            SELECT distinct i.relname, d.indisunique, d.indkey, pg_get_indexdef(d.indexrelid),
+            SELECT distinct n.nspname, t.relname, i.relname, d.indisunique, d.indkey, pg_get_indexdef(d.indexrelid),
                             pg_catalog.obj_description(i.oid, 'pg_class') AS comment, d.indisvalid,
                             ARRAY(
                               SELECT pg_get_indexdef(d.indexrelid, k + 1, true)
@@ -112,60 +121,16 @@ module ActiveRecord
             LEFT JOIN pg_namespace n ON n.oid = t.relnamespace
             WHERE i.relkind IN ('i', 'I')
               AND d.indisprimary = 'f'
-              AND t.relname = #{scope[:name]}
-              AND n.nspname = #{scope[:schema]}
+              AND (#{table_scope_sql(table_names)})
             ORDER BY i.relname
           SQL
 
-          result.map do |row|
-            index_name = row[0]
-            unique = row[1]
-            indkey = row[2].split(" ").map(&:to_i)
-            inddef = row[3]
-            comment = row[4]
-            valid = row[5]
-            columns = decode_string_array(row[6]).map { |c| Utils.unquote_identifier(c.strip.gsub('""', '"')) }
-
-            using, expressions, include, nulls_not_distinct, where = inddef.scan(/ USING (\w+?) \((.+?)\)(?: INCLUDE \((.+?)\))?( NULLS NOT DISTINCT)?(?: WHERE (.+))?\z/m).flatten
-
-            orders = {}
-            opclasses = {}
-            include_columns = include ? include.split(",").map { |c| Utils.unquote_identifier(c.strip.gsub('""', '"')) } : []
-
-            if indkey.include?(0)
-              columns = expressions
-            else
-              # prevent INCLUDE columns from being matched
-              columns.reject! { |c| include_columns.include?(c) }
-
-              # add info on sort order (only desc order is explicitly specified, asc is the default)
-              # and non-default opclasses
-              expressions.scan(/(?<column>\w+)"?\s?(?<opclass>(?:\w+\.)?\w+_ops(_\w+)?)?\s?(?<desc>DESC)?\s?(?<nulls>NULLS (?:FIRST|LAST))?/).each do |column, opclass, desc, nulls|
-                opclasses[column] = opclass.split(".").last.to_sym if opclass
-
-                if nulls
-                  orders[column] = [desc, nulls].compact.join(" ")
-                else
-                  orders[column] = :desc if desc
-                end
-              end
-            end
-
-            IndexDefinition.new(
-              table_name,
-              index_name,
-              unique,
-              columns,
-              orders: orders,
-              opclasses: opclasses,
-              where: where,
-              using: using.to_sym,
-              include: include_columns.presence,
-              nulls_not_distinct: nulls_not_distinct.present?,
-              comment: comment.presence,
-              valid: valid
-            )
+          result.each do |row|
+            key = key_for.call(row[0], row[1])
+            result_by_table[key] << index_from_row(row[2..], key) if key
           end
+
+          result_by_table
         end
 
         def table_options(table_name) # :nodoc:
@@ -585,16 +550,43 @@ module ActiveRecord
         end
 
         def primary_keys(table_name) # :nodoc:
-          query_values(<<~SQL)
-            SELECT a.attname
+          primary_keys_for_tables([table_name])[table_name.to_s]
+        end
+
+        def primary_keys_for_tables(table_names) # :nodoc:
+          return {} if table_names.empty?
+
+          result_by_table = table_names.each_with_object({}) do |name, h|
+            h[name.to_s] = []
+          end
+          key_for = table_key_lookup(table_names)
+
+          result = query_all(<<~SQL)
+            SELECT n.nspname AS nspname, t.relname AS relname, a.attname AS column_name
             FROM pg_index i
-            JOIN pg_attribute a
-              ON a.attrelid = i.indrelid
-              AND a.attnum = ANY(i.indkey)
-            WHERE i.indrelid = #{quote(quote_table_name(table_name))}::regclass
-              AND i.indisprimary
+            INNER JOIN pg_class t ON t.oid = i.indrelid
+            INNER JOIN pg_namespace n ON n.oid = t.relnamespace
+            INNER JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
+            WHERE i.indisprimary
+              AND i.indrelid = #{to_regclass_array_sql(table_names)}
             ORDER BY array_position(i.indkey, a.attnum)
           SQL
+
+          result.each do |row|
+            key = key_for.call(row["nspname"], row["relname"])
+            result_by_table[key] << row["column_name"] if key
+          end
+
+          result_by_table
+        end
+
+        def columns_for_tables(table_names) # :nodoc:
+          definitions_by_table = column_definitions_for_tables(table_names)
+          definitions_by_table.each_with_object({}) do |(table, definitions), hash|
+            hash[table] = definitions.map do |field|
+              new_column_from_field(table, field, definitions)
+            end
+          end
         end
 
         # Renames a table.
@@ -1409,6 +1401,109 @@ module ActiveRecord
           def extract_schema_qualified_name(string)
             name = Utils.extract_schema_qualified_name(string.to_s)
             [name.schema, name.identifier]
+          end
+
+          # Build a SQL expression scoping a relation-OID column (e.g.
+          # +i.indrelid+, +a.attrelid+) to the given table names via
+          # to_regclass. Each name resolves the way casting to regclass does
+          # (an unqualified name picks the first schema on the search path; a
+          # qualified name pins its schema), but to_regclass returns NULL for
+          # a missing relation instead of raising — so one bad name can't fail
+          # the whole batch.
+          def to_regclass_array_sql(table_names)
+            names_sql = table_names.map { |name| quote(quote_table_name(name)) }.join(", ")
+            "ANY(ARRAY(SELECT to_regclass(x)::oid FROM unnest(ARRAY[#{names_sql}]) AS x))"
+          end
+
+          # Returns a proc mapping a row's (namespace, relname) back to the
+          # requested table-name string, so results are keyed the way
+          # SchemaCache#add_tables looks them up (by +table.to_s+). Qualified
+          # requests match on (schema, relname); unqualified requests match on
+          # relname alone (resolved via the search path).
+          def table_key_lookup(table_names)
+            qualified = {}
+            unqualified = {}
+            table_names.each do |name|
+              schema, identifier = extract_schema_qualified_name(name)
+              if schema
+                qualified[[schema, identifier]] = name.to_s
+              else
+                unqualified[identifier] = name.to_s
+              end
+            end
+            ->(nsp, rel) { qualified[[nsp, rel]] || unqualified[rel] }
+          end
+
+          # Build a WHERE clause scoping pg_class (t) / pg_namespace (n) to the
+          # given table names, grouped by schema: unqualified names resolve
+          # against the search path (matching every schema on it that has the
+          # relation, as +#indexes+ does), qualified names pin their schema.
+          # Used for relation-name-based queries where matching all search-path
+          # schemas is the existing behavior.
+          def table_scope_sql(table_names)
+            by_schema = table_names.each_with_object(Hash.new { |h, k| h[k] = [] }) do |name, h|
+              schema, tbl = extract_schema_qualified_name(name)
+              h[schema] << tbl
+            end
+
+            by_schema.map do |schema, names|
+              schema_sql = schema ? quote(schema) : "ANY (current_schemas(false))"
+              names_sql = names.map { |n| quote(n) }.join(", ")
+              "(n.nspname = #{schema_sql} AND t.relname IN (#{names_sql}))"
+            end.join(" OR ")
+          end
+
+          # Turns one +#indexes_for_tables+ row — the seven columns after the
+          # leading namespace/relname key columns — into an IndexDefinition,
+          # attributed to +table_name+ (the requested table-name string).
+          def index_from_row(row, table_name)
+            index_name = row[0]
+            unique = row[1]
+            indkey = row[2].split(" ").map(&:to_i)
+            inddef = row[3]
+            comment = row[4]
+            valid = row[5]
+            columns = decode_string_array(row[6]).map { |c| Utils.unquote_identifier(c.strip.gsub('""', '"')) }
+
+            using, expressions, include, nulls_not_distinct, where = inddef.scan(/ USING (\w+?) \((.+?)\)(?: INCLUDE \((.+?)\))?( NULLS NOT DISTINCT)?(?: WHERE (.+))?\z/m).flatten
+
+            orders = {}
+            opclasses = {}
+            include_columns = include ? include.split(",").map { |c| Utils.unquote_identifier(c.strip.gsub('""', '"')) } : []
+
+            if indkey.include?(0)
+              columns = expressions
+            else
+              # prevent INCLUDE columns from being matched
+              columns.reject! { |c| include_columns.include?(c) }
+
+              # add info on sort order (only desc order is explicitly specified, asc is the default)
+              # and non-default opclasses
+              expressions.scan(/(?<column>\w+)"?\s?(?<opclass>(?:\w+\.)?\w+_ops(_\w+)?)?\s?(?<desc>DESC)?\s?(?<nulls>NULLS (?:FIRST|LAST))?/).each do |column, opclass, desc, nulls|
+                opclasses[column] = opclass.split(".").last.to_sym if opclass
+
+                if nulls
+                  orders[column] = [desc, nulls].compact.join(" ")
+                else
+                  orders[column] = :desc if desc
+                end
+              end
+            end
+
+            IndexDefinition.new(
+              table_name,
+              index_name,
+              unique,
+              columns,
+              orders: orders,
+              opclasses: opclasses,
+              where: where,
+              using: using.to_sym,
+              include: include_columns.presence,
+              nulls_not_distinct: nulls_not_distinct.present?,
+              comment: comment.presence,
+              valid: valid
+            )
           end
 
           def decode_string_array(value)

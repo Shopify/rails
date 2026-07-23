@@ -1249,20 +1249,42 @@ module ActiveRecord
         #  - format_type includes the column size constraint, e.g. varchar(50)
         #  - ::regclass is a function that gives the id for a table name
         def column_definitions(table_name)
-          query_rows(<<~SQL)
-              SELECT a.attname, format_type(a.atttypid, a.atttypmod),
+          fields = column_definitions_for_tables([table_name])[table_name.to_s]
+          raise ActiveRecord::StatementInvalid.new("Could not find table '#{table_name}'", connection_pool: @pool) if fields.empty?
+          fields
+        end
+
+        def column_definitions_for_tables(table_names) # :nodoc:
+          return {} if table_names.empty?
+
+          result_by_table = table_names.each_with_object({}) do |name, h|
+            h[name.to_s] = []
+          end
+          key_for = table_key_lookup(table_names)
+
+          result = query_rows(<<~SQL)
+              SELECT n.nspname, k.relname, a.attname, format_type(a.atttypid, a.atttypmod),
                      pg_get_expr(d.adbin, d.adrelid), a.attnotnull, a.atttypid, a.atttypmod,
                      c.collname, col_description(a.attrelid, a.attnum) AS comment,
                      #{supports_identity_columns? ? 'attidentity' : quote('')} AS identity,
                      #{supports_virtual_columns? ? 'attgenerated' : quote('')} as attgenerated
                 FROM pg_attribute a
+                INNER JOIN pg_class k ON k.oid = a.attrelid
+                INNER JOIN pg_namespace n ON n.oid = k.relnamespace
                 LEFT JOIN pg_attrdef d ON a.attrelid = d.adrelid AND a.attnum = d.adnum
                 LEFT JOIN pg_type t ON a.atttypid = t.oid
                 LEFT JOIN pg_collation c ON a.attcollation = c.oid AND a.attcollation <> t.typcollation
-               WHERE a.attrelid = #{quote(quote_table_name(table_name))}::regclass
-                 AND a.attnum > 0 AND NOT a.attisdropped
+               WHERE a.attnum > 0 AND NOT a.attisdropped
+                 AND a.attrelid = #{to_regclass_array_sql(table_names)}
                ORDER BY a.attnum
           SQL
+
+          result.each do |row|
+            key = key_for.call(row[0], row[1])
+            result_by_table[key] << row[2..] if key
+          end
+
+          result_by_table
         end
 
         def arel_visitor

@@ -83,6 +83,12 @@ module ActiveRecord
         raise NotImplementedError, "#indexes is not implemented"
       end
 
+      def indexes_for_tables(table_names) # :nodoc:
+        table_names.each_with_object({}) do |table_name, hash|
+          hash[table_name.to_s] = indexes(table_name)
+        end
+      end
+
       # Checks to see if an index exists on a table for a given index definition.
       #
       #   # Check an index exists
@@ -110,6 +116,12 @@ module ActiveRecord
         definitions = column_definitions(table_name)
         definitions.map do |field|
           new_column_from_field(table_name, field, definitions)
+        end
+      end
+
+      def columns_for_tables(table_names) # :nodoc:
+        table_names.each_with_object({}) do |table_name, hash|
+          hash[table_name.to_s] = columns(table_name)
         end
       end
 
@@ -147,6 +159,12 @@ module ActiveRecord
         pk = primary_keys(table_name)
         pk = pk.first unless pk.size > 1
         pk
+      end
+
+      def primary_keys_for_tables(table_names) # :nodoc:
+        table_names.each_with_object({}) do |table_name, hash|
+          hash[table_name.to_s] = primary_keys(table_name)
+        end
       end
 
       # Creates a new table with the name +table_name+. +table_name+ may either

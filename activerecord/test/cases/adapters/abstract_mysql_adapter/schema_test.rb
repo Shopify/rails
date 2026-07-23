@@ -92,6 +92,136 @@ module ActiveRecord
         assert_equal :fulltext, index_c.type
       end
 
+      def test_indexes_for_multiple_tables
+        @connection.create_table(:idx_multi_a) { |t| t.string :email; t.string :name }
+        @connection.create_table(:idx_multi_b) { |t| t.string :email; t.string :other }
+        # "by_email" is idx_multi_a's alphabetically-last index and
+        # idx_multi_b's alphabetically-first, so the rows are adjacent across
+        # the two tables in the ORDER BY. A name-only index boundary would fail
+        # to start a new index for idx_multi_b's "by_email" and crash.
+        @connection.add_index :idx_multi_a, :name,  name: "aaa_name"
+        @connection.add_index :idx_multi_a, :email, name: "by_email"
+        @connection.add_index :idx_multi_b, :email, name: "by_email"
+        @connection.add_index :idx_multi_b, :other, name: "zzz_other"
+
+        # A single table name returns an Array of indexes (backward compatible).
+        single = @connection.indexes("idx_multi_a")
+        assert_kind_of Array, single
+        assert_equal %w[aaa_name by_email], single.map(&:name).sort
+
+        # indexes_for_tables returns a Hash of table name => Array of indexes.
+        multi = @connection.indexes_for_tables(["idx_multi_a", "idx_multi_b"])
+        assert_kind_of Hash, multi
+        assert_equal %w[idx_multi_a idx_multi_b], multi.keys.sort
+        assert multi.values.all?(Array)
+        assert_equal %w[aaa_name by_email], multi["idx_multi_a"].map(&:name).sort
+        assert_equal %w[by_email zzz_other], multi["idx_multi_b"].map(&:name).sort
+
+        # A non-primary index name shared across two tables must not merge:
+        # each table's "by_email" keeps its own columns and table attribute.
+        a = multi["idx_multi_a"].find { |i| i.name == "by_email" }
+        b = multi["idx_multi_b"].find { |i| i.name == "by_email" }
+        assert_equal %w[email], a.columns
+        assert_equal %w[email], b.columns
+        assert_equal "idx_multi_a", a.table
+        assert_equal "idx_multi_b", b.table
+      ensure
+        @connection.drop_table :idx_multi_a, if_exists: true
+        @connection.drop_table :idx_multi_b, if_exists: true
+      end
+
+      def test_indexes_for_multiple_tables_with_qualified_and_unqualified_names
+        @connection.create_table(:idx_mix_a) { |t| t.string :name }
+        @connection.create_table("#{@db_name}.idx_mix_b") { |t| t.string :other }
+        @connection.add_index :idx_mix_a, :name, name: "mix_a_name"
+        @connection.add_index "#{@db_name}.idx_mix_b", :other, name: "mix_b_other"
+
+        # Mixing a schema-qualified name with an unqualified one yields a
+        # multi-clause (OR) scope. The trailing AND index_name != 'PRIMARY'
+        # must filter every clause; without parenthesizing the scope it binds
+        # only to the last clause and the primary key leaks in as a "PRIMARY"
+        # index for the other table.
+        multi = @connection.indexes_for_tables(["#{@db_name}.idx_mix_b", :idx_mix_a])
+        assert_equal %w[mix_b_other], multi["idx_mix_b"].map(&:name).sort
+        assert_equal %w[mix_a_name], multi["idx_mix_a"].map(&:name).sort
+      ensure
+        @connection.drop_table :idx_mix_a, if_exists: true
+        @connection.drop_table "#{@db_name}.idx_mix_b", if_exists: true
+      end
+
+      def test_columns_for_multiple_tables
+        @connection.create_table(:cols_multi_a) { |t| t.string :title; t.integer :counter }
+        @connection.create_table(:cols_multi_b) { |t| t.string :name; t.text :body }
+
+        # A single table name returns an Array of columns (backward compatible).
+        assert_kind_of Array, @connection.columns("cols_multi_a")
+
+        # columns_for_tables returns a Hash of table name => Array of columns,
+        # matching #columns for each table (names and sql_types).
+        multi = @connection.columns_for_tables(["cols_multi_a", "cols_multi_b"])
+        assert_kind_of Hash, multi
+        assert_equal %w[cols_multi_a cols_multi_b], multi.keys.sort
+
+        profile = ->(cols) { cols.map { |c| [c.name, c.sql_type] } }
+        assert_equal profile.call(@connection.columns("cols_multi_a")), profile.call(multi["cols_multi_a"])
+        assert_equal profile.call(@connection.columns("cols_multi_b")), profile.call(multi["cols_multi_b"])
+      ensure
+        @connection.drop_table :cols_multi_a, if_exists: true
+        @connection.drop_table :cols_multi_b, if_exists: true
+      end
+
+      def test_primary_keys_for_multiple_tables
+        @connection.create_table(:pk_multi_a, primary_key: :custom_id) { |t| t.string :name }
+        @connection.create_table(:pk_multi_b) { |t| t.string :name }
+        @connection.execute "CREATE TABLE pk_multi_c (a int NOT NULL, b int NOT NULL, c int NOT NULL, PRIMARY KEY (c, a, b))"
+        @connection.create_table(:pk_multi_none, id: false) { |t| t.string :name }
+
+        # A single table name returns an Array of primary key columns (backward compatible).
+        assert_equal %w[custom_id], @connection.primary_keys("pk_multi_a")
+        assert_equal %w[id], @connection.primary_keys("pk_multi_b")
+        # Composite key columns arrive in PRIMARY KEY ordinal order (seq_in_index),
+        # not the table's column order.
+        assert_equal %w[c a b], @connection.primary_keys("pk_multi_c")
+        # A table without a primary key returns an empty Array, not a missing key.
+        assert_equal [], @connection.primary_keys("pk_multi_none")
+
+        # primary_keys_for_tables returns a Hash of table name => Array of pk columns.
+        multi = @connection.primary_keys_for_tables(["pk_multi_a", "pk_multi_b", "pk_multi_c", "pk_multi_none"])
+        assert_kind_of Hash, multi
+        assert_equal %w[pk_multi_a pk_multi_b pk_multi_c], multi.keys.sort
+        assert_equal %w[custom_id], multi["pk_multi_a"]
+        assert_equal %w[id], multi["pk_multi_b"]
+        assert_equal %w[c a b], multi["pk_multi_c"]
+        # No primary key => absent from the hash; the default-proc returns [] on
+        # access (so the cache reduces it to nil, as #primary_key does).
+        assert_not multi.key?("pk_multi_none")
+        assert_equal [], multi["pk_multi_none"]
+      ensure
+        @connection.drop_table :pk_multi_a, if_exists: true
+        @connection.drop_table :pk_multi_b, if_exists: true
+        @connection.drop_table :pk_multi_c, if_exists: true
+        @connection.drop_table :pk_multi_none, if_exists: true
+      end
+
+      def test_primary_keys_for_multiple_tables_with_qualified_and_unqualified_names
+        @connection.create_table(:pk_mix_a) { |t| t.string :name }
+        @connection.create_table("#{@db_name}.pk_mix_b") { |t| t.string :other }
+        @connection.add_index :pk_mix_a, :name, name: "pk_mix_a_name"
+        @connection.add_index "#{@db_name}.pk_mix_b", :other, name: "pk_mix_b_other"
+
+        # Mixing a schema-qualified name with an unqualified one yields a
+        # multi-clause (OR) scope. `index_name = 'PRIMARY' AND <scope>` must
+        # filter every clause; without parenthesizing the scope, AND binds
+        # only to the first clause and the other table's non-primary indexes
+        # leak in as primary key columns.
+        multi = @connection.primary_keys_for_tables(["#{@db_name}.pk_mix_b", :pk_mix_a])
+        assert_equal %w[id], multi["pk_mix_b"]
+        assert_equal %w[id], multi["pk_mix_a"]
+      ensure
+        @connection.drop_table :pk_mix_a, if_exists: true
+        @connection.drop_table "#{@db_name}.pk_mix_b", if_exists: true
+      end
+
       unless mysql_enforcing_gtid_consistency?
         def test_drop_temporary_table
           @connection.transaction do

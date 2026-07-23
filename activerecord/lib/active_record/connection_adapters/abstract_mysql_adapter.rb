@@ -690,17 +690,23 @@ module ActiveRecord
 
       def primary_keys(table_name) # :nodoc:
         raise ArgumentError unless table_name.present?
+        primary_keys_for_tables([table_name]).each_value.first || []
+      end
 
-        scope = quoted_scope(table_name)
+      def primary_keys_for_tables(table_names) # :nodoc:
+        return {} if table_names.empty?
 
-        query_values(<<~SQL)
-          SELECT column_name
+        result = query_all(<<~SQL)
+          SELECT table_name AS 'table_name', column_name AS 'column_name'
           FROM information_schema.statistics
           WHERE index_name = 'PRIMARY'
-            AND table_schema = #{scope[:schema]}
-            AND table_name = #{scope[:name]}
-          ORDER BY seq_in_index
+            AND (#{statistics_table_scope_sql(table_names)})
+          ORDER BY table_name, seq_in_index
         SQL
+
+        result.each_with_object(Hash.new { |h, k| h[k] = [] }) do |row, primary_keys_by_table|
+          primary_keys_by_table[row["table_name"]] << row["column_name"]
+        end
       end
 
       def case_sensitive_comparison(attribute, value) # :nodoc:
@@ -1116,32 +1122,62 @@ module ActiveRecord
         end
 
         def column_definitions(table_name) # :nodoc:
-          fields = query_all("SHOW FULL FIELDS FROM #{quote_table_name(table_name)}")
-
-          update_fields_for_mariadb(table_name, fields) if mariadb?
-
+          fields = column_definitions_for_tables([table_name]).each_value.first
+          raise ActiveRecord::StatementInvalid.new("Could not find table '#{table_name}'", connection_pool: @pool) unless fields
           fields
         end
 
-        def update_fields_for_mariadb(table_name, fields)
+        def column_definitions_for_tables(table_names) # :nodoc:
+          return {} if table_names.empty?
+
+          result = query_all(<<~SQL)
+            SELECT COLUMN_NAME AS 'Field',
+                   COLUMN_TYPE AS 'Type',
+                   COLLATION_NAME AS 'Collation',
+                   IS_NULLABLE AS 'Null',
+                   COLUMN_KEY AS 'Key',
+                   COLUMN_DEFAULT AS 'Default',
+                   EXTRA AS 'Extra',
+                   PRIVILEGES AS 'Privileges',
+                   COLUMN_COMMENT AS 'Comment',
+                   TABLE_NAME AS 'table_name'
+            FROM information_schema.columns
+            WHERE #{statistics_table_scope_sql(table_names)}
+            ORDER BY table_name, ORDINAL_POSITION
+          SQL
+
+          fields_by_table = result.each_with_object(Hash.new { |h, k| h[k] = [] }) do |row, hash|
+            hash[row.delete("table_name")] << row
+          end
+
+          if mariadb?
+            fields_by_table.each_value do |fields|
+              update_fields_for_mariadb(fields)
+            end
+          end
+
+          fields_by_table
+        end
+
+        def update_fields_for_mariadb(fields)
           has_function_default_candidate = fields.any? do |field|
             default = field["Default"]
             default&.match?(/[a-zA-Z_]\w*\(/) && !/\ACURRENT_TIMESTAMP/i.match?(default)
           end
+          return unless has_function_default_candidate
 
-          if has_function_default_candidate
-            table_info = create_table_info(table_name)
-            fields.each do |field|
-              default = field["Default"]
-              next unless default&.match?(/[a-zA-Z_]\w*\(/)
-              next if /\ACURRENT_TIMESTAMP/i.match?(default)
+          # MariaDB quotes string literal defaults in information_schema.COLUMNS.COLUMN_DEFAULT
+          # (e.g. `'uuid()'`) but leaves function/expression defaults unquoted (e.g. `uuid()`),
+          # unlike SHOW FULL FIELDS which reports both as `uuid()`. Use that to distinguish
+          # function defaults from literal strings that merely look like function calls, without
+          # parsing SHOW CREATE TABLE output.
+          fields.each do |field|
+            default = field["Default"]
+            next unless default&.match?(/[a-zA-Z_]\w*\(/)
+            next if /\ACURRENT_TIMESTAMP/i.match?(default)
+            next if default.start_with?("'")
 
-              field_name = field["Field"]
-              match = table_info&.match(/`#{field_name}` .+ DEFAULT ('|\d+|[A-z]+)/)
-              if match && match[1].match?(/\A[A-z]/)
-                field["Extra"] = "DEFAULT_GENERATED"
-              end
-            end
+            field["Extra"] = "DEFAULT_GENERATED"
           end
         end
 

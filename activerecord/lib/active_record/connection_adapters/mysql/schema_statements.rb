@@ -6,14 +6,42 @@ module ActiveRecord
       module SchemaStatements # :nodoc:
         # Returns an array of indexes for the given table.
         def indexes(table_name)
-          indexes = []
-          current_index = nil
-          query_all("SHOW KEYS FROM #{quote_table_name(table_name)}").each do |row|
-            if current_index != row["Key_name"]
-              next if row["Key_name"] == "PRIMARY" # skip the primary key
-              current_index = row["Key_name"]
+          indexes_for_tables([table_name]).each_value.first || []
+        end
 
-              mysql_index_type = row["Index_type"].downcase.to_sym
+        def indexes_for_tables(table_names) # :nodoc:
+          return {} if table_names.empty?
+
+          optional_columns = +""
+          optional_columns << ", EXPRESSION AS 'Expression'" if supports_expression_index?
+          if supports_disabling_indexes?
+            optional_columns << (mariadb? ? ", IF(ignored = 'NO', 'YES', 'NO') AS 'enabled'" : ", is_visible AS 'enabled'")
+          end
+
+          result = query_all(<<~SQL)
+            SELECT TABLE_NAME AS 'Table', INDEX_NAME AS 'Key_name',
+                   NON_UNIQUE AS 'Non_unique', SEQ_IN_INDEX AS 'Seq_in_index',
+                   COLUMN_NAME AS 'Column_name', COLLATION AS 'Collation',
+                   SUB_PART AS 'Sub_part', LOWER(INDEX_TYPE) AS 'Index_type',
+                   INDEX_COMMENT AS 'Index_comment'#{optional_columns}
+            FROM information_schema.statistics
+            WHERE (#{statistics_table_scope_sql(table_names)})
+              AND index_name != 'PRIMARY'
+            ORDER BY table_name, index_name, seq_in_index
+          SQL
+
+          indexes_by_table = Hash.new { |h, k| h[k] = [] }
+
+          current_index = nil
+
+          result.each do |row|
+            table = row["Table"]
+            index_key = [table, row["Key_name"]]
+
+            if current_index != index_key
+              current_index = index_key
+
+              mysql_index_type = row["Index_type"].to_sym
               case mysql_index_type
               when :fulltext, :spatial
                 index_type = mysql_index_type
@@ -22,7 +50,7 @@ module ActiveRecord
               end
 
               index = [
-                row["Table"],
+                table,
                 row["Key_name"],
                 row["Non_unique"].to_i == 0,
                 [],
@@ -34,48 +62,57 @@ module ActiveRecord
               ]
 
               if supports_disabling_indexes?
-                index[-1][:enabled] = mariadb? ? row["Ignored"] == "NO" : row["Visible"] == "YES"
+                index[-1][:enabled] = row["enabled"] == "YES"
               end
 
-              indexes << index
+              indexes_by_table[table] << index
             end
+
+            index = indexes_by_table[table].last
 
             if expression = row["Expression"]
               expression = expression.gsub("\\'", "'")
               expression = +"(#{expression})" unless expression.start_with?("(")
-              indexes.last[-2] << expression
-              indexes.last[-1][:expressions] ||= {}
-              indexes.last[-1][:expressions][expression] = expression
-              indexes.last[-1][:orders][expression] = :desc if row["Collation"] == "D"
+              index[-2] << expression
+              index[-1][:expressions] ||= {}
+              index[-1][:expressions][expression] = expression
+              index[-1][:orders][expression] = :desc if row["Collation"] == "D"
             else
-              indexes.last[-2] << row["Column_name"]
-              indexes.last[-1][:lengths][row["Column_name"]] = row["Sub_part"].to_i if row["Sub_part"]
-              indexes.last[-1][:orders][row["Column_name"]] = :desc if row["Collation"] == "D"
+              index[-2] << row["Column_name"]
+              index[-1][:lengths][row["Column_name"]] = row["Sub_part"].to_i if row["Sub_part"]
+              index[-1][:orders][row["Column_name"]] = :desc if row["Collation"] == "D"
             end
           end
 
-          indexes.map do |index|
-            options = index.pop
+          indexes_by_table.transform_values! do |table_indexes|
+            table_indexes.map! do |index|
+              options = index.pop
 
-            if expressions = options.delete(:expressions)
-              orders = options.delete(:orders)
-              lengths = options.delete(:lengths)
+              if expressions = options.delete(:expressions)
+                orders = options.delete(:orders)
+                lengths = options.delete(:lengths)
 
-              columns = index[-1].to_h { |name|
-                [ name.to_sym, expressions[name] || +quote_column_name(name) ]
-              }
+                columns = index[-1].to_h { |name|
+                  [ name.to_sym, expressions[name] || +quote_column_name(name) ]
+                }
 
-              index[-1] = add_options_for_index_columns(
-                columns, order: orders, length: lengths
-              ).values.join(", ")
+                index[-1] = add_options_for_index_columns(
+                  columns, order: orders, length: lengths
+                ).values.join(", ")
+              end
+              MySQL::IndexDefinition.new(*index, **options)
             end
-            MySQL::IndexDefinition.new(*index, **options)
           end
-        rescue StatementInvalid => e
-          if e.message.match?(/Table '.+' doesn't exist/)
-            []
-          else
-            raise
+
+          indexes_by_table
+        end
+
+        def columns_for_tables(table_names) # :nodoc:
+          definitions_by_table = column_definitions_for_tables(table_names)
+          definitions_by_table.each_with_object({}) do |(table, definitions), hash|
+            hash[table] = definitions.map do |field|
+              new_column_from_field(table, field, definitions)
+            end
           end
         end
 
@@ -197,7 +234,15 @@ module ActiveRecord
           def new_column_from_field(table_name, field, _definitions)
             type_metadata = fetch_type_metadata(field["Type"], field["Extra"])
             default, default_function = field["Default"], nil
-
+            # MariaDB reports the COLUMN_DEFAULT of a nullable column with no
+            # default as the string "NULL" rather than SQL NULL; normalize it so
+            # the column is treated as having no default. MySQL already returns
+            # SQL NULL for a no-default column, and leaves a literal "NULL"
+            # string default unquoted, so this must be MariaDB-only — otherwise
+            # MySQL's literal "NULL" defaults would be wiped to nil. A literal
+            # "NULL" string default on MariaDB is quoted ('NULL') and is handled
+            # by the strip branch below.
+            default = nil if mariadb? && default == "NULL"
             if type_metadata.type == :datetime && /\ACURRENT_TIMESTAMP(?:\([0-6]?\))?\z/i.match?(default)
               default = "#{default} ON UPDATE #{default}" if /on update CURRENT_TIMESTAMP/i.match?(field["Extra"])
               default, default_function = nil, default
@@ -209,9 +254,15 @@ module ActiveRecord
                 default = default.gsub("\\'", "'")
                 default, default_function = nil, default
               end
-            elsif type_metadata.type == :text && default&.start_with?("'")
-              # strip and unescape quotes
-              default = default[1...-1].gsub("\\'", "'")
+            elsif mariadb? && default&.start_with?("'")
+              # MariaDB quotes string literal defaults in information_schema
+              # COLUMN_DEFAULT (e.g. `'abc'`, `'O''Connor'`) and escapes
+              # embedded single quotes — by doubling them in varchar defaults
+              # (`''`) but with a backslash in text defaults (`\'`). MySQL leaves
+              # string defaults unquoted, so this only runs on MariaDB. Strip the
+              # wrapping quotes and undo both escape forms so the default matches
+              # what SHOW FULL FIELDS reported.
+              default = default[1...-1].gsub("''", "'").gsub("\\'", "'")
             end
 
             MySQL::Column.new(
@@ -281,6 +332,19 @@ module ActiveRecord
             schema, name = string.to_s.scan(/[^`.\s]+|`[^`]*`/)
             schema, name = nil, schema unless name
             [schema, name]
+          end
+
+          def statistics_table_scope_sql(table_names)
+            by_schema = table_names.each_with_object(Hash.new { |h, k| h[k] = [] }) do |name, h|
+              schema, tbl = extract_schema_qualified_name(name)
+              h[schema] << tbl
+            end
+
+            by_schema.map do |schema, names|
+              schema_sql = schema ? quote(schema) : "database()"
+              names_sql = names.map { |n| quote(n) }.join(", ")
+              "(table_schema = #{schema_sql} AND table_name IN (#{names_sql}))"
+            end.join(" OR ")
           end
 
           def type_with_size_to_sql(type, size)
