@@ -1,36 +1,51 @@
 # frozen_string_literal: true
 
 require "active_support/ractors"
-
-require "arel/errors"
-
-require "arel/crud"
-require "arel/factory_methods"
-
-require "arel/expressions"
-require "arel/predications"
-require "arel/filter_predications"
-require "arel/window_predications"
-require "arel/math"
-require "arel/alias_predication"
-require "arel/order_predications"
-require "arel/table"
-require "arel/attributes/attribute"
-
-require "arel/visitors"
-require "arel/collectors/sql_string"
-
-require "arel/tree_manager"
-require "arel/insert_manager"
-require "arel/select_manager"
-require "arel/update_manager"
-require "arel/delete_manager"
-require "arel/nodes"
+require "active_support/dependencies/autoload"
 
 require "active_record/version"
 
 module Arel
+  extend ActiveSupport::Autoload
+
   VERSION = "10.#{ActiveRecord::VERSION::STRING}".freeze
+
+  eager_autoload do
+    autoload :ArelError, "arel/errors"
+    autoload :EmptyJoinError, "arel/errors"
+    autoload :BindError, "arel/errors"
+
+    autoload :Crud
+    autoload :FactoryMethods
+    autoload :Expressions
+    autoload :Predications
+    autoload :FilterPredications
+    autoload :WindowPredications
+    autoload :Math
+    autoload :AliasPredication
+    autoload :OrderPredications
+
+    autoload :Table
+    autoload :Attribute, "arel/attributes/attribute"
+    autoload :Attributes
+    autoload :Nodes
+    autoload :Visitors
+    autoload :Collectors
+
+    autoload :TreeManager
+    autoload :InsertManager
+    autoload :SelectManager
+    autoload :UpdateManager
+    autoload :DeleteManager
+  end
+
+  def self.eager_load!
+    super
+    Attributes.eager_load!
+    Nodes.eager_load!
+    Visitors.eager_load!
+    Collectors.eager_load!
+  end
 
   # Wrap a known-safe SQL string for passing to query methods, e.g.
   #

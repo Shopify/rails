@@ -1,7 +1,5 @@
 # frozen_string_literal: true
 
-require "active_model/attribute"
-
 module Arel # :nodoc: all
   module Nodes
     class Casted < Arel::Nodes::NodeExpression # :nodoc:
@@ -44,20 +42,6 @@ module Arel # :nodoc: all
 
       def infinite?
         value.respond_to?(:infinite?) && value.infinite?
-      end
-    end
-
-    def self.build_quoted(other, attribute = nil)
-      case other
-      when Arel::Nodes::Node, Arel::Attributes::Attribute, Arel::Table, Arel::SelectManager, Arel::Nodes::SqlLiteral, ActiveModel::Attribute
-        other
-      else
-        case attribute
-        when Arel::Attributes::Attribute
-          Casted.new other, attribute
-        else
-          Quoted.new other
-        end
       end
     end
   end

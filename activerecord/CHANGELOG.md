@@ -1,3 +1,9 @@
+*   Autoload Arel instead of requiring them all up front, and
+    expose `Arel.eager_load!` (invoked by `ActiveRecord.eager_load!`) so
+    production can still eager load the entire Arel tree.
+
+    *Gannon McGibbon*
+
 *   Remove unused `rest` parameter from merge and merge!
 
     *Aaron Patterson*

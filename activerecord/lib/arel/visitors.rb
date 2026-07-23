@@ -1,13 +1,17 @@
 # frozen_string_literal: true
 
-require "arel/visitors/visitor"
-require "arel/visitors/to_sql"
-require "arel/visitors/sqlite"
-require "arel/visitors/postgresql"
-require "arel/visitors/mysql"
-require "arel/visitors/dot"
-
 module Arel # :nodoc: all
   module Visitors
+    extend ActiveSupport::Autoload
+
+    eager_autoload do
+      autoload :Visitor
+      autoload :UnsupportedVisitError, "arel/visitors/to_sql"
+      autoload :ToSql
+      autoload :SQLite, "arel/visitors/sqlite"
+      autoload :PostgreSQL, "arel/visitors/postgresql"
+      autoload :MySQL, "arel/visitors/mysql"
+      autoload :Dot
+    end
   end
 end

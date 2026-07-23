@@ -1,73 +1,106 @@
 # frozen_string_literal: true
 
-# node
-require "arel/nodes/node"
-require "arel/nodes/node_expression"
-require "arel/nodes/select_statement"
-require "arel/nodes/select_core"
-require "arel/nodes/insert_statement"
-require "arel/nodes/update_statement"
-require "arel/nodes/bind_param"
-require "arel/nodes/fragments"
+require "active_model/attribute"
 
-# terminal
+module Arel # :nodoc: all
+  module Nodes
+    extend ActiveSupport::Autoload
 
-require "arel/nodes/terminal"
-require "arel/nodes/true"
-require "arel/nodes/false"
+    eager_autoload do
+      # node
+      autoload :Node
+      autoload :NodeExpression
+      autoload :SelectStatement
+      autoload :SelectCore
+      autoload :InsertStatement
+      autoload :UpdateStatement
+      autoload :DeleteStatement
+      autoload :BindParam
+      autoload :Fragments
 
-# unary
-require "arel/nodes/unary"
-require "arel/nodes/grouping"
-require "arel/nodes/homogeneous_in"
-require "arel/nodes/ordering"
-require "arel/nodes/ascending"
-require "arel/nodes/descending"
-require "arel/nodes/unqualified_column"
-require "arel/nodes/with"
+      # terminal
+      autoload :Distinct, "arel/nodes/terminal"
+      autoload :True
+      autoload :False
 
-# binary
-require "arel/nodes/binary"
-require "arel/nodes/equality"
-require "arel/nodes/filter"
-require "arel/nodes/in"
-require "arel/nodes/join_source"
-require "arel/nodes/delete_statement"
-require "arel/nodes/table_alias"
-require "arel/nodes/infix_operation"
-require "arel/nodes/unary_operation"
-require "arel/nodes/over"
-require "arel/nodes/matches"
-require "arel/nodes/regexp"
-require "arel/nodes/cte"
+      # unary
+      require "arel/nodes/unary"
+      autoload :Grouping
+      autoload :HomogeneousIn
+      require "arel/nodes/ordering"
+      autoload :Ascending
+      autoload :Descending
+      autoload :UnqualifiedColumn
+      require "arel/nodes/with"
 
-# nary (And and Or)
-require "arel/nodes/nary"
+      # binary
+      require "arel/nodes/binary"
+      require "arel/nodes/equality"
+      autoload :Filter
+      autoload :In
+      autoload :JoinSource
+      autoload :TableAlias
+      require "arel/nodes/infix_operation"
+      require "arel/nodes/unary_operation"
+      autoload :Over
+      require "arel/nodes/matches"
+      require "arel/nodes/regexp"
+      autoload :Cte
 
-# function
-require "arel/nodes/function"
-require "arel/nodes/count"
-require "arel/nodes/extract"
-require "arel/nodes/values_list"
-require "arel/nodes/named_function"
+      # nary (And and Or)
+      require "arel/nodes/nary"
 
-# windows
-require "arel/nodes/window"
+      # function
+      require "arel/nodes/function"
+      autoload :Count
+      autoload :Extract
+      autoload :ValuesList
+      autoload :NamedFunction
 
-# conditional expressions
-require "arel/nodes/case"
+      # windows
+      require "arel/nodes/window"
 
-# joins
-require "arel/nodes/full_outer_join"
-require "arel/nodes/inner_join"
-require "arel/nodes/outer_join"
-require "arel/nodes/right_outer_join"
-require "arel/nodes/string_join"
-require "arel/nodes/leading_join"
+      # conditional expressions
+      require "arel/nodes/case"
 
-require "arel/nodes/comment"
+      # joins
+      autoload :FullOuterJoin
+      autoload :InnerJoin
+      autoload :OuterJoin
+      autoload :RightOuterJoin
+      autoload :StringJoin
+      autoload :LeadingJoin
 
-require "arel/nodes/sql_literal"
-require "arel/nodes/bound_sql_literal"
+      autoload :Comment
 
-require "arel/nodes/casted"
+      autoload :SqlLiteral
+      autoload :BoundSqlLiteral
+
+      require "arel/nodes/casted"
+    end
+
+    # Quote and wrap a value in the appropriate Arel node. When +other+ is
+    # already an Arel node, an attribute, a table, a select manager, an SQL
+    # literal, or an ActiveModel::Attribute, it is returned unchanged.
+    # Otherwise it is wrapped in either a Nodes::Casted (when an attribute
+    # is given to cast against) or a Nodes::Quoted.
+    #
+    # This is a module method on Arel::Nodes so it is defined here in the
+    # autoload hub rather than in an autoloaded file: autoload only triggers
+    # on constant references, so a module method defined in +casted.rb+ would
+    # not be available until Nodes::Casted or Nodes::Quoted was referenced.
+    def self.build_quoted(other, attribute = nil)
+      case other
+      when Arel::Nodes::Node, Arel::Attributes::Attribute, Arel::Table, Arel::SelectManager, Arel::Nodes::SqlLiteral, ActiveModel::Attribute
+        other
+      else
+        case attribute
+        when Arel::Attributes::Attribute
+          Casted.new other, attribute
+        else
+          Quoted.new other
+        end
+      end
+    end
+  end
+end

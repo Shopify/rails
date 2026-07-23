@@ -573,6 +573,7 @@ module ActiveRecord
 
   def self.eager_load!
     super
+    Arel.eager_load!
     ActiveRecord::Locking.eager_load!
     ActiveRecord::Scoping.eager_load!
     ActiveRecord::Associations.eager_load!
