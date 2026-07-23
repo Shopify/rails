@@ -1543,6 +1543,17 @@ if ActiveRecord::Base.lease_connection.supports_bulk_alter?
     end
 
     if current_adapter?(:Mysql2Adapter, :TrilogyAdapter)
+      def test_literal_default_that_looks_like_a_function_is_not_mistaken_for_one
+        with_bulk_change_table do |t|
+          t.string :name, default: "uuid()"
+        end
+
+        assert_equal "uuid()", column(:name).default
+        assert_nil column(:name).default_function
+      end
+    end
+
+    if current_adapter?(:Mysql2Adapter, :TrilogyAdapter)
       def test_updating_auto_increment
         with_bulk_change_table do |t|
           t.change :id, :bigint, auto_increment: true
