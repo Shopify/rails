@@ -228,6 +228,30 @@ class TemplateDigestorTest < ActionView::TestCase
     assert_not_equal old_digest, digest("events/_event")
   end
 
+  def test_adding_a_localized_partial_only_changes_digests_for_that_locale
+    @finder = FixtureFinder.build(locale: [:en])
+    before = digest("messages/edit")
+
+    File.write("digestor/messages/_header.fr.html.erb", "fr header")
+
+    @finder = FixtureFinder.build(locale: [:en])
+    assert_equal before, digest("messages/edit")
+
+    @finder = FixtureFinder.build(locale: [:fr])
+    assert_not_equal before, digest("messages/edit")
+  end
+
+  def test_details_that_resolve_the_same_templates_share_digest_values
+    de_finder = @finder = FixtureFinder.build(locale: [:de])
+    de_digest = digest("messages/edit")
+
+    es_finder = @finder = FixtureFinder.build(locale: [:es])
+    es_digest = digest("messages/edit")
+
+    assert_not_same de_finder.digest_cache, es_finder.digest_cache
+    assert_equal de_digest, es_digest
+  end
+
   def test_extra_whitespace_in_render_partial
     assert_digest_difference("messages/edit") do
       change_template("messages/_form")
