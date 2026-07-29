@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "cases/helper"
+require "active_support/testing/ractors_assertions"
 
 class OverloadedType < ActiveRecord::Base
   attribute :overloaded_float, :integer
@@ -22,6 +23,20 @@ end
 
 module ActiveRecord
   class CustomPropertiesTest < ActiveRecord::TestCase
+    include ActiveSupport::Testing::RactorsAssertions
+
+    if RUBY_VERSION >= "4.0"
+      test "attribute type is available in a Ractor" do
+        OverloadedType.reset_column_information
+
+        type = on_ractor do
+          OverloadedType.type_for_attribute("overloaded_float")
+        end
+
+        assert_equal :integer, type.type
+      end
+    end
+
     test "overloading types" do
       data = OverloadedType.new
 

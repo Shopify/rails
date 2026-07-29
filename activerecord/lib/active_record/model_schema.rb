@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 require "monitor"
-require "active_record/model_schema/schema"
+require "active_record/model_schema/schema_context"
 
 module ActiveRecord
   module ModelSchema
@@ -200,19 +200,12 @@ module ActiveRecord
     end
 
     module ClassMethods
-      def current_schema_context # :nodoc:
-        connection_db_config.schema_context
-      rescue ConnectionNotDefined
-        "default"
+      def schema_context # :nodoc:
+        @schema_context ||= build_schema_context
       end
 
-      def model_schema # :nodoc:
-        context_key = current_schema_context
-        model_schemas[context_key] ||= Schema.new(self, context_key)
-      end
-
-      def model_schemas # :nodoc:
-        @model_schemas ||= {}
+      def build_schema_context # :nodoc:
+        ActiveRecord::ModelSchema::SchemaContext.new(self)
       end
 
       # Guesses the table name (in forced lower-case) based on the name of the class in the
@@ -464,23 +457,23 @@ module ActiveRecord
       end
 
       def attributes_builder # :nodoc:
-        model_schema.attributes_builder
+        schema_context.attributes_builder
       end
 
       def columns_hash # :nodoc:
-        model_schema.columns_hash
+        schema_context.columns_hash
       end
 
       def columns
-        model_schema.columns
+        schema_context.columns
       end
 
       def _returning_columns_for_insert(connection) # :nodoc:
-        model_schema._returning_columns_for_insert(connection)
+        schema_context._returning_columns_for_insert(connection)
       end
 
       def _returning_columns_for_update(connection) # :nodoc:
-        model_schema._returning_columns_for_update(connection)
+        schema_context._returning_columns_for_update(connection)
       end
 
       # Returns the column object for the named attribute.
@@ -506,22 +499,22 @@ module ActiveRecord
       # Returns a hash where the keys are column names and the values are
       # default values when instantiating the Active Record object for this table.
       def column_defaults
-        model_schema.column_defaults
+        schema_context.column_defaults
       end
 
       # Returns an array of column names as strings.
       def column_names
-        model_schema.column_names
+        schema_context.column_names
       end
 
       def symbol_column_to_string(name_symbol) # :nodoc:
-        model_schema.symbol_column_to_string(name_symbol)
+        schema_context.symbol_column_to_string(name_symbol)
       end
 
       # Returns an array of column objects where the primary id, all columns ending in "_id" or "_count",
       # and columns used for single table inheritance have been removed.
       def content_columns
-        model_schema.content_columns
+        schema_context.content_columns
       end
 
       # Resets all the cached information about columns, which will cause them
@@ -574,11 +567,11 @@ module ActiveRecord
         @load_schema_monitor.synchronize do
           return if schema_loaded?
 
-          model_schema.load_schema!
+          schema_context.load_schema!
 
-          unless @any_schema_loaded
+          unless @schema_hooks_loaded
             load_schema!
-            @any_schema_loaded = true
+            @schema_hooks_loaded = true
           end
         rescue
           reload_schema_from_cache # If the schema loading failed half way through, we must reset the state.
@@ -592,18 +585,21 @@ module ActiveRecord
         end
 
         def reload_schema_from_cache(recursive = true)
-          @any_schema_loaded = false
+          @schema_hooks_loaded = false
           @arel_table = Arel::Table.new(klass: self)
           @attribute_names = nil
 
-          # Reset all Schema instances
-          model_schemas.each_value(&:reload_schema_from_cache)
+          reload_schema_contexts_from_cache
 
           if recursive
             subclasses.each do |descendant|
               descendant.send(:reload_schema_from_cache)
             end
           end
+        end
+
+        def reload_schema_contexts_from_cache
+          @schema_context&.reload_schema_from_cache
         end
 
       private
@@ -618,17 +614,11 @@ module ActiveRecord
         end
 
         def schema_loaded?
-          model_schema.schema_loaded?
+          @schema_context&.schema_loaded? || false
         end
 
         def load_schema!
-          # Base implementation is a no-op. The adapter-specific schema loading
-          # (columns_hash, default_attributes) is handled by model_schema.load_schema!
-          # which is called directly from load_schema before this super chain.
-          #
-          # This method exists as the hook point for the super chain — overrides
-          # in CounterCache, EncryptableRecord, etc. call super and then do
-          # model-class-level setup that should only happen once.
+          # The current schema context handles the default schema load.
         end
 
         # Guesses the table name, but does not decorate it with prefix and suffix information.

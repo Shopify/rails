@@ -265,7 +265,7 @@ module ActiveRecord
 
     module ClassMethods
       def initialize_find_by_cache # :nodoc:
-        model_schemas.each_value(&:initialize_find_by_cache)
+        schema_context.initialize_find_by_cache
       end
 
       def find(*ids) # :nodoc:
@@ -416,7 +416,7 @@ module ActiveRecord
       end
 
       def cached_find_by_statement(connection, key, &block) # :nodoc:
-        model_schema.cached_find_by_statement(connection, key, &block)
+        schema_context.cached_find_by_statement(connection, key, &block)
       end
 
       def raw_relation # :nodoc:
