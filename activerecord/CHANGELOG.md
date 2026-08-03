@@ -32,7 +32,16 @@
     # SELECT * FROM articles WHERE user_id = 1
     ```
 
-    *Andrew Novoselac*
+    Reload only considers default scopes marked with `all_queries: true`. Named
+    all-query default scopes survive `reload(unscoped: true)`; pass a name to
+    remove one, or include literal `true` in an array of names to also remove
+    unnamed all-query default scopes.
+
+    Internal operations that bypass ordinary visibility scopes, including
+    uniqueness validation, fixture lookup, and counter maintenance, continue
+    to apply all-query default scopes.
+
+    *Andrew Novoselac* and *Matthew Draper*
 
 *   Enable experimental support for models to connect to and query databases
     with different adapters.
