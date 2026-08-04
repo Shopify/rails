@@ -210,6 +210,27 @@ if RUBY_VERSION >= "4.0"
           Ractor.new { ActionView::LookupContext.view_context_class }.value
       end
 
+      test "builds lookup contexts and interns their details keys inside a non-main Ractor" do
+        Mime.eager_load! # freeze the Mime registry, as ActionDispatch.eager_load! does at boot
+
+        same_key, worker_key_id, defaulted_variants = Ractor.new do
+          details = { locale: [:en], formats: [:html], variants: [], handlers: [:erb] }
+          a = ActionView::LookupContext.new([], details)
+          b = ActionView::LookupContext.new([], details.dup)
+          interned_same = a.details_key.equal?(b.details_key)
+          key_id = a.details_key.object_id
+          a.variants = nil # falls back to the default_variants method
+          [interned_same, key_id, a.variants]
+        end.value
+
+        assert same_key
+        assert_equal [], defaulted_variants
+
+        details = { locale: [:en], formats: [:html], variants: [], handlers: [:erb] }
+        main_key_id = ActionView::LookupContext.new([], details).details_key.object_id
+        assert_not_equal main_key_id, worker_key_id
+      end
+
       test "interns details keys and builds digest caches inside a non-main Ractor" do
         interned, digest_cache = Ractor.new do
           details = { locale: [:en], formats: nil, variants: [], handlers: [:erb] }
