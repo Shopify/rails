@@ -117,6 +117,17 @@ module ActiveSupport
         def shareable_lambda(...)
           Ractor.shareable_lambda(...)
         end
+
+        # Returns the value stored under +key+ in the current Ractor's local
+        # storage, running +block+ to compute and store it on first access, by
+        # delegating to +Ractor.store_if_absent+. Concurrent threads in the
+        # same Ractor initialize the value only once.
+        #
+        # On Ruby versions without +Ractor+ support there are no non-main
+        # Ractors, so this shim stores the value in a process-wide map.
+        def store_if_absent(key, &block)
+          Ractor.store_if_absent(key, &block)
+        end
       else
         def main?
           Ractor.current == Ractor.main
@@ -141,7 +152,16 @@ module ActiveSupport
         def shareable_lambda(self: nil, &block)
           block
         end
+
+        def store_if_absent(key, &block)
+          @local_storage.compute_if_absent(key, &block)
+        end
       end
+    end
+
+    unless defined?(Ractor) && RUBY_VERSION >= "4.0"
+      require "concurrent/map"
+      @local_storage = Concurrent::Map.new
     end
   end
 end
