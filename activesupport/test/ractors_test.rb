@@ -2,7 +2,7 @@
 
 require_relative "abstract_unit"
 
-class RactorsTest < ActiveSupport::TestCase
+class KernelRactorShareabilityTest < ActiveSupport::TestCase
   if RUBY_VERSION >= "4.0"
     def test_ractor_make_shareable_returns_a_shareable_object
       string = +"hello"

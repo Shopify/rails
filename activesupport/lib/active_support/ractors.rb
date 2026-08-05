@@ -68,9 +68,6 @@ module ActiveSupport
       end
 
       if defined?(Ractor) && RUBY_VERSION >= "4.0"
-        gem "ractor-dispatch"
-        require "ractor/dispatch"
-
         # Makes +obj+ Ractor-shareable by delegating to +Ractor.make_shareable+.
         #
         # The +copy:+ option is forwarded unchanged. On Ruby versions without
