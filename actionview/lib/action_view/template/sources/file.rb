@@ -11,11 +11,6 @@ module ActionView
         def to_s
           ::File.binread @filename
         end
-
-        def freeze
-          @filename.freeze
-          super
-        end
       end
     end
   end
