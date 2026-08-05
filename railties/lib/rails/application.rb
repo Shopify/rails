@@ -993,30 +993,9 @@ module Rails
     #
     def message_verifiers
       @message_verifiers ||=
-        ActiveSupport::MessageVerifiers.new(
-          SecretKeyGenerator.new(@key_generators, secret_key_base)
-        ).rotate_defaults
-    end
-
-    # Callable that generates derived keys from a salt and secret_key_base.
-    # Defined as a separate class so its instances can be made
-    # Ractor-shareable (Proc objects always capture the enclosing self).
-    class SecretKeyGenerator # :nodoc:
-      def initialize(generators, default_secret_key_base)
-        @generators = generators
-        @default_secret_key_base = default_secret_key_base
-      end
-
-      def call(salt, secret_key_base: @default_secret_key_base)
-        (@generators[secret_key_base] ||= ActiveSupport::CachingKeyGenerator.new(
-          ActiveSupport::KeyGenerator.new(secret_key_base, iterations: 1000)
-        )).generate_key(salt)
-      end
-
-      # RotationCoordinator introspects parameters to extract kwargs.
-      def parameters
-        [[:req, :salt], [:key, :secret_key_base]]
-      end
+        ActiveSupport::MessageVerifiers.new do |salt, secret_key_base: self.secret_key_base|
+          key_generator(secret_key_base).generate_key(salt)
+        end.rotate_defaults
     end
 
     # Returns a message verifier object.
@@ -1572,7 +1551,7 @@ module Rails
       end
 
       def coerce_same_site_protection(protection)
-        protection.respond_to?(:call) ? protection : shareable_proc { protection }
+        protection.respond_to?(:call) ? protection : proc { protection }
       end
 
       def filter_parameters

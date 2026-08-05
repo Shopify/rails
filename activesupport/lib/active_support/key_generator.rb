@@ -64,20 +64,7 @@ module ActiveSupport
 
     # Returns a derived key suitable for use.
     def generate_key(*args)
-      cache_key = args.join("|")
-      @cache_keys[cache_key] || if frozen?
-        # After freeze the cache is immutable; derive on demand.
-        @key_generator.generate_key(*args)
-      else
-        @cache_keys[cache_key] = @key_generator.generate_key(*args)
-      end
-    end
-
-    def freeze
-      # Concurrent::Map cannot be frozen. Convert to a plain Hash so
-      # the generator can be made Ractor-shareable after boot.
-      @cache_keys = @cache_keys.each_pair.to_h
-      super
+      @cache_keys[args.join("|")] ||= @key_generator.generate_key(*args)
     end
   end
 end
