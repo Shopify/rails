@@ -101,7 +101,7 @@ module ActionController
     #       end
     #     end
     def self.add(key, &block)
-      define_method(_render_with_renderer_method_name(key), &block)
+      define_method(_render_with_renderer_method_name(key), ActiveSupport::Ractors.try_shareable_proc(block))
       (@all += [key.to_sym]).freeze
 
       RENDERERS.target = @all
