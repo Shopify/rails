@@ -17,8 +17,8 @@ module ActionDispatch
       ].freeze
 
       included do
-        mattr_accessor :ignore_accept_header, default: false
-        mattr_accessor :strict_accept_header, default: false
+        class_attribute :ignore_accept_header, default: false
+        class_attribute :strict_accept_header, default: false
       end
 
       # The MIME type of the HTTP request, such as [Mime](:xml).
