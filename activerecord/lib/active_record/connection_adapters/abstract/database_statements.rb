@@ -771,7 +771,7 @@ module ActiveRecord
 
         def sql_for_insert(sql, pk, binds, returning) # :nodoc:
           if supports_insert_returning?
-            if pk.nil?
+            if returning.nil? && pk.nil?
               # Extract the table from the insert sql. Yuck.
               table_ref = extract_table_ref_from_insert_sql(sql)
               pk = schema_cache.primary_keys(table_ref) if table_ref
@@ -791,7 +791,11 @@ module ActiveRecord
         end
 
         def returning_column_values(result)
-          [last_inserted_id(result)]
+          if supports_insert_returning?
+            result.rows.first
+          else
+            [last_inserted_id(result)]
+          end
         end
 
         def single_value_from_rows(rows)
