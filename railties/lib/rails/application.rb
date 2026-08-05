@@ -122,10 +122,13 @@ module Rails
     # can be passed into non-main Ractors. This must be called after the
     # application has been fully initialized and eager-loaded.
     def ractorize!
+      warn "Ractor support in Rails is experimental and subject to change.", category: :experimental, uplevel: 1
+
       eager_load! if !config.eager_load
 
-      # Force env_config and routes to be built before freezing
+      # Force env_config, revision, and routes to be built before freezing
       env_config
+      revision
       routes
       app
 
@@ -594,6 +597,12 @@ module Rails
         end
         ::ActiveJob::Base.make_shareable!
       end
+
+      # The event/error reporters and backtrace cleaner are read from
+      # worker Ractors.
+      Rails.event.make_shareable!
+      Rails.error.make_shareable!
+      Rails.backtrace_cleaner.make_shareable!
     end
 
     def freeze
@@ -727,10 +736,9 @@ module Rails
       ::ActionView::PathRegistry.make_shareable!
 
       # Deep-freeze the dependency tracker registry (read on the digest path
-      # from worker Ractors). freeze_registry already ran from the railtie's
-      # after_initialize hook; share_registry is the opt-in step reserved for
-      # the application, so the branch's own mechanism carries the load rather
-      # than the make_shareable! harness.
+      # from worker Ractors). The registry was frozen by
+      # DependencyTracker.eager_load!; share_registry deep-shares the
+      # tracker values themselves.
       ::ActionView::DependencyTracker.share_registry if defined?(::ActionView::DependencyTracker)
 
       # Now that all framework log subscribers have registered (most
@@ -1441,22 +1449,6 @@ module Rails
     # Eager loads the application code.
     def eager_load!
       Rails.autoloaders.each(&:eager_load)
-    end
-
-    def ractorize! # :nodoc:
-      warn "Ractor support in Rails is experimental and subject to change.", category: :experimental, uplevel: 1
-
-      env_config
-      revision
-      routes
-
-      @autoloaders, @reloaders, @routes_reloader = nil, nil, nil
-
-      Ractor.make_shareable(self)
-      Ractor.make_shareable(Rails.event)
-      Ractor.make_shareable(Rails.error)
-      Ractor.make_shareable(Rails.backtrace_cleaner)
-      ActionView::DependencyTracker.share_registry if defined?(ActionView)
     end
 
   protected
