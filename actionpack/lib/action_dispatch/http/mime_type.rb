@@ -5,6 +5,7 @@
 require "singleton"
 require "active_support/deprecation"
 require "action_dispatch/deprecator"
+require "active_support/core_ext/string/filters"
 
 module Mime
   class Mimes
@@ -110,24 +111,13 @@ module Mime
       nil
     end
 
-    # ractor-safe-rails exploration only: ractorize! deep-freezes module
-    # graphs via make_shareable!. Neutralize it for Mime so the tests rely
-    # solely on eager_load! to make the request-path registries shareable.
-    # This validates that the upstream fix (the actionview-template-types-
-    # ractor-shareable branch) is sufficient on its own, without the harness
-    # brute-freezing the deprecated SET/LOOKUP/EXTENSION_LOOKUP proxies and
-    # the boot-only @on_change_callbacks, none of which are read in a request.
-    def make_shareable! # :nodoc:
-      self
-    end
-
-    def update_registries # :nodoc:
+    def update # :nodoc:
       if @registry.frozen?
-        ActionDispatch.deprecator.warn(
-          "Registering or unregistering a MIME type after the application has " \
-          "been initialized is deprecated. Register custom MIME types from an " \
-          "initializer instead (e.g. config/initializers/mime_types.rb)."
-        )
+        ActionDispatch.deprecator.warn(<<~DEPRECATION.squish)
+          Registering or unregistering a MIME type after the application has been initialized is deprecated.
+          Register custom MIME types from an initializer instead (e.g. config/initializers/mime_types.rb).
+          This will raise a FrozenError in Rails 9.0.
+        DEPRECATION
         registry, string_lookup, extension_lookup = @registry.dup, @lookup_by_string.dup, @lookup_by_extension.dup
         yield registry, string_lookup, extension_lookup
         @registry = registry.freeze
@@ -240,6 +230,11 @@ module Mime
         @on_change_callbacks << block
       end
 
+      def register_callback(&block)
+        on_change { |mime, registered| block.call(mime) if registered }
+      end
+      ActionDispatch.deprecator.deprecate_methods(self, :register_callback)
+
       def lookup(string)
         lookup = Mime.lookup_by_string
         return lookup[string] if lookup.key?(string)
@@ -263,7 +258,7 @@ module Mime
       def register(string, symbol, mime_type_synonyms = [], extension_synonyms = [], skip_lookup = false)
         new_mime = Type.new(string, symbol, mime_type_synonyms)
 
-        Mime.update_registries do |registry, string_lookup, extension_lookup|
+        Mime.update do |registry, string_lookup, extension_lookup|
           registry << new_mime
           ([string] + mime_type_synonyms).each { |str| string_lookup[-str] = new_mime } unless skip_lookup
           ([symbol] + extension_synonyms).each { |ext| extension_lookup[-ext.to_s] = new_mime }
@@ -323,7 +318,7 @@ module Mime
       def unregister(symbol)
         symbol = symbol.downcase
         if mime = Mime[symbol]
-          Mime.update_registries do |registry, string_lookup, extension_lookup|
+          Mime.update do |registry, string_lookup, extension_lookup|
             registry.delete_if { |v| v.eql?(mime) }
             string_lookup.delete_if { |_, v| v.eql?(mime) }
             extension_lookup.delete_if { |_, v| v.eql?(mime) }

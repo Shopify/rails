@@ -165,14 +165,11 @@ ActiveSupport.on_load(:action_view) do
   ActionView::LookupContext.clear
 
   unless ActionView::Base.default_formats
-    ActionView::Base.default_formats = symbols = Mime.symbols
-    # Deprecated code path: A Mime::Type was registered after boot,
-    # replace default_formats if it still points at the old array.
+    ActionView::Base.default_formats = previous_symbols = Mime.symbols
+    # TODO: remove in Rails 9, when late Mime::Type registration raises
     Mime::Type.on_change do
-      current = Mime.symbols
-      unless symbols.equal?(current)
-        ActionView::Base.default_formats = current if ActionView::Base.default_formats.equal?(symbols)
-        symbols = current
+      if !previous_symbols.equal?(Mime.symbols) && ActionView::Base.default_formats.equal?(previous_symbols)
+        ActionView::Base.default_formats = previous_symbols = Mime.symbols
       end
     end
   end
