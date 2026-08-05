@@ -89,19 +89,6 @@ module ActiveRecord
           [index, algorithm, if_not_exists]
         end
 
-        def remove_column(table_name, column_name, type = nil, **options)
-          if foreign_key_exists?(table_name, column: column_name)
-            remove_foreign_key(table_name, column: column_name)
-          end
-          algorithm = index_algorithm(options.delete(:algorithm))
-          lock = lock_clause(options.delete(:lock))
-          return if options[:if_exists] == true && !column_exists?(table_name, column_name)
-          sql = +"ALTER TABLE #{quote_table_name(table_name)} #{remove_column_for_alter(table_name, column_name, type, **options)}"
-          sql << ", #{algorithm}" if algorithm
-          sql << ", #{lock}" if lock
-          execute(sql)
-        end
-
         def create_table(table_name, options: default_row_format, **)
           super
         end
@@ -192,6 +179,10 @@ module ActiveRecord
 
           def create_table_definition(name, **options)
             MySQL::TableDefinition.new(self, name, **options)
+          end
+
+          def create_alter_table(name)
+            MySQL::AlterTable.new create_table_definition(name)
           end
 
           def new_column_from_field(table_name, field, _definitions)

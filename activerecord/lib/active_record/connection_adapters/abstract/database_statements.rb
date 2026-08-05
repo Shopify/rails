@@ -11,7 +11,7 @@ module ActiveRecord
       def to_sql(arel_or_sql, binds = nil)
         unless binds.nil?
           ActiveRecord.deprecator.warn(<<~MSG)
-            Passing `binds` to `to_sql` is deprecated and will be removed in Rails 8.3.
+            Passing `binds` to `to_sql` is deprecated and will be removed in Rails 9.0.
             The `binds` argument has been unused since bind parameters were moved into
             the Arel AST in Rails 5.2.
           MSG
@@ -241,20 +241,49 @@ module ActiveRecord
         raise NotImplementedError
       end
 
-      # Executes an INSERT query and returns the new record's ID
-      #
-      # +id_value+ will be returned unless the value is +nil+, in
-      # which case the database will attempt to calculate the last inserted
-      # id and return that value.
-      #
-      # If the next id was calculated in advance (as in Oracle), it should be
-      # passed in as +id_value+.
+      # Executes an INSERT query and returns the new record's ID.
       #
       # Some adapters support the `returning` keyword argument, which controls
       # what the method returns: +nil+ (default) returns the id via
       # +last_inserted_id+; a column name returns that column as a single
       # value; an array of column names returns an Array of column values.
       def insert(arel_or_sql, name = nil, pk = nil, id_value = nil, sequence_name = nil, binds = [], returning: nil)
+        unless pk.nil?
+          ActiveRecord.deprecator.warn(<<~MSG.squish)
+            Passing `pk` as a positional argument to `insert` is deprecated
+            and will be removed in Rails 9.0. Pass `returning:` instead —
+            `insert(arel, name, "id")` becomes `insert(arel, name, returning: "id")`.
+          MSG
+        end
+        unless id_value.nil?
+          ActiveRecord.deprecator.warn(<<~MSG.squish)
+            Passing `id_value` as a positional argument to `insert` is
+            deprecated and will be removed in Rails 9.0. `id_value` was
+            returned when the database couldn't compute the last inserted id;
+            callers that pass it already know the value and can use it
+            directly rather than reading it back from `insert`.
+          MSG
+        end
+        unless sequence_name.nil?
+          ActiveRecord.deprecator.warn(<<~MSG.squish)
+            Passing `sequence_name` as a positional argument to `insert` is
+            deprecated and will be removed in Rails 9.0. It was only used by
+            PostgreSQL's `use_insert_returning?` currval fallback, which is
+            deprecated on its own — drop the argument once the
+            `insert_returning` option is removed.
+          MSG
+        end
+        if binds.any?
+          ActiveRecord.deprecator.warn(<<~MSG.squish)
+            Passing `binds` as a positional argument to `insert` is
+            deprecated and will be removed in Rails 9.0. Use
+            `Arel.sql(sql_with_placeholders, *binds)` to carry bind values
+            inside the arel node instead —
+            `insert(sql, name, nil, nil, nil, binds)` becomes
+            `insert(Arel.sql(sql, *binds), name)`.
+          MSG
+        end
+
         # The `pk` positional argument is really the RETURNING column name.
         # Translate it to `returning:` — including the legacy `false` sentinel
         # meaning "no primary key / skip RETURNING".
@@ -281,6 +310,17 @@ module ActiveRecord
 
       # Executes the update statement and returns the number of rows affected.
       def update(arel_or_sql, name = nil, binds = [])
+        if binds.any?
+          ActiveRecord.deprecator.warn(<<~MSG.squish)
+            Passing `binds` as a positional argument to `update` is
+            deprecated and will be removed in Rails 9.0. Use
+            `Arel.sql(sql_with_placeholders, *binds)` to carry bind values
+            inside the arel node instead —
+            `update(sql, name, binds)` becomes
+            `update(Arel.sql(sql, *binds), name)`.
+          MSG
+        end
+
         intent = QueryIntent.new(adapter: self, arel: arel_or_sql, name: name, binds: binds)
 
         intent.execute!
@@ -300,6 +340,17 @@ module ActiveRecord
 
       # Executes the delete statement and returns the number of rows affected.
       def delete(arel_or_sql, name = nil, binds = [])
+        if binds.any?
+          ActiveRecord.deprecator.warn(<<~MSG.squish)
+            Passing `binds` as a positional argument to `delete` is
+            deprecated and will be removed in Rails 9.0. Use
+            `Arel.sql(sql_with_placeholders, *binds)` to carry bind values
+            inside the arel node instead —
+            `delete(sql, name, binds)` becomes
+            `delete(Arel.sql(sql, *binds), name)`.
+          MSG
+        end
+
         intent = QueryIntent.new(adapter: self, arel: arel_or_sql, name: name, binds: binds)
 
         intent.execute!
@@ -800,7 +851,10 @@ module ActiveRecord
         def apply_returning_to!(intent, returning)
           return unless supports_insert_returning?
 
-          arel_or_sql = intent.arel || intent.raw_sql
+          # Only `Arel::InsertManager` has `#returning` on the AST; other arel
+          # nodes (e.g. `Arel::Nodes::BoundSqlLiteral` from `Arel.sql("... ?", value)`)
+          # are compiled to raw SQL first and take the string append path.
+          arel_or_sql = intent.arel.is_a?(Arel::InsertManager) ? intent.arel : intent.raw_sql
 
           returning ||= primary_key_for_insert(arel_or_sql)
           returning = Array(returning)
