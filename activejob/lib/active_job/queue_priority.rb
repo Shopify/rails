@@ -46,7 +46,8 @@ module ActiveJob
     end
 
     included do
-      class_attribute :priority, instance_accessor: false, default: -> { self.class.default_priority }
+      class_attribute :priority, instance_accessor: false,
+        default: ActiveSupport::Ractors.shareable_lambda { self.class.default_priority }
     end
 
     # Returns the priority that the job will be created with
