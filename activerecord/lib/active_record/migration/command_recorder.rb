@@ -63,7 +63,6 @@ module ActiveRecord
         :create_virtual_table, :drop_virtual_table,
         :enable_index, :disable_index
       ].freeze
-      include JoinTable
 
       attr_accessor :commands, :delegate, :reverting
 
@@ -106,11 +105,6 @@ module ActiveRecord
       #
       #   recorder.inverse_of(:rename_table, [:old, :new])
       #   # => [:rename_table, [:new, :old]]
-      #
-      # If the inverse of a command requires several commands, returns array of commands.
-      #
-      #   recorder.inverse_of(:remove_columns, [:some_table, :foo, :bar, type: :string])
-      #   # => [[:add_column, :some_table, :foo, :string], [:add_column, :some_table, :bar, :string]]
       #
       # This method will raise an +IrreversibleMigration+ exception if it cannot
       # invert the +command+.

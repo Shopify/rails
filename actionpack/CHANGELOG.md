@@ -1,3 +1,22 @@
+*   Allow HTTP token authentication to require specific authentication schemes.
+
+    Pass `scheme:` to `authenticate_or_request_with_http_token` (and the other
+    token authentication methods) with a scheme name, or an array of names, to
+    require one of those schemes and use them in the `WWW-Authenticate`
+    challenge:
+
+    ```ruby
+    authenticate_or_request_with_http_token(scheme: ["Bearer", "DPoP"]) do |token, options, scheme|
+      # ...
+    end
+    ```
+
+    Any scheme name can be required. Without `scheme:`, `Token`, `Bearer`, and
+    `DPoP` are accepted. The request's scheme is yielded to the authentication
+    block as a downcased symbol in an optional third argument.
+
+    *Chad Cole*
+
 *   Fix route recognition still matching routes that were removed by redrawing
     a route set as empty.
 
@@ -129,7 +148,7 @@
       user: { email: "  ALICE@EXAMPLE.COM  ", profile: { bio: "  Hello world  " } }
     )
     params.deep_transform_values { |v| v.is_a?(String) ? v.strip.downcase : v }
-    # => #<ActionController::Parameters {"user"=>#<ActionController::Parameters {"email"=>"alice@example.com", "profile"=>#<ActionController::Parameters {"bio"=>"hello world"} permitted: false>} permitted: false>} permitted: false>
+    # => #<ActionController::Parameters {"user"=>{"email"=>"alice@example.com", "profile"=>{"bio"=>"hello world"}}} permitted: false>
     ```
 
     *Edil Talantbek uulu*
