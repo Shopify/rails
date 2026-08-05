@@ -1,3 +1,21 @@
+*   Support endless and beginless ranges in `number_field_tag` and
+    `range_field_tag`.
+
+    Previously, passing an endless (`18..`) or beginless (`..10`) range as the
+    `:in`/`:within` option raised `RangeError`. Now an endless range renders
+    `min` without `max`, and a beginless range renders `max` without `min`,
+    matching `number_field` and `range_field`.
+
+    *Kenta Ishizaki*
+
+*   Honor an explicit `value:` option in `color_field`, including `nil`.
+
+    Previously, passing `value: nil` was ignored and the field still pre-filled
+    from the model's stored color. Now an explicitly provided `value:` is
+    honored, and the stored color is only used when no `value:` option is given.
+
+    *Kenta Ishizaki*
+
 *   Calling `safe_join` in a view no longer fallbacks to the `$,` global variable.
 
     Previously, calling `safe_join` would use `$,` by default to separate elements.
