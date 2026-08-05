@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "concurrent/map"
 require "action_view/path_set"
 require "action_view/render_parser"
 
@@ -30,7 +31,7 @@ module ActionView
     autoload :RubyTracker
     autoload :WildcardResolver
 
-    @trackers = {}
+    @trackers = Concurrent::Map.new
 
     def self.find_dependencies(name, template, view_paths = nil) # :nodoc:
       tracker = @trackers[template.handler]
@@ -48,39 +49,17 @@ module ActionView
     # +call(name, template)+ is also accepted for backwards compatibility.
     def self.register_tracker(extension, tracker)
       handler = Template.handler_for_extension(extension)
-      callable = if tracker.respond_to?(:supports_view_paths?)
-        tracker
+      if tracker.respond_to?(:supports_view_paths?)
+        @trackers[handler] = tracker
       else
-        ActiveSupport::Ractors.try_shareable_proc { |name, template, _|
+        @trackers[handler] = lambda { |name, template, _|
           tracker.call(name, template)
         }
-      end
-
-      if @trackers.frozen?
-        ActionView.deprecator.warn(<<~MSG)
-          Registering a dependency tracker after the application has booted is deprecated.
-          Register trackers from a Railtie or an initializer instead.
-        MSG
-        @trackers = @trackers.merge(handler => callable).freeze
-      else
-        @trackers[handler] = callable
       end
     end
 
     def self.remove_tracker(handler) # :nodoc:
-      if @trackers.frozen?
-        @trackers = @trackers.except(handler).freeze
-      else
-        @trackers.delete(handler)
-      end
-    end
-
-    def self.freeze_registry # :nodoc:
-      @trackers.freeze
-    end
-
-    def self.share_registry # :nodoc:
-      ActiveSupport::Ractors.make_shareable(@trackers)
+      @trackers.delete(handler)
     end
 
     case ActionView.render_tracker
