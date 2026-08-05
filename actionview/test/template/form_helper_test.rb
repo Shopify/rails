@@ -1147,6 +1147,12 @@ class FormHelperTest < ActionView::TestCase
     assert_dom_equal(expected, color_field("car", "color"))
   end
 
+  def test_color_field_with_string_containing_hex_color_substring
+    expected = %{<input id="car_color" name="car[color]" type="color" value="#000000" />}
+    @car.color = "Not a color #123456 at all"
+    assert_dom_equal(expected, color_field("car", "color"))
+  end
+
   def test_color_field_with_value_attr
     expected = %{<input id="car_color" name="car[color]" type="color" value="#00FF00" />}
     assert_dom_equal(expected, color_field("car", "color", value: "#00FF00"))
@@ -1486,6 +1492,16 @@ class FormHelperTest < ActionView::TestCase
     assert_dom_equal(expected, number_field("order", "quantity", in: 1...10))
     expected = %{<input name="order[quantity]" size="30" max="9" id="order_quantity" type="number" min="1" />}
     assert_dom_equal(expected, number_field("order", "quantity", size: 30, in: 1...10))
+  end
+
+  def test_number_field_with_endless_range
+    expected = %{<input name="order[quantity]" id="order_quantity" type="number" min="18" />}
+    assert_dom_equal(expected, number_field("order", "quantity", in: 18..))
+  end
+
+  def test_number_field_with_beginless_range
+    expected = %{<input name="order[quantity]" max="10" id="order_quantity" type="number" />}
+    assert_dom_equal(expected, number_field("order", "quantity", in: ..10))
   end
 
   def test_range_input

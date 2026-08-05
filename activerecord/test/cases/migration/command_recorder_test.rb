@@ -223,6 +223,11 @@ module ActiveRecord
         assert_equal [:remove_column, [:table, :column, :type, {}], nil], remove
       end
 
+      def test_invert_add_column_if_not_exists
+        remove = @recorder.inverse_of :add_column, [:table, :column, :type, if_not_exists: true]
+        assert_equal [:remove_column, [:table, :column, :type, if_exists: true], nil], remove
+      end
+
       def test_invert_change_column
         assert_raises(ActiveRecord::IrreversibleMigration) do
           @recorder.inverse_of :change_column, [:table, :column, :type, {}]
@@ -326,6 +331,11 @@ module ActiveRecord
         assert_equal [:remove_index, [:table, :one, algorithm: :concurrently], nil], remove
       end
 
+      def test_invert_add_index_if_not_exists
+        remove = @recorder.inverse_of :add_index, [:table, :one, if_not_exists: true]
+        assert_equal [:remove_index, [:table, :one, if_exists: true], nil], remove
+      end
+
       if ActiveRecord::Base.lease_connection.supports_disabling_indexes?
         def test_invert_add_index_with_disabled_option
           remove = @recorder.inverse_of :add_index, [:table, :one, enabled: false]
@@ -371,6 +381,11 @@ module ActiveRecord
       def test_invert_remove_index_with_no_special_options
         add = @recorder.inverse_of :remove_index, [:table, { column: [:one, :two] }]
         assert_equal [:add_index, [:table, [:one, :two]]], add
+      end
+
+      def test_invert_remove_index_if_exists
+        add = @recorder.inverse_of :remove_index, [:table, { column: [:one, :two], if_exists: true }]
+        assert_equal [:add_index, [:table, [:one, :two], if_not_exists: true]], add
       end
 
       def test_invert_remove_index_with_no_column
