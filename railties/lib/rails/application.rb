@@ -13,6 +13,7 @@ require "active_support/configuration_file"
 require "active_support/parameter_filter"
 require "rails/engine"
 require "rails/autoloaders"
+require "active_support/core_ext/object/shareable"
 
 module Rails
   # An Engine with the responsibility of coordinating the whole boot process.

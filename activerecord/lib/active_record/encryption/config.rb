@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "openssl"
+require "active_support/core_ext/object/shareable"
 
 module ActiveRecord
   module Encryption

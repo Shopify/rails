@@ -3,6 +3,7 @@
 # :markup: markdown
 
 require "active_support/parameter_filter"
+require "active_support/core_ext/object/shareable"
 
 module ActionDispatch
   module Http

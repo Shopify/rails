@@ -9,6 +9,7 @@ require "action_view/helpers"
 require "action_view/context"
 require "action_view/template"
 require "action_view/lookup_context"
+require "active_support/core_ext/object/shareable"
 
 module ActionView # :nodoc:
   # = Action View \Base

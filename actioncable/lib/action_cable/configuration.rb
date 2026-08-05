@@ -4,6 +4,7 @@
 
 require "rack"
 require "active_support/core_ext/string/inflections"
+require "active_support/core_ext/kernel/shareable"
 
 module ActionCable
   # # Action Cable Configuration

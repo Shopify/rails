@@ -2,6 +2,7 @@
 
 require "active_support"
 require "active_support/i18n_railtie"
+require "active_support/core_ext/kernel/shareable"
 
 module ActiveSupport
   class Railtie < Rails::Railtie # :nodoc:

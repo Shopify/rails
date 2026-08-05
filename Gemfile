@@ -165,3 +165,5 @@ gem "launchy"
 install_if -> { RUBY_VERSION >= "4.0" } do
   gem "ractor-dispatch"
 end
+
+gem "ractor_safe"

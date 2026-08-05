@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "delegate"
+require "active_support/core_ext/object/shareable"
 
 module ActionMailer
   # = Action Mailer \MessageDelivery

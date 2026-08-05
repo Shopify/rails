@@ -3,6 +3,7 @@
 require "active_support/core_ext/enumerable"
 require "active_support/parameter_filter"
 require "concurrent/map"
+require "active_support/core_ext/object/shareable"
 
 module ActiveRecord
   # = Active Record \Core

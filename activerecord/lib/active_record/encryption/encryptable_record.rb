@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "active_support/core_ext/object/shareable"
+
 module ActiveRecord
   module Encryption
     # This is the concern mixed in Active Record models to make them encryptable. It adds the +encrypts+

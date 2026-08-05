@@ -2,6 +2,7 @@
 
 require "logger"
 require "active_support/isolated_execution_state"
+require "active_support/core_ext/object/shareable"
 
 module ActiveSupport
   # = Ractor-Local Logger

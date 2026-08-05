@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "active_support/core_ext/object/shareable"
+
 module ActionView # :nodoc:
   module PathRegistry # :nodoc:
     @view_paths_by_class = {}

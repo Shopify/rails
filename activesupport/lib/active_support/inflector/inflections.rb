@@ -3,6 +3,7 @@
 require "concurrent/map"
 require "active_support/core_ext/module/delegation"
 require "active_support/i18n"
+require "active_support/core_ext/object/shareable"
 
 module ActiveSupport
   module Inflector

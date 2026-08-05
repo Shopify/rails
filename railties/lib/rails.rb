@@ -14,6 +14,7 @@ require "rails/backtrace_cleaner"
 
 require "active_support/railtie"
 require "action_dispatch/railtie"
+require "active_support/core_ext/object/shareable"
 
 # UTF-8 is the default internal and external encoding.
 silence_warnings do

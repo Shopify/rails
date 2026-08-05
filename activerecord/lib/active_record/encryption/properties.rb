@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "active_support/core_ext/object/shareable"
+
 module ActiveRecord
   module Encryption
     # This is a wrapper for a hash of encryption properties. It is used by

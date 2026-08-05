@@ -7,6 +7,8 @@ require "active_support/core_ext/class/attribute"
 require "active_support/core_ext/module/redefine_method"
 require "active_support/core_ext/string/filters"
 require "active_support/core_ext/object/blank"
+require "active_support/core_ext/object/shareable"
+require "active_support/core_ext/kernel/shareable"
 
 module ActiveSupport
   # = Active Support \Callbacks

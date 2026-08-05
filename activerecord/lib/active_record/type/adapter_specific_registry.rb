@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "active_support/core_ext/kernel/shareable"
+
 module ActiveRecord
   # :stopdoc:
   module Type

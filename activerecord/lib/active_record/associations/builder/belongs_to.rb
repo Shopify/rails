@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "active_support/core_ext/object/shareable"
+
 module ActiveRecord::Associations::Builder # :nodoc:
   class BelongsTo < SingularAssociation # :nodoc:
     def self.macro

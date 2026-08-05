@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "active_support/core_ext/object/shareable"
+
 # This is the parent Association class which defines the variables
 # used by all associations.
 #

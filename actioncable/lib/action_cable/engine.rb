@@ -5,6 +5,7 @@
 require "rails"
 require "action_cable"
 require "active_support/core_ext/hash/indifferent_access"
+require "active_support/core_ext/kernel/shareable"
 
 module ActionCable
   class Engine < Rails::Engine # :nodoc:

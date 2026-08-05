@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 require "active_support/core_ext/object/deep_dup"
+require "active_support/core_ext/object/shareable"
+require "active_support/core_ext/kernel/shareable"
 
 module ActiveRecord
   # Declare an enum attribute where the values map to integers in the database,
