@@ -17,9 +17,9 @@ module ActiveRecord
       end
 
       def register(type_name, klass = nil, **options, &block)
-        unless block_given?
+        unless block
           k = klass
-          block = shareable_proc { |_, *args| k.new(*args) }
+          block = shareable_proc { |_, *args, **kwargs| k.new(*args, **kwargs) }
         end
         registrations << Registration.new(type_name, block, **options)
       end
