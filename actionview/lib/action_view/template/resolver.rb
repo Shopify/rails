@@ -92,9 +92,8 @@ module ActionView
 
     delegate :caching?, to: :class
 
-    # This is what child classes implement. No defaults are needed
-    # because Resolver guarantees that the arguments are present and
-    # normalized.
+    # Extension point for custom resolvers: implement this method, or
+    # override find_all/find directly.
     def find_templates(name, prefix, partial, details, locals = [])
       raise NotImplementedError, "Subclasses must implement a find_templates(name, prefix, partial, details, locals = []) method"
     end
