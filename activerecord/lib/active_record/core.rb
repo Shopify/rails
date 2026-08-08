@@ -473,6 +473,10 @@ module ActiveRecord
             end
           end
         end
+
+        def find_by_statement_cache_key
+          @find_by_statement_cache_key ||= "active_record_find_by_statement_cache_#{object_id}".to_sym
+        end
     end
 
     # New objects can be instantiated as either empty (pass no construction parameter) or pre-set with
