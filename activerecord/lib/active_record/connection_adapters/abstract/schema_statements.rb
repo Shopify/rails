@@ -348,6 +348,19 @@ module ActiveRecord
         table_definition
       end
 
+      # Returns an AlterTable object containing information about changes that
+      # would be made to +table_name+.
+      #
+      #   alter_table = build_alter_table_definition(:suppliers) do |table|
+      #     table.add_column(:qualification, :string)
+      #   end
+      #
+      def build_alter_table_definition(table_name) # :nodoc:
+        alter_table = create_alter_table(table_name)
+        yield alter_table if block_given?
+        alter_table
+      end
+
       # Creates a new join table with the name created using the lexical order of the first two
       # arguments. These arguments can be a String or a Symbol.
       #
