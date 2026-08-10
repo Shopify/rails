@@ -178,7 +178,12 @@ module ActiveRecord
         end
 
         def stale_state
-          query_constraints_foreign_key = ActiveRecord::Key.for(reflection.join_query_constraints_foreign_key)
+          keys = if reflection.join_query_constraints_mapping
+            reflection.foreign_key
+          else
+            reflection.join_query_constraints_foreign_key
+          end
+          query_constraints_foreign_key = ActiveRecord::Key.for(keys)
           values = query_constraints_foreign_key.map do |key|
             owner.read_attribute(key) { |name| owner.send(:missing_attribute, name, caller) }
           end

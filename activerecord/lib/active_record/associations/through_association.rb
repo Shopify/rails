@@ -81,7 +81,13 @@ module ActiveRecord
         # to try to properly support stale-checking for nested associations.
         def stale_state
           if through_reflection.belongs_to?
-            Array(through_reflection.join_query_constraints_foreign_key).filter_map do |foreign_key_column|
+            foreign_key = if through_reflection.join_query_constraints_mapping
+              through_reflection.foreign_key
+            else
+              through_reflection.join_query_constraints_foreign_key
+            end
+
+            Array(foreign_key).filter_map do |foreign_key_column|
               owner.read_attribute(foreign_key_column)
             end.presence
           end

@@ -2445,22 +2445,26 @@ class BelongsToWithDecoupledQueryConstraintsTest < ActiveRecord::TestCase
     assert_equal comment.blog_post_id, blog_post.id
 
     comment.blog_id = 123_456
+    assert_same blog_post, comment.blog_post_with_decoupled_qc
     comment.save!
 
     assert_equal 123_456, comment.blog_id
     assert_equal comment.blog_post_id, blog_post.id
   end
 
-  def test_saving_decoupled_query_constraints_belongs_to_autosaves_new_target_after_constraint_changes
-    blog_post = Sharded::BlogPost.new(id: 654_321, blog_id: 123_456)
-    comment = Sharded::Comment.new(blog_post_with_decoupled_qc: blog_post)
-    comment.blog_id = blog_post.blog_id
+  def test_saving_decoupled_query_constraints_belongs_to_autosaves_assigned_target_after_constraint_changes
+    blog = sharded_blogs(:sharded_blog_one)
+    blog_post = Sharded::BlogPost.new(blog: blog)
+    comment = Sharded::Comment.new(blog_post_with_decoupled_qc_autosave: blog_post)
+    comment.blog_id = blog.id
+
+    assert_same blog_post, comment.blog_post_with_decoupled_qc_autosave
 
     comment.save!
 
     assert_predicate blog_post, :persisted?
     assert_equal blog_post.id, comment.blog_post_id
-    assert_equal blog_post, comment.reload.blog_post_with_decoupled_qc
+    assert_equal blog_post, comment.reload.blog_post_with_decoupled_qc_autosave
   end
 
   def test_belongs_to_with_query_constraints_column_mapping
@@ -2558,37 +2562,39 @@ class BelongsToWithDecoupledQueryConstraintsTest < ActiveRecord::TestCase
     assert_match(/#{Regexp.escape(Sharded::Comment.lease_connection.quote_table_name("sharded_comments.id"))} =/, sql)
   end
 
-  def test_changing_query_constraint_column_invalidates_cached_belongs_to
+  def test_changing_query_constraint_column_doesnt_invalidate_cached_belongs_to
     comment = sharded_comments(:great_comment_blog_post_one)
-    expected_blog_post = sharded_blog_posts(:great_post_blog_one)
+    loaded_blog_post = comment.blog_post_with_decoupled_qc
 
-    # Load the association once — caches the target and records stale_state.
-    assert_equal expected_blog_post, comment.blog_post_with_decoupled_qc
-    assert_predicate comment.association(:blog_post_with_decoupled_qc), :loaded?
-
-    # Change ONLY the query-constraint column (blog_id), NOT the foreign_key
-    # (blog_post_id). The cached target must become stale.
     comment.blog_id = comment.blog_id + 1_000_000
 
-    # The reader must reload — issuing exactly one query — rather than serving
-    # the stale cache.
-    assert_queries_count(1) do
-      comment.blog_post_with_decoupled_qc
+    assert_no_queries do
+      assert_same loaded_blog_post, comment.blog_post_with_decoupled_qc
     end
-
-    # With a non-existent blog_id the query finds no matching BlogPost.
-    assert_nil comment.blog_post_with_decoupled_qc
   end
 
-  def test_changing_query_constraint_column_invalidates_cached_has_one_through
+  def test_changing_foreign_key_invalidates_cached_belongs_to_with_decoupled_query_constraints
     comment = sharded_comments(:great_comment_blog_post_one)
-    expected_blog = sharded_blogs(:sharded_blog_one)
+    original_blog_post = sharded_blog_posts(:great_post_blog_one)
+    replacement_blog_post = sharded_blog_posts(:second_post_blog_one)
 
-    assert_equal expected_blog, comment.blog_through_post_with_decoupled_qc
-    comment.blog_id = comment.blog_id + 1_000_000
+    assert_equal original_blog_post, comment.blog_post_with_decoupled_qc
+
+    comment.blog_post_id = replacement_blog_post.id
 
     assert_queries_count(1) do
-      assert_nil comment.blog_through_post_with_decoupled_qc
+      assert_equal replacement_blog_post, comment.blog_post_with_decoupled_qc
+    end
+  end
+
+  def test_changing_query_constraint_column_doesnt_invalidate_cached_has_one_through
+    comment = sharded_comments(:great_comment_blog_post_one)
+    loaded_blog = comment.blog_through_post_with_decoupled_qc
+
+    comment.blog_id = comment.blog_id + 1_000_000
+
+    assert_no_queries do
+      assert_same loaded_blog, comment.blog_through_post_with_decoupled_qc
     end
   end
 
