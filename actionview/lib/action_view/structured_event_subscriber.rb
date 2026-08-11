@@ -77,6 +77,11 @@ module ActionView
         def rails_root # :doc:
           Utils.rails_root
         end
+
+        def initialize(...) # :nodoc:
+          super
+          rails_root
+        end
     end
 
     include Utils
