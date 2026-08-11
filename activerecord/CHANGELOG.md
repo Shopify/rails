@@ -9,8 +9,8 @@
     Additive query constraints do not participate in association stale tracking.
     Changing them does not invalidate a cached target; changing its foreign key does.
 
-    A column may map to a different name on the other side using a Hash, and
-    listing the foreign key itself is allowed (it is de-duplicated):
+    A column may map to a different name on the other side using a Hash. Query
+    constraint columns must be distinct from the association's foreign key columns:
 
     ``` ruby
     class BlogPost < ApplicationRecord

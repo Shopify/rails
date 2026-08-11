@@ -2528,22 +2528,6 @@ class BelongsToWithDecoupledQueryConstraintsTest < ActiveRecord::TestCase
     assert_match(/#{Regexp.escape(Sharded::Comment.lease_connection.quote_table_name("sharded_comments.id"))} =/, sql)
   end
 
-  def test_belongs_to_with_fk_listed_in_query_constraints_queries_using_base_pk_fk_pair
-    comment = sharded_comments(:great_comment_blog_post_one)
-    expected_blog_post = sharded_blog_posts(:great_post_blog_one)
-
-    sql = capture_sql do
-      assert_equal expected_blog_post, comment.blog_post_with_fk_in_qc
-    end.first
-
-    # The query must use the base PK/FK pair on the target table:
-    # sharded_blog_posts.blog_id and sharded_blog_posts.id.
-    # It must NOT reference sharded_blog_posts.blog_post_id (which is not even
-    # a column on that table) — the FK listed in query_constraints is de-duplicated.
-    assert_match(/#{Regexp.escape(Sharded::BlogPost.lease_connection.quote_table_name("sharded_blog_posts.blog_id"))} =/, sql)
-    assert_match(/#{Regexp.escape(Sharded::BlogPost.lease_connection.quote_table_name("sharded_blog_posts.id"))} =/, sql)
-    assert_no_match(/#{Regexp.escape(Sharded::BlogPost.lease_connection.quote_table_name("sharded_blog_posts.blog_post_id"))} =/, sql)
-  end
 
   def test_belongs_to_with_bare_hash_query_constraints_loads_correctly
     blog_post = sharded_blog_posts(:great_post_blog_one)

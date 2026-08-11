@@ -571,32 +571,33 @@ module ActiveRecord
         query_constraints = [query_constraints] unless query_constraints.is_a?(Array)
         return unless options[:foreign_key] || query_constraints.any?(Hash)
 
-        @normalized_query_constraints_mapping ||= query_constraints.flat_map { |element|
-          case element
-          when Symbol, String
-            column = -element.to_s
-            [[column, column].freeze]
-          when Hash
-            element.map { |self_column, target_column| [-self_column.to_s, -target_column.to_s].freeze }
-          end
-        }.freeze
+        @normalized_query_constraints_mapping ||= begin
+          mapping = query_constraints.flat_map { |element|
+            case element
+            when Symbol, String
+              column = -element.to_s
+              [[column, column].freeze]
+            when Hash
+              element.map { |self_column, target_column| [-self_column.to_s, -target_column.to_s].freeze }
+            end
+          }
+          validate_query_constraints_mapping!(mapping)
+          mapping.freeze
+        end
       end
 
       def join_query_constraints_mapping
         return unless (mapping = normalized_query_constraints_mapping)
 
-        @join_query_constraints_mapping ||= begin
-          foreign_keys = Array(foreign_key)
-          mapping.uniq.reject { |_, target_column| foreign_keys.include?(target_column) }.freeze
-        end
+        @join_query_constraints_mapping ||= mapping.uniq.freeze
       end
 
       # The set of columns used to query association targets (loading, preloading).
       #
       # `query_constraints` is a list of *additional* columns layered on top of the
       # `foreign_key` — the foreign key always participates, since an association
-      # cannot be queried without it. Listing the foreign key in `query_constraints`
-      # is allowed and harmless: it is de-duplicated here rather than rejected.
+      # cannot be queried without it. Query constraint columns must be distinct
+      # from the foreign key columns.
       #
       # Defaults to `foreign_key` when no `query_constraints` are given.
       def query_constraints_foreign_key
@@ -697,6 +698,7 @@ module ActiveRecord
 
       def check_validity!
         return if @validated
+        join_query_constraints_mapping
 
         check_validity_of_inverse!
 
@@ -835,6 +837,18 @@ module ActiveRecord
       end
 
       private
+        def validate_query_constraints_mapping!(mapping)
+          foreign_key_mapping_index = belongs_to? ? 0 : 1
+          query_constraint_foreign_keys = mapping.map { |columns| columns[foreign_key_mapping_index] }
+          overlapping_foreign_keys = Array(foreign_key) & query_constraint_foreign_keys
+
+          if overlapping_foreign_keys.any?
+            raise ArgumentError,
+              "`query_constraints` on `#{active_record}.#{macro} :#{name}` " \
+              "must not include the foreign key columns #{overlapping_foreign_keys.inspect}."
+          end
+        end
+
         # Attempts to find the inverse association name automatically.
         # If it cannot find a suitable inverse association name, it returns
         # +nil+.
@@ -1078,14 +1092,6 @@ module ActiveRecord
         derive_primary_key(klass) { |model| model.composite_query_constraints_list }
       end
 
-      def join_query_constraints_mapping
-        return unless (mapping = normalized_query_constraints_mapping)
-
-        @join_query_constraints_mapping ||= begin
-          foreign_keys = Array(foreign_key)
-          mapping.uniq.reject { |self_column, _| foreign_keys.include?(self_column) }.freeze
-        end
-      end
 
       def join_query_constraints_primary_key(klass = nil)
         if (mapping = join_query_constraints_mapping)

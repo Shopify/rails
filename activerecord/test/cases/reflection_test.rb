@@ -782,16 +782,16 @@ class ReflectionTest < ActiveRecord::TestCase
     assert_equal ["blog_id", "blog_post_id"], reflection.join_query_constraints_primary_key
   end
 
-  def test_query_constraints_allows_the_foreign_key_to_be_listed
-    # query_constraints are *additional* columns layered on the foreign key, so
-    # listing the foreign key itself is allowed (not rejected) and de-duplicated.
+  def test_has_many_query_constraints_cannot_include_the_foreign_key
     reflection = ActiveRecord::Reflection.create(
       :has_many, :comments, nil,
       { foreign_key: :blog_post_id, query_constraints: [:blog_id, :blog_post_id], class_name: "Sharded::Comment" },
       Sharded::BlogPost
     )
 
-    assert_equal ["blog_id", "blog_post_id"], reflection.query_constraints_foreign_key
+    error = assert_raises(ArgumentError) { reflection.check_validity! }
+    assert_equal "`query_constraints` on `Sharded::BlogPost.has_many :comments` " \
+      "must not include the foreign key columns [\"blog_post_id\"].", error.message
   end
 
   def test_query_constraints_foreign_key_normalizes_schema_backed_column_mappings
@@ -801,18 +801,16 @@ class ReflectionTest < ActiveRecord::TestCase
     assert_equal ["blog_id", "id", "featured_comment_id"], reflection.query_constraints_foreign_key
   end
 
-  def test_belongs_to_query_constraints_allows_fk_listed_keeps_pairs_aligned
-    # Listing the writable foreign_key in query_constraints must not misalign the
-    # join key arrays. The FK is de-duplicated, so the belongs_to query still uses
-    # the base PK/FK pair: target [blog_id, id] ↔ owner [blog_id, blog_post_id].
+  def test_belongs_to_query_constraints_cannot_include_the_foreign_key
     reflection = ActiveRecord::Reflection.create(
       :belongs_to, :blog_post, nil,
       { foreign_key: :blog_post_id, query_constraints: [:blog_id, :blog_post_id], class_name: "Sharded::BlogPost" },
       Sharded::Comment
     )
 
-    assert_equal ["blog_id", "id"], reflection.join_query_constraints_primary_key
-    assert_equal ["blog_id", "blog_post_id"], reflection.join_query_constraints_foreign_key
+    error = assert_raises(ArgumentError) { reflection.check_validity! }
+    assert_equal "`query_constraints` on `Sharded::Comment.belongs_to :blog_post` " \
+      "must not include the foreign key columns [\"blog_post_id\"].", error.message
   end
 
   def test_normalized_query_constraints_mapping_with_bare_hash

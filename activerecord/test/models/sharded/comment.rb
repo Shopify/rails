@@ -19,10 +19,6 @@ module Sharded
       query_constraints: :blog_id,
       autosave: true
     has_one :blog_through_post_with_decoupled_qc, through: :blog_post_with_decoupled_qc, source: :blog
-    belongs_to :blog_post_with_fk_in_qc,
-      class_name: "Sharded::BlogPost",
-      foreign_key: :blog_post_id,
-      query_constraints: [:blog_id, :blog_post_id]
     belongs_to :blog
   end
 
