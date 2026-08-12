@@ -544,17 +544,25 @@ class AssociationsTest < ActiveRecord::TestCase
     assert_match(/#{Regexp.escape(tags_id_col)} =/, target_sql)
   end
 
-  def test_using_query_constraints_is_allowed
-    assert_nothing_raised do
-      Sharded::BlogPost.has_many :qc_configured_comments,
-        class_name: "Sharded::Comment", query_constraints: [:blog_id, :blog_post_id]
+  def test_using_query_constraints_without_foreign_key_derives_foreign_key
+    Sharded::BlogPost.has_many :qc_configured_comments,
+      class_name: "Sharded::Comment", query_constraints: :blog_id
 
-      Sharded::Comment.belongs_to :qc_configured_blog_post,
-        class_name: "Sharded::Blog", query_constraints: [:blog_id, :blog_post_id]
-    end
+    reflection = Sharded::BlogPost.reflect_on_association(:qc_configured_comments)
 
-    assert Sharded::BlogPost.reflect_on_association(:qc_configured_comments)
-    assert Sharded::Comment.reflect_on_association(:qc_configured_blog_post)
+    assert_equal "blog_post_id", reflection.foreign_key
+    assert_equal ["blog_id", "id"], reflection.join_query_constraints_foreign_key
+    assert_equal ["blog_id", "blog_post_id"], reflection.join_query_constraints_primary_key
+
+    blog_post = sharded_blog_posts(:great_post_blog_one)
+    comment = Sharded::Comment.create!(blog_id: blog_post.blog_id, blog_post_id: blog_post.id)
+
+    assert_includes blog_post.qc_configured_comments, comment
+
+    blog_post.qc_configured_comments.delete(comment)
+
+    assert_nil comment.reload.blog_post_id
+    assert_equal blog_post.blog_id, comment.blog_id
   end
 end
 

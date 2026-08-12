@@ -529,10 +529,11 @@ module ActiveRecord
         @association_foreign_key = nil
         @association_primary_key = nil
 
-        # Preserve legacy composite foreign key behavior by routing it through the
-        # existing multi-column query key machinery. Explicit association-level
-        # query constraints remain separate and skip this normalization.
-        if options[:foreign_key].is_a?(Array) && !options[:query_constraints]
+        # Preserve composite foreign key behavior by routing it through the existing
+        # multi-column query key machinery. Track its origin so explicit association
+        # query constraints remain additive when +foreign_key+ is omitted.
+        @query_constraints_are_foreign_key = options[:foreign_key].is_a?(Array) && !options[:query_constraints]
+        if @query_constraints_are_foreign_key
           options[:query_constraints] = options.delete(:foreign_key)
         end
 
@@ -556,9 +557,9 @@ module ActiveRecord
       end
 
       # Normalizes the `query_constraints` option into [self_column, target_column] pairs.
-      # Returns nil for old-style query_constraints (plain FK column arrays without explicit foreign_key).
+      # Returns nil when the constraints came from an Array-valued `foreign_key`,
+      # which retains composite foreign key behavior.
       #
-      # Activated when `foreign_key` is also specified, or when any element is a Hash.
       # Key = column on this model's table (self), Value = column on the other table (target).
       #
       # Examples:
@@ -566,10 +567,10 @@ module ActiveRecord
       #   query_constraints: [:blog_id, { id: :blog_post_id }] => [["blog_id", "blog_id"], ["id", "blog_post_id"]]
       def normalized_query_constraints_mapping
         return unless options[:query_constraints]
+        return if @query_constraints_are_foreign_key
 
         query_constraints = options[:query_constraints]
         query_constraints = [query_constraints] unless query_constraints.is_a?(Array)
-        return unless options[:foreign_key] || query_constraints.any?(Hash)
 
         @normalized_query_constraints_mapping ||= begin
           mapping = query_constraints.flat_map { |element|
@@ -615,19 +616,22 @@ module ActiveRecord
       def foreign_key(infer_from_inverse_of: true)
         @foreign_key ||= if options[:foreign_key]
           ActiveRecord::Key.for(options[:foreign_key]).name
-        elsif options[:query_constraints]
-          query_constraints = options[:query_constraints]
-          query_constraints = [query_constraints] unless query_constraints.is_a?(Array)
-          if query_constraints.any?(Hash)
-            raise ArgumentError,
-              "`query_constraints` with column mapping (Hash) on `#{active_record}.#{macro} :#{name}` " \
-              "requires an explicit `foreign_key` option."
-          end
-          query_constraints.map { |fk| -fk.to_s.freeze }.freeze
+        elsif @query_constraints_are_foreign_key
+          options[:query_constraints].map { |fk| -fk.to_s.freeze }.freeze
         else
+          if options[:query_constraints]
+            query_constraints = options[:query_constraints]
+            query_constraints = [query_constraints] unless query_constraints.is_a?(Array)
+            if query_constraints.any?(Hash)
+              raise ArgumentError,
+                "`query_constraints` with column mapping (Hash) on `#{active_record}.#{macro} :#{name}` " \
+                "requires an explicit `foreign_key` option."
+            end
+          end
+
           derived_fk = derive_foreign_key(infer_from_inverse_of: infer_from_inverse_of)
 
-          if !derived_fk.is_a?(Array) && active_record.has_query_constraints?
+          if !options[:query_constraints] && !derived_fk.is_a?(Array) && active_record.has_query_constraints?
             derived_fk = derive_fk_query_constraints(derived_fk)
           end
 
@@ -657,9 +661,8 @@ module ActiveRecord
         @active_record_primary_key ||=
           if options[:primary_key]
             ActiveRecord::Key.for(options[:primary_key]).name
-          elsif (active_record.has_query_constraints? || options[:query_constraints]) && !options[:foreign_key]
-            # query_constraints drive the key only when no foreign_key is given;
-            # an explicit foreign_key handles writes and takes precedence here.
+          elsif @query_constraints_are_foreign_key ||
+              (active_record.has_query_constraints? && !options[:foreign_key] && !options[:query_constraints])
             active_record.query_constraints_list
           else
             active_record.primary_key_definition.inferred_id || primary_key(active_record).freeze
@@ -1074,18 +1077,16 @@ module ActiveRecord
 
         klass ||= self.klass
 
-        # An explicit `foreign_key` handles writes, so the association's writable
-        # key is the target's single primary key even when extra `query_constraints`
-        # are layered on for reads (the decoupled query-constraints feature).
-        if klass.has_query_constraints? && options[:foreign_key]
+        # An explicit or derived `foreign_key` handles writes, so the association's
+        # writable key is the target's primary key even when extra query constraints
+        # are layered on for reads.
+        if klass.has_query_constraints? &&
+            (options[:foreign_key] || (options[:query_constraints] && !@query_constraints_are_foreign_key))
           return klass.primary_key_definition.inferred_id || primary_key(klass).freeze
         end
 
-        # `query_constraints` without an explicit `foreign_key` represents the
-        # legacy composite `foreign_key` form. Query-constrained targets must use
-        # their composite query key; other targets continue to use their declared
-        # primary key, which may itself be composite.
-        if options[:query_constraints]
+        # An Array-valued `foreign_key` uses the target's composite query key.
+        if @query_constraints_are_foreign_key
           return klass.has_query_constraints? ? klass.composite_query_constraints_list : primary_key(klass)
         end
 

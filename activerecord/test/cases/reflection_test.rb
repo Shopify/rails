@@ -715,14 +715,22 @@ class ReflectionTest < ActiveRecord::TestCase
     assert_equal ["blog_id", "tag_id"], reflection.association_foreign_key
   end
 
-  def test_using_query_constraints_is_allowed
-    has_many = ActiveRecord::Reflection.create(:has_many, :clients, nil, { query_constraints: [:firm_id, :firm_name] }, Firm)
-    has_one = ActiveRecord::Reflection.create(:has_one, :account, nil, { query_constraints: [:firm_id, :firm_name] }, Firm)
-    belongs_to = ActiveRecord::Reflection.create(:belongs_to, :client, nil, { query_constraints: [:firm_id, :firm_name] }, Firm)
+  def test_query_constraints_without_foreign_key_derives_writable_foreign_key
+    has_many = ActiveRecord::Reflection.create(:has_many, :clients, nil, { query_constraints: :firm_name }, Firm)
+    has_one = ActiveRecord::Reflection.create(:has_one, :account, nil, { query_constraints: :firm_name }, Firm)
+    belongs_to = ActiveRecord::Reflection.create(:belongs_to, :client, nil, { query_constraints: :firm_name }, Firm)
 
-    assert_equal ["firm_id", "firm_name"], has_many.query_constraints_foreign_key
-    assert_equal ["firm_id", "firm_name"], has_one.query_constraints_foreign_key
-    assert_equal ["firm_id", "firm_name"], belongs_to.query_constraints_foreign_key
+    assert_equal "firm_id", has_many.foreign_key
+    assert_equal ["firm_name", "id"], has_many.join_query_constraints_foreign_key
+    assert_equal ["firm_name", "firm_id"], has_many.join_query_constraints_primary_key
+
+    assert_equal "firm_id", has_one.foreign_key
+    assert_equal ["firm_name", "id"], has_one.join_query_constraints_foreign_key
+    assert_equal ["firm_name", "firm_id"], has_one.join_query_constraints_primary_key
+
+    assert_equal "client_id", belongs_to.foreign_key
+    assert_equal ["firm_name", "client_id"], belongs_to.join_query_constraints_foreign_key
+    assert_equal ["firm_name", "id"], belongs_to.join_query_constraints_primary_key
   end
 
   def test_normalized_query_constraints_mapping_with_symbols
@@ -782,10 +790,22 @@ class ReflectionTest < ActiveRecord::TestCase
     assert_equal ["blog_id", "blog_post_id"], reflection.join_query_constraints_primary_key
   end
 
-  def test_has_many_query_constraints_cannot_include_the_foreign_key
+  def test_has_many_query_constraints_cannot_include_explicit_foreign_key
     reflection = ActiveRecord::Reflection.create(
       :has_many, :comments, nil,
       { foreign_key: :blog_post_id, query_constraints: [:blog_id, :blog_post_id], class_name: "Sharded::Comment" },
+      Sharded::BlogPost
+    )
+
+    error = assert_raises(ArgumentError) { reflection.check_validity! }
+    assert_equal "`query_constraints` on `Sharded::BlogPost.has_many :comments` " \
+      "must not include the foreign key columns [\"blog_post_id\"].", error.message
+  end
+
+  def test_has_many_query_constraints_cannot_include_derived_foreign_key
+    reflection = ActiveRecord::Reflection.create(
+      :has_many, :comments, nil,
+      { query_constraints: [:blog_id, :blog_post_id], class_name: "Sharded::Comment" },
       Sharded::BlogPost
     )
 
@@ -801,10 +821,22 @@ class ReflectionTest < ActiveRecord::TestCase
     assert_equal ["blog_id", "id", "featured_comment_id"], reflection.query_constraints_foreign_key
   end
 
-  def test_belongs_to_query_constraints_cannot_include_the_foreign_key
+  def test_belongs_to_query_constraints_cannot_include_explicit_foreign_key
     reflection = ActiveRecord::Reflection.create(
       :belongs_to, :blog_post, nil,
       { foreign_key: :blog_post_id, query_constraints: [:blog_id, :blog_post_id], class_name: "Sharded::BlogPost" },
+      Sharded::Comment
+    )
+
+    error = assert_raises(ArgumentError) { reflection.check_validity! }
+    assert_equal "`query_constraints` on `Sharded::Comment.belongs_to :blog_post` " \
+      "must not include the foreign key columns [\"blog_post_id\"].", error.message
+  end
+
+  def test_belongs_to_query_constraints_cannot_include_derived_foreign_key
+    reflection = ActiveRecord::Reflection.create(
+      :belongs_to, :blog_post, nil,
+      { query_constraints: [:blog_id, :blog_post_id], class_name: "Sharded::BlogPost" },
       Sharded::Comment
     )
 
@@ -829,18 +861,18 @@ class ReflectionTest < ActiveRecord::TestCase
     assert_equal ["blog_id", "featured_comment_id"], reflection.join_query_constraints_foreign_key
   end
 
-  def test_belongs_to_standalone_symbol_array_query_constraints_returns_nil_mapping
-    # Standalone symbol-array query_constraints (no explicit foreign_key, no Hash)
-    # is the legacy form: normalized mapping returns nil, foreign_key is derived
-    # from the query_constraints array itself.
+  def test_belongs_to_query_constraints_without_foreign_key_are_additive
     reflection = ActiveRecord::Reflection.create(
       :belongs_to, :blog_post, nil,
-      { query_constraints: [:blog_id, :blog_post_id], class_name: "Sharded::BlogPost" },
+      { query_constraints: [:blog_id], class_name: "Sharded::BlogPost" },
       Sharded::Comment
     )
 
-    assert_nil reflection.normalized_query_constraints_mapping
-    assert_equal ["blog_id", "blog_post_id"], reflection.foreign_key
+    assert_equal [["blog_id", "blog_id"]], reflection.normalized_query_constraints_mapping
+    assert_equal "blog_post_id", reflection.foreign_key
+    assert_equal "id", reflection.association_primary_key
+    assert_equal ["blog_id", "blog_post_id"], reflection.join_query_constraints_foreign_key
+    assert_equal ["blog_id", "id"], reflection.join_query_constraints_primary_key
   end
 
   def test_counter_cache_column_defaults_when_counter_cache_is_true

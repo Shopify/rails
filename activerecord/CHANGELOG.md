@@ -2,9 +2,9 @@
 
     `query_constraints` declares *additional* columns to match when querying an
     association's targets (loading, preloading, eager loading, joins, and
-    association predicates), layered on top of the foreign key. When both
-    `foreign_key` and `query_constraints` are given, only the foreign key is
-    written, while queries match on the foreign key plus the extra columns.
+    association predicates), layered on top of the foreign key. The foreign key
+    is derived by convention when omitted and is the only key written, while
+    queries match on the foreign key plus the extra columns.
 
     Additive query constraints do not participate in association stale tracking.
     Changing them does not invalidate a cached target; changing its foreign key does.
