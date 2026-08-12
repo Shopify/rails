@@ -1,3 +1,15 @@
+
+*   Fix clearing an association whose foreign key is a subset of the
+    referencing record's primary key. This affected `belongs_to` associations
+    with composite foreign keys, and `has_one` associations with either scalar
+    or composite foreign keys.
+
+    Previously, assigning `nil` preserved every foreign key column in these
+    cases. Shared columns are now preserved only when the foreign key has
+    another column that can be nulled instead.
+
+    *Matthew Draper*
+
 *   Support `query_constraints` on associations, decoupled from `foreign_key`.
 
     `query_constraints` declares *additional* columns to match when querying an
@@ -20,6 +32,45 @@
     ```
 
     *Nikita Vasilevsky*
+
+*   Deprecate `ActiveRecord::ConnectionAdapters::DatabaseStatements#create`
+    in favor of `#insert`.
+
+    `create` was an alias of `insert`, but it reads like a DDL statement
+    (compare `create_table`, `create_database`) rather than the SQL `INSERT`
+    it actually performs. Use `insert` directly instead.
+
+    *Ryuta Kamizono*
+
+*   Use bind parameters for array-form arguments in `find_by_sql` and
+    `count_by_sql`, matching the `where` behavior the API doc already
+    claimed.
+
+    *Ryuta Kamizono*
+
+*   Append `TRADITIONAL` instead of `STRICT_ALL_TABLES` to MySQL's `sql_mode`
+    by default.
+
+    On environments whose global `sql_mode` is empty — most notably Amazon
+    RDS and Aurora MySQL default parameter groups — appending only
+    `STRICT_ALL_TABLES` leaves out `NO_ZERO_IN_DATE`, `NO_ZERO_DATE`, and
+    `ERROR_FOR_DIVISION_BY_ZERO`, which MySQL 5.7+ has otherwise made part
+    of its own default. Appending `TRADITIONAL` closes the gap.
+
+    Reproducing the previous behavior is possible via
+    `variables: { sql_mode: "STRICT_ALL_TABLES" }` in `database.yml`.
+
+    *Ryuta Kamizono*
+
+*   Change the shape of `ActiveRecord::Migration::CommandRecorder#commands`.
+
+    Each recorded migration command is now stored as
+    `[cmd, args, kwargs, block]` (4-element) instead of
+    `[cmd, args, block]` (3-element) with kwargs bundled into a trailing
+    hash inside `args`. Code that inspects `recorder.commands` directly
+    needs to adapt to the new tuple shape.
+
+    *Ryuta Kamizono*
 
 *   Add query predicate hooks for Active Model types.
 
