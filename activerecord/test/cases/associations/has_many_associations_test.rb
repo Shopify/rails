@@ -99,12 +99,10 @@ class HasManyAssociationsTestPrimaryKeys < ActiveRecord::TestCase
 
       attr_accessor :use_title_key
 
-      has_many_with_variants :comments, anonymous_class: comments,
-        variants: {
-          default: { foreign_key: :post_id },
-          title: { pk: :title, fk: :body }
-        } do
-          use_title_key ? :title : :default
+      has_many_with_variants :comments,
+        default: { anonymous_class: comments, foreign_key: :post_id },
+        title: { anonymous_class: comments, pk: :title, fk: :body } do
+        use_title_key ? :title : :default
       end
     end
 
@@ -120,6 +118,28 @@ class HasManyAssociationsTestPrimaryKeys < ActiveRecord::TestCase
     assert_equal [id_comment], post.comments.to_a
   end
 
+  def test_has_many_with_variants_treats_each_keyword_as_a_variant
+    comments = Class.new(ActiveRecord::Base) do
+      self.table_name = "comments"
+      self.inheritance_column = "not_there"
+    end
+
+    posts = Class.new(ActiveRecord::Base) do
+      self.table_name = "posts"
+
+      has_many_with_variants :comments,
+        default: { anonymous_class: comments, foreign_key: :post_id },
+        title: { anonymous_class: comments, primary_key: :title, foreign_key: :body } do
+        :default
+      end
+    end
+
+    variants = posts.reflect_on_association(:comments).options[:association_variants]
+
+    assert_equal [:default, :title], variants.keys
+    assert_equal "post_id", posts.new.association(:comments).reflection.foreign_key
+  end
+
   def test_has_many_with_variants_uses_runtime_keys_when_building_records
     comments = Class.new(ActiveRecord::Base) do
       self.table_name = "comments"
@@ -131,12 +151,10 @@ class HasManyAssociationsTestPrimaryKeys < ActiveRecord::TestCase
 
       attr_accessor :use_title_key
 
-      has_many_with_variants :comments, anonymous_class: comments,
-        variants: {
-          default: { foreign_key: :post_id },
-          title: { primary_key: :title, foreign_key: :body }
-        } do
-          use_title_key ? :title : :default
+      has_many_with_variants :comments,
+        default: { anonymous_class: comments, foreign_key: :post_id },
+        title: { anonymous_class: comments, primary_key: :title, foreign_key: :body } do
+        use_title_key ? :title : :default
       end
     end
 
@@ -161,12 +179,10 @@ class HasManyAssociationsTestPrimaryKeys < ActiveRecord::TestCase
 
       attr_accessor :variant
 
-      has_many_with_variants :comments, anonymous_class: comments,
-        variants: {
-          default: { primary_key: [:id, :title], foreign_key: [:post_id, :body] },
-          title: { primary_key: [:title, :id], foreign_key: [:body, :post_id] }
-        } do
-          variant
+      has_many_with_variants :comments,
+        default: { anonymous_class: comments, primary_key: [:id, :title], foreign_key: [:post_id, :body] },
+        title: { anonymous_class: comments, primary_key: [:title, :id], foreign_key: [:body, :post_id] } do
+        variant
       end
     end
 

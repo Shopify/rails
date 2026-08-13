@@ -1428,18 +1428,20 @@ module ActiveRecord
           Reflection.add_reflection(self, name, reflection)
         end
 
-        def has_many_with_variants(name, scope = nil, variants:, **options, &variant_selector)
+        def has_many_with_variants(name, scope = nil, **variants, &variant_selector)
           raise ArgumentError, "Variant associations require a block" unless variant_selector
 
-          options[:association_variants] = variants.transform_keys(&:to_sym).transform_values do |variant_options|
-            normalize_association_variant_options(options, variant_options)
-          end.freeze
-          options[:association_variant_selector] = variant_selector
+          options = {
+            association_variants: variants.transform_keys(&:to_sym).transform_values do |variant_options|
+              normalize_association_variant_options(variant_options)
+            end.freeze,
+            association_variant_selector: variant_selector,
+          }
           reflection = Builder::HasMany.build(self, name, scope, options)
           Reflection.add_reflection(self, name, reflection)
         end
 
-        def normalize_association_variant_options(base_options, variant_options)
+        def normalize_association_variant_options(variant_options)
           variant_options = variant_options.to_hash.transform_keys(&:to_sym)
           variant_options = variant_options.dup
 
@@ -1457,7 +1459,7 @@ module ActiveRecord
             variant_options[:query_constraints] = variant_options.delete(:foreign_key)
           end
 
-          base_options.merge(variant_options).freeze
+          variant_options.freeze
         end
         private :normalize_association_variant_options
 

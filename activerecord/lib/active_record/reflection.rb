@@ -1339,6 +1339,10 @@ module ActiveRecord
         selected_variant_reflection.class_name
       end
 
+      def build_association(attributes, &block)
+        selected_variant_reflection.build_association(attributes, &block)
+      end
+
       def association_scope_cache(klass, owner, &block)
         key = [self, selected_variant_name]
         if polymorphic?

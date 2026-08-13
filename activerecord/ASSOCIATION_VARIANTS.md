@@ -9,10 +9,8 @@ such as an `id`/`post_id` association moving to a `uuid`/`post_uuid` association
 
 ```ruby
 has_many_with_variants :comments,
-  variants: {
-    default: { foreign_key: :post_id },
-    uuid: { fk: :post_uuid, pk: :uuid }
-  } do
+  default: { foreign_key: :post_id },
+  uuid: { foreign_key: :post_uuid, primary_key: :uuid } do
   if beta_flag_check(:use_uuids)
     :uuid
   else
@@ -24,99 +22,42 @@ end
 The block is evaluated against the owner record when the association is used.
 It returns the key for one of the predefined variants.
 
-## API Options
+## API
 
-### Prototype shape: explicit `variants:` plus selector block
+Variants are declared as keyword arguments directly on
+`has_many_with_variants`. Each keyword names a static association option set:
 
 ```ruby
 has_many_with_variants :comments,
-  variants: {
-    default: { foreign_key: :post_id },
-    uuid: { foreign_key: :post_uuid, primary_key: :uuid }
-  } do
+  default: { foreign_key: :post_id },
+  uuid: { foreign_key: :post_uuid, primary_key: :uuid } do
   beta_flag_check(:use_uuids) ? :uuid : :default
 end
 ```
 
-This is the shape used by the prototype. It separates static declaration from
-runtime selection, lets Rails normalize and validate every variant up front, and
-makes statement-cache keys straightforward because the runtime value is a stable
-variant key. It is concise and keeps the selected variant visually close to the
-variant table.
+The declaration has no extra `variants:` wrapper. The selector block returns
+one of the declared keyword names. Rails normalizes every option set up front,
+then uses that stable key for runtime selection and statement caching.
 
-The main drawback is that regular association blocks are already used for
-association extension methods. A `_with_variants` API can choose to give the
-block a different meaning, but that makes it less compatible with existing
-association conventions.
-
-### Short aliases inside variants
+The prototype also accepts `fk` and `pk` as short aliases inside each variant:
 
 ```ruby
 has_many_with_variants :comments,
-  variants: {
-    default: { fk: :post_id },
-    uuid: { fk: :post_uuid, pk: :uuid }
-  } do
+  default: { fk: :post_id },
+  uuid: { fk: :post_uuid, pk: :uuid } do
   beta_flag_check(:use_uuids) ? :uuid : :default
 end
 ```
 
-This is compact, but it introduces association-specific abbreviations that Rails
-does not generally use. It is useful for prototyping, but the long option names
-are clearer and avoid making variant declarations feel like a separate DSL.
+Association options belong to the variant they affect. This keeps the call
+unambiguous: every keyword after the optional scope is a variant name rather
+than a second namespace of shared association options.
 
-### Recommended public shape: selector as an option
-
-```ruby
-has_many_with_variants :comments,
-  variants: {
-    default: { foreign_key: :post_id },
-    uuid: { foreign_key: :post_uuid, primary_key: :uuid }
-  },
-  variant: -> { beta_flag_check(:use_uuids) ? :uuid : :default }
-```
-
-This is the shape I would lean toward for a public Rails API. It preserves the
-existing association block for extension methods, keeps the variant selector as
-just another association option, and still gives Rails static variant data to
-normalize up front.
-
-The tradeoff is that the selector is slightly less prominent. A clearer option
-name like `select_variant:` or `variant_selector:` might be better than
-`variant:` if we want to emphasize that the proc returns a key, not options.
-
-### Nested variant builder
-
-```ruby
-has_many_with_variants :comments do
-  variant :default, foreign_key: :post_id
-  variant :uuid, foreign_key: :post_uuid, primary_key: :uuid
-
-  select_variant { beta_flag_check(:use_uuids) ? :uuid : :default }
-end
-```
-
-This gives Rails room to grow a richer DSL, but it is heavier than the problem
-requires and conflicts with the current association block convention, where the
-block usually defines extension methods on the association proxy.
-
-### Fully dynamic options block
-
-```ruby
-has_many_with_variants :comments do
-  if beta_flag_check(:use_uuids)
-    { foreign_key: :post_uuid, primary_key: :uuid }
-  else
-    { foreign_key: :post_id }
-  end
-end
-```
-
-This was the original sketch. It is flexible, but it forces Rails to repeatedly
-normalize and merge options at runtime and makes cache keys depend on the shape
-of arbitrary returned hashes. The keyed API is better for the UUID migration
-case because the variants are known in advance and only the selection is
-dynamic.
+The block remains the runtime selector instead of an association extension
+block. That tradeoff is explicit in the `_with_variants` entrypoint. A fully
+dynamic block returning option hashes would avoid named declarations, but it
+would require repeated normalization and make cache identity depend on arbitrary
+runtime hashes.
 
 ## Chosen Approach
 
