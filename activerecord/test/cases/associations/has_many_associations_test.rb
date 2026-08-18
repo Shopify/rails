@@ -3314,6 +3314,77 @@ class HasManyAssociationsTest < ActiveRecord::TestCase
     assert_not_same regular_association, post.association(:variant_comments)
   end
 
+  def test_has_many_with_variants_treats_each_keyword_as_a_variant
+    variant = :regular
+    post_class = Class.new(ActiveRecord::Base) do
+      def self.name = "VariantOptionsPost"
+
+      self.table_name = "posts"
+
+      has_many_with_variants :variant_comments,
+        regular: { class_name: "Comment", foreign_key: :post_id },
+        title: { class_name: "Comment", foreign_key: :body, primary_key: :title } do
+          variant
+        end
+    end
+    reflection = post_class.reflect_on_association(:variant_comments)
+
+    assert_equal [:regular, :title], reflection.variant_reflections.keys
+    assert_equal :post_id, reflection.options[:foreign_key]
+
+    variant = :title
+
+    assert_equal :body, reflection.options[:foreign_key]
+    assert_equal :title, reflection.options[:primary_key]
+  end
+
+  def test_has_many_with_variants_memoizes_derived_keys_by_variant
+    variant = :regular
+    post_class = Class.new(ActiveRecord::Base) do
+      def self.name = "VariantMemoizedPost"
+
+      self.table_name = "posts"
+
+      has_many_with_variants :variant_comments,
+        regular: {
+          class_name: "Comment",
+          primary_key: [:id, :title],
+          foreign_key: [:post_id, :body],
+        },
+        title: {
+          class_name: "Comment",
+          primary_key: [:title, :id],
+          foreign_key: [:body, :post_id],
+        } do
+          variant
+        end
+    end
+    reflection = post_class.reflect_on_association(:variant_comments)
+    regular_reflection = reflection.resolve
+    regular_foreign_key = reflection.foreign_key
+    regular_primary_key = reflection.active_record_primary_key
+
+    assert_same regular_foreign_key, reflection.foreign_key
+    assert_same regular_primary_key, reflection.active_record_primary_key
+
+    variant = :title
+    title_reflection = reflection.resolve
+    title_foreign_key = reflection.foreign_key
+    title_primary_key = reflection.active_record_primary_key
+
+    assert_not_same regular_reflection, title_reflection
+    assert_equal ["body", "post_id"], title_foreign_key
+    assert_equal ["title", "id"], title_primary_key
+    assert_same title_foreign_key, reflection.foreign_key
+    assert_same title_primary_key, reflection.active_record_primary_key
+
+    variant = :regular
+
+    assert_same regular_reflection, reflection.resolve
+    assert_same regular_foreign_key, reflection.foreign_key
+    assert_same regular_primary_key, reflection.active_record_primary_key
+  end
+
   def test_has_many_with_variants_preloads_and_joins_the_selected_variant
     variant = :regular
 
