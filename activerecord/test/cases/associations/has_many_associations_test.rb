@@ -3276,6 +3276,105 @@ class HasManyAssociationsTest < ActiveRecord::TestCase
       assert_not_nil(firm.comments.first)
     end
   end
+  def test_has_many_with_variants_resolves_options_when_accessed
+    variant = :regular
+
+    post_class = Class.new(ActiveRecord::Base) do
+      def self.name = "VariantPost"
+
+      self.table_name = "posts"
+      self.inheritance_column = nil
+
+      has_many_with_variants :variant_comments,
+        regular: { class_name: "Comment", foreign_key: :post_id },
+
+        author: { class_name: "Comment", foreign_key: :author_id, primary_key: :author_id } do
+          variant
+        end
+    end
+    post = post_class.find(7)
+    post_comment = comments(:eager_other_comment1)
+    author_comment = Comment.create!(post_id: 1, author_id: post.author_id, body: "By the same author")
+    reflection = post_class.reflect_on_association(:variant_comments)
+
+    assert_equal "post_id", reflection.foreign_key
+    assert_includes post.variant_comments, post_comment
+    assert_not_includes post.variant_comments, author_comment
+    assert_equal post.id, post.variant_comments.build.post_id
+    regular_association = post.association(:variant_comments)
+
+
+    variant = :author
+
+    assert_equal "author_id", reflection.foreign_key
+    assert_equal "author_id", reflection.active_record_primary_key
+    assert_includes post.variant_comments, author_comment
+    assert_not_includes post.variant_comments, post_comment
+    assert_equal post.author_id, post.variant_comments.build.author_id
+    assert_not_same regular_association, post.association(:variant_comments)
+  end
+
+  def test_has_many_with_variants_preloads_and_joins_the_selected_variant
+    variant = :regular
+
+    post_class = Class.new(ActiveRecord::Base) do
+      def self.name = "VariantPreloadPost"
+
+      self.table_name = "posts"
+      self.inheritance_column = nil
+
+      has_many_with_variants :variant_comments,
+        regular: { class_name: "Comment", foreign_key: :post_id },
+
+        author: { class_name: "Comment", foreign_key: :author_id, primary_key: :author_id } do
+          variant
+        end
+    end
+    post_comment = comments(:eager_other_comment1)
+    author_comments = [
+      Comment.create!(post_id: 1, author_id: 2, body: "Author two"),
+      Comment.create!(post_id: 1, author_id: 3, body: "Author three"),
+    ]
+
+    assert post_class.joins(:variant_comments).where(posts: { id: 7 }, comments: { id: post_comment.id }).exists?
+
+    variant = :author
+    posts = post_class.where(id: [7, 8]).preload(:variant_comments).index_by(&:id)
+
+    assert_predicate posts[7].association(:variant_comments), :loaded?
+    assert_predicate posts[8].association(:variant_comments), :loaded?
+    assert_equal [author_comments.first], posts[7].variant_comments.select { |comment| author_comments.include?(comment) }
+    assert_equal [author_comments.last], posts[8].variant_comments.select { |comment| author_comments.include?(comment) }
+    assert post_class.joins(:variant_comments).where(posts: { id: 7 }, comments: { id: author_comments.first.id }).exists?
+  end
+
+  def test_has_many_with_variants_rejects_an_unknown_variant
+    variant = :missing
+    post_class = Class.new(ActiveRecord::Base) do
+      self.table_name = "posts"
+
+      has_many_with_variants(:variant_comments, regular: { class_name: "Comment" }) { variant }
+    end
+
+    error = assert_raises(ArgumentError) do
+      post_class.reflect_on_association(:variant_comments).foreign_key
+    end
+
+    assert_match "variant resolver returned :missing; expected one of :regular", error.message
+  end
+
+  def test_has_many_with_variants_requires_invariant_callback_options
+    error = assert_raises(ArgumentError) do
+      Class.new(ActiveRecord::Base) do
+        has_many_with_variants(:comments,
+          regular: { dependent: :destroy },
+          alternate: {}) { :regular }
+      end
+    end
+
+    assert_match "The :dependent option must be the same for every variant", error.message
+  end
+
 
   def test_key_ensuring_owner_was_is_not_valid_without_dependent_option
     error = assert_raises(ArgumentError) do

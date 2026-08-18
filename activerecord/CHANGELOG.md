@@ -23,6 +23,13 @@
     ```
 
     *Nikita Vasilevsky*
+*   Add association `_with_variants` macros for selecting options at runtime.
+
+    `belongs_to`, `has_one`, `has_many`, and `has_and_belongs_to_many` each
+    support named option variants selected by a resolver block. This supports
+    gradual key migrations without defining multiple public associations.
+
+    *Nikita Vasilevsky*
 *   Fix clearing an association whose foreign key is a subset of the
     referencing record's primary key. This affected `belongs_to` associations
     with composite foreign keys, and `has_one` associations with either scalar

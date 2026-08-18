@@ -13,6 +13,10 @@ module ActiveRecord::Associations::Builder # :nodoc:
       valid << :ensuring_owner_was if options[:dependent] == :destroy_async
       valid
     end
+    def self.variant_invariant_options
+      super + [:polymorphic, :counter_cache, :optional, :default]
+    end
+
 
     def self.valid_dependent_options
       [:destroy, :delete, :destroy_async]
@@ -176,8 +180,8 @@ module ActiveRecord::Associations::Builder # :nodoc:
       CODE
     end
 
-    private_class_method :macro, :valid_options, :valid_dependent_options, :define_callbacks,
-      :define_validations, :define_change_tracking_methods, :add_counter_cache_callbacks,
-      :add_touch_callbacks, :add_default_callbacks, :add_destroy_callbacks
+    private_class_method :macro, :valid_options, :variant_invariant_options, :valid_dependent_options,
+      :define_callbacks, :define_validations, :add_counter_cache_callbacks, :add_touch_callbacks,
+      :add_default_callbacks, :add_destroy_callbacks
   end
 end

@@ -7,6 +7,10 @@ module ActiveRecord::Associations::Builder # :nodoc:
     def self.valid_options(options)
       super + [:required, :touch]
     end
+    def self.variant_invariant_options
+      super + [:required, :touch]
+    end
+
 
     def self.define_accessors(model, reflection)
       super
@@ -71,6 +75,6 @@ module ActiveRecord::Associations::Builder # :nodoc:
       end
     end
 
-    private_class_method :valid_options, :define_accessors, :define_constructors
+    private_class_method :valid_options, :variant_invariant_options, :define_accessors, :define_constructors
   end
 end

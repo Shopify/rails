@@ -9,6 +9,10 @@ module ActiveRecord::Associations::Builder # :nodoc:
     def self.valid_options(options)
       super + [:class_name, :before_add, :after_add, :before_remove, :after_remove, :extend]
     end
+    def self.variant_invariant_options
+      super + CALLBACKS
+    end
+
 
     def self.define_callbacks(model, reflection)
       super
@@ -79,6 +83,7 @@ module ActiveRecord::Associations::Builder # :nodoc:
       CODE
     end
 
-    private_class_method :valid_options, :define_callback, :define_extensions, :define_readers, :define_writers
+    private_class_method :valid_options, :variant_invariant_options, :define_callback, :define_extensions,
+      :define_readers, :define_writers
   end
 end

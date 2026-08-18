@@ -147,6 +147,62 @@ class HasAndBelongsToManyAssociationsTest < ActiveRecord::TestCase
     preloaded = Post.includes(:categories).find post.id
     assert_equal preloaded, Marshal.load(Marshal.dump(preloaded))
   end
+  def test_has_and_belongs_to_many_with_variants_resolves_join_keys_when_accessed
+    variant = :regular
+
+    developer_class = Class.new(ActiveRecord::Base) do
+      def self.name = "VariantDeveloper"
+
+      self.table_name = "developers"
+
+      has_and_belongs_to_many_with_variants :variant_projects,
+        regular: {
+
+          class_name: "Project",
+          join_table: "developers_projects",
+          foreign_key: :developer_id,
+          association_foreign_key: :project_id,
+        },
+        reversed: {
+          class_name: "Project",
+          join_table: "developers_projects",
+          foreign_key: :project_id,
+          association_foreign_key: :developer_id,
+        } do
+          variant
+        end
+    end
+    developer = developer_class.create!(name: "Variant developer")
+    regular_project = Project.create!(name: "Regular variant")
+
+    reversed_project = Project.create!(name: "Reversed variant")
+    developer_class.lease_connection.execute(<<~SQL)
+      INSERT INTO developers_projects (developer_id, project_id)
+      VALUES (#{developer.id}, #{regular_project.id}), (#{reversed_project.id}, #{developer.id})
+
+    SQL
+    reflection = developer_class.reflect_on_association(:variant_projects)
+
+    assert_equal :has_and_belongs_to_many, reflection.macro
+    assert_equal [regular_project], developer.variant_projects.to_a
+    regular_association = developer.association(:variant_projects)
+
+
+    variant = :reversed
+
+    assert_equal "project_id", reflection.foreign_key
+    assert_equal [reversed_project], developer.variant_projects.to_a
+    assert_not_same regular_association, developer.association(:variant_projects)
+
+    added_project = Project.create!(name: "Added through reversed variant")
+    developer.variant_projects << added_project
+    join = developer_class.lease_connection.select_one(<<~SQL)
+      SELECT * FROM developers_projects
+      WHERE developer_id = #{added_project.id} AND project_id = #{developer.id}
+    SQL
+    assert_not_nil join
+  end
+
 
   def test_should_property_quote_string_primary_keys
     setup_data_for_habtm_case

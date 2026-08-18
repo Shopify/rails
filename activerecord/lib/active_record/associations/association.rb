@@ -33,8 +33,9 @@ module ActiveRecord
     # <tt>owner</tt>, the collection of its posts as <tt>target</tt>, and
     # the <tt>reflection</tt> object represents a <tt>:has_many</tt> macro.
     class Association # :nodoc:
-      attr_accessor :owner
+      attr_accessor :owner, :variant_reflection
       attr_reader :reflection, :disable_joins
+
 
       delegate :options, to: :reflection
 
@@ -202,17 +203,27 @@ module ActiveRecord
         nil
       end
 
-      # We can't dump @reflection and @through_reflection since it contains the scope proc
+      # We can't dump reflection objects since they can contain procs.
       def marshal_dump
-        ivars = (instance_variables - [:@reflection, :@through_reflection]).map { |name| [name, instance_variable_get(name)] }
+        ivars = (instance_variables - [:@reflection, :@through_reflection, :@variant_reflection]).map { |name| [name, instance_variable_get(name)] }
         [@reflection.name, ivars]
       end
 
       def marshal_load(data)
         reflection_name, ivars = data
         ivars.each { |name, val| instance_variable_set(name, val) }
-        @reflection = @owner.class._reflect_on_association(reflection_name)
+        reflection = @owner.class._reflect_on_association(reflection_name)
+        if reflection.variant?
+          @variant_reflection = reflection
+          @reflection = reflection.resolve
+          @disable_joins = @reflection.options[:disable_joins] || false
+          reset
+          reset_scope
+        else
+          @reflection = reflection
+        end
       end
+
 
       def initialize_attributes(record, except_from_scope_attributes = nil) # :nodoc:
         except_from_scope_attributes ||= {}

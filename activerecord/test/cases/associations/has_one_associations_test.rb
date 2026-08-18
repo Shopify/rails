@@ -61,6 +61,36 @@ class HasOneAssociationsTest < ActiveRecord::TestCase
       assert_equal first_account.credit_limit, firm.account.credit_limit
     end
   end
+  def test_has_one_with_variants_resolves_options_when_accessed
+    variant = :id
+    firm_class = Class.new(ActiveRecord::Base) do
+      def self.name = "VariantFirm"
+
+      self.table_name = "companies"
+      self.inheritance_column = nil
+
+      has_one_with_variants :variant_account,
+        id: { class_name: "Account", foreign_key: :firm_id },
+        name: { class_name: "Account", foreign_key: :firm_name, primary_key: :name } do
+          variant
+        end
+    end
+    firm = firm_class.find(companies(:first_firm).id)
+    reflection = firm_class.reflect_on_association(:variant_account)
+
+    assert_equal :has_one, reflection.macro
+    assert_equal Account.find_by(firm_id: firm.id), firm.variant_account
+    assert_equal firm.id, firm.build_variant_account.firm_id
+    id_association = firm.association(:variant_account)
+
+    variant = :name
+
+    assert_equal "firm_name", reflection.foreign_key
+    assert_equal Account.find_by(firm_name: firm.name), firm.variant_account
+    assert_equal firm.name, firm.build_variant_account.firm_name
+    assert_not_same id_association, firm.association(:variant_account)
+  end
+
 
   def test_has_one_does_not_use_order_by
     sql_log = capture_sql { companies(:first_firm).account }

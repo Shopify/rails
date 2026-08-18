@@ -82,6 +82,8 @@ module ActiveRecord
           polymorphic_parent = !root? && parent.polymorphic?
           source_records.each do |record|
             reflection = record.class._reflect_on_association(association)
+            reflection = reflection.resolve if reflection&.variant?
+
             next if polymorphic_parent && !reflection || !record.association(association).klass
             (h[reflection] ||= []) << record
           end

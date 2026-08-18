@@ -705,6 +705,39 @@ end
 This relation can be [bi-directional](#bi-directional-associations) when used in
 combination with `belongs_to` on the other model.
 
+#### Dynamic Association Variants
+
+Use the `_with_variants` association macros when one logical association needs
+different options selected at runtime. Variants are available for every
+association kind: `belongs_to_with_variants`, `has_one_with_variants`,
+`has_many_with_variants`, and `has_and_belongs_to_many_with_variants`. Each
+keyword names a variant and maps to options accepted by the corresponding
+association macro. The block returns the active variant name:
+
+```ruby
+class Post < ApplicationRecord
+  has_many_with_variants :comments,
+    regular: { foreign_key: :post_id },
+    uuid: { foreign_key: :post_uuid, primary_key: :uuid } do
+      use_uuids? ? :uuid : :regular
+    end
+end
+```
+
+The resolver is reevaluated when the association is accessed. It receives no
+association owner; when declared in the model body as above, `self` is the
+model class, so the resolver cannot call instance methods on the record. If its
+result changes, Rails replaces the cached association so that previously
+resolved keys are not reused. The resolver must return a configured variant
+name.
+
+Options that install callbacks on the model must be identical in every variant.
+These include `dependent`, `validate`, `autosave`, and `deprecated`; collection
+callbacks; `required` and `touch` on singular associations; and `polymorphic`,
+`counter_cache`, `optional`, and `default` on `belongs_to`. Variants must also
+use the same underlying association type, such as all direct or all `:through`
+associations.
+
 #### Methods Added by `has_many`
 
 When you declare a `has_many` association, the declaring class gains numerous

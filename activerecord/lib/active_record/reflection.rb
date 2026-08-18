@@ -172,6 +172,10 @@ module ActiveRecord
       def through_reflection?
         false
       end
+      def variant?
+        false
+      end
+
 
       def table_name
         klass.table_name
@@ -1020,6 +1024,69 @@ module ActiveRecord
         end
       end
     end
+    class VariantReflection # :nodoc:
+      attr_accessor :parent_reflection
+      attr_reader :active_record, :name, :plural_name, :variant_reflections
+
+      def initialize(variant_reflections, resolver)
+        @variant_reflections = variant_reflections.freeze
+        @resolver = resolver
+
+        reflection = variant_reflections.values.first
+        @active_record = reflection.active_record
+        @name = reflection.name
+        @plural_name = reflection.plural_name
+        @macro = reflection.macro
+        @collection = reflection.collection?
+        @has_one = reflection.has_one?
+        @belongs_to = reflection.belongs_to?
+      end
+
+      def resolve
+        variant = @resolver.call
+        @variant_reflections.fetch(variant) do
+          raise ArgumentError, "The #{@active_record.name}##{@name} variant resolver returned #{variant.inspect}; " \
+            "expected one of #{@variant_reflections.keys.map(&:inspect).join(", ")}"
+        end
+      end
+
+      def variant?
+        true
+      end
+
+      attr_reader :macro
+
+      def collection?
+        @collection
+      end
+
+      def has_one?
+        @has_one
+      end
+
+      def belongs_to?
+        @belongs_to
+      end
+
+      def autosave=(autosave)
+        @variant_reflections.each_value { |reflection| reflection.autosave = autosave }
+      end
+
+      def clear_association_scope_cache
+        @variant_reflections.each_value(&:clear_association_scope_cache)
+      end
+
+      def respond_to_missing?(method, include_private = false)
+        resolve.respond_to?(method, include_private) || super
+      end
+
+      private
+        def method_missing(method, ...)
+          resolve.__send__(method, ...)
+        end
+    end
+
+
 
     class HasOneReflection < AssociationReflection # :nodoc:
       def macro; :has_one; end

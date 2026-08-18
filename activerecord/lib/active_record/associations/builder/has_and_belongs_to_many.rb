@@ -2,13 +2,15 @@
 
 module ActiveRecord::Associations::Builder # :nodoc:
   class HasAndBelongsToMany # :nodoc:
-    attr_reader :lhs_model, :association_name, :options
+    attr_reader :lhs_model, :association_name, :options, :variant_name
 
-    def initialize(association_name, lhs_model, options)
+    def initialize(association_name, lhs_model, options, variant_name: nil)
       @association_name = association_name
       @lhs_model = lhs_model
       @options = options
+      @variant_name = variant_name
     end
+
 
     def through_model
       join_model = Class.new(ActiveRecord::Base) {
@@ -45,7 +47,8 @@ module ActiveRecord::Associations::Builder # :nodoc:
         end
       }
 
-      join_model.name                = "HABTM_#{association_name.to_s.camelize}"
+      join_model.name = ["HABTM", association_name.to_s.camelize, variant_name&.to_s&.camelize].compact.join("_")
+
       join_model.table_name_resolver = -> { table_name }
       join_model.left_model          = lhs_model
 
@@ -55,20 +58,22 @@ module ActiveRecord::Associations::Builder # :nodoc:
     end
 
     def middle_reflection(join_model)
-      middle_name = [lhs_model.name.downcase.pluralize,
-                     association_name.to_s].sort.join("_").gsub("::", "_").to_sym
+      middle_name = [lhs_model.name.downcase.pluralize, association_name.to_s].sort.join("_").gsub("::", "_")
+      middle_name = "#{middle_name}_#{variant_name}_variant" if variant_name
       middle_options = middle_options join_model
 
       HasMany.create_reflection(lhs_model,
-                                middle_name,
+                                middle_name.to_sym,
                                 nil,
                                 middle_options)
     end
+
 
     private
       def middle_options(join_model)
         middle_options = {}
         middle_options[:class_name] = "#{lhs_model.name}::#{join_model.name}"
+        middle_options[:anonymous_class] = join_model if variant_name
         if options.key? :foreign_key
           middle_options[:foreign_key] = options[:foreign_key]
         end

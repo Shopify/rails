@@ -69,6 +69,38 @@ class BelongsToAssociationsTest < ActiveRecord::TestCase
       assert_equal first_firm.name, client.firm.name
     end
   end
+  def test_belongs_to_with_variants_resolves_options_when_accessed
+    variant = :post
+    comment_class = Class.new(ActiveRecord::Base) do
+      def self.name = "VariantComment"
+
+      self.table_name = "comments"
+      self.inheritance_column = nil
+
+      belongs_to_with_variants :variant_post,
+        post: { class_name: "Post", foreign_key: :post_id },
+        author: { class_name: "Post", foreign_key: :author_id } do
+          variant
+        end
+    end
+    comment = comment_class.create!(post_id: 1, author_id: 7, body: "Variant owner")
+    reflection = comment_class.reflect_on_association(:variant_post)
+
+    assert_equal :belongs_to, reflection.macro
+    assert_equal Post.find(1), comment.variant_post
+    post_association = comment.association(:variant_post)
+
+    variant = :author
+
+    assert_equal "author_id", reflection.foreign_key
+    assert_equal Post.find(7), comment.variant_post
+    assert_not_same post_association, comment.association(:variant_post)
+
+    comment.variant_post = Post.find(8)
+    assert_equal 8, comment.author_id
+    assert_equal 1, comment.post_id
+  end
+
 
   def test_where_with_custom_primary_key
     assert_equal [authors(:david)], Author.where(owned_essay: essays(:david_modest_proposal))

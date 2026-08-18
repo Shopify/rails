@@ -52,17 +52,31 @@ module ActiveRecord
     # Returns the association instance for the given name, instantiating it if it doesn't already exist
     def association(name) # :nodoc:
       association = association_instance_get(name)
+      variant_reflection = association&.variant_reflection
+
+      if variant_reflection
+        reflection = variant_reflection.resolve
+        association = nil unless reflection.equal?(association.reflection)
+      end
 
       if association.nil?
-        unless reflection = self.class._reflect_on_association(name)
+        unless reflection ||= self.class._reflect_on_association(name)
           raise AssociationNotFoundError.new(self, name)
         end
+
+        if reflection.variant?
+          variant_reflection = reflection
+          reflection = reflection.resolve
+        end
+
         association = reflection.association_class.new(self, reflection)
+        association.variant_reflection = variant_reflection
         association_instance_set(name, association)
       end
 
       association
     end
+
 
     def association_cached?(name) # :nodoc:
       @association_cache.key?(name)
@@ -1430,6 +1444,27 @@ module ActiveRecord
           reflection = Builder::HasMany.build(self, name, scope, options, &extension)
           Reflection.add_reflection(self, name, reflection)
         end
+        # Defines a +has_many+ association whose options are selected at runtime.
+        # Each keyword names a variant and contains any options accepted by +has_many+.
+        # The resolver block must return one of those names:
+        #
+        #   has_many_with_variants :comments,
+        #     regular: { foreign_key: :post_id },
+        #     uuid: { foreign_key: :post_uuid, primary_key: :uuid } do
+        #       use_uuids? ? :uuid : :regular
+        #     end
+        #
+        # The resolver receives no owner record. Here, +self+ is the model class.
+        # Selection is reevaluated when the association is accessed. If it changes,
+        # the previously cached association is replaced. Options which install model
+        # callbacks (+dependent+, +validate+, +autosave+, collection callbacks, and
+        # +deprecated+) must be the same in every variant. All variants must also be
+        # either direct associations or +:through+ associations.
+        def has_many_with_variants(name, **variants, &resolver)
+          reflection = Builder::HasMany.build_with_variants(self, name, variants, resolver)
+          Reflection.add_reflection(self, name, reflection)
+        end
+
 
         # Specifies a one-to-one association with another class. This method
         # should only be used if the other class contains the foreign key. If
@@ -1634,6 +1669,13 @@ module ActiveRecord
           reflection = Builder::HasOne.build(self, name, scope, options)
           Reflection.add_reflection(self, name, reflection)
         end
+        # Defines a +has_one+ association whose options are selected at runtime.
+        # See #has_many_with_variants for variant selection semantics.
+        def has_one_with_variants(name, **variants, &resolver)
+          reflection = Builder::HasOne.build_with_variants(self, name, variants, resolver)
+          Reflection.add_reflection(self, name, reflection)
+        end
+
 
         # Specifies a one-to-one association with another class. This method
         # should only be used if this class contains the foreign key. If the
@@ -1833,6 +1875,13 @@ module ActiveRecord
           reflection = Builder::BelongsTo.build(self, name, scope, options)
           Reflection.add_reflection(self, name, reflection)
         end
+        # Defines a +belongs_to+ association whose options are selected at runtime.
+        # See #has_many_with_variants for variant selection semantics.
+        def belongs_to_with_variants(name, **variants, &resolver)
+          reflection = Builder::BelongsTo.build_with_variants(self, name, variants, resolver)
+          Reflection.add_reflection(self, name, reflection)
+        end
+
 
         # Specifies a many-to-many relationship with another class. This associates two classes via an
         # intermediate join table. Unless the join table is explicitly specified as an option, it is
@@ -2049,6 +2098,56 @@ module ActiveRecord
 
           has_many name, scope, **hm_options, &extension
           _reflections[name].parent_reflection = habtm_reflection
+        end
+
+        # Defines a +has_and_belongs_to_many+ association whose options are selected at runtime.
+        # See #has_many_with_variants for variant selection semantics.
+        def has_and_belongs_to_many_with_variants(name, **variants, &resolver)
+          Builder::HasMany.validate_variant_definition(self, name, variants, resolver)
+
+          through_reflections = {}
+          habtm_reflections = {}
+
+          variants.each do |variant, variant_options|
+            options = variant_options.dup
+            habtm_reflection = ActiveRecord::Reflection::HasAndBelongsToManyReflection.new(name, nil, options, self)
+            builder = Builder::HasAndBelongsToMany.new(name, self, options, variant_name: variant)
+            join_model = builder.through_model
+
+            const_set(join_model.name, join_model)
+            private_constant(join_model.name)
+
+            middle_reflection = builder.middle_reflection(join_model)
+            Builder::HasMany.define_callbacks(self, middle_reflection)
+            Reflection.add_reflection(self, middle_reflection.name, middle_reflection)
+            middle_reflection.parent_reflection = habtm_reflection
+
+            hm_options = {
+              through: middle_reflection.name,
+              source: join_model.right_reflection.name,
+            }
+            [:before_add, :after_add, :before_remove, :after_remove, :autosave, :validate, :join_table, :class_name, :extend, :strict_loading, :deprecated].each do |option|
+              hm_options[option] = options[option] if options.key?(option)
+            end
+
+            through_reflection = Builder::HasMany.create_reflection(self, name, nil, hm_options)
+            through_reflection.parent_reflection = habtm_reflection
+            through_reflections[variant] = through_reflection
+            habtm_reflections[variant] = habtm_reflection
+          end
+
+          reflection = Builder::HasMany.build_variant_reflection(self, name, through_reflections, resolver)
+          reflection.parent_reflection = ActiveRecord::Reflection::VariantReflection.new(habtm_reflections, resolver)
+          Reflection.add_reflection(self, name, reflection)
+
+          include Module.new {
+            define_method(:destroy_associations) do
+              reflection = self.class._reflect_on_association(name).resolve
+              association(reflection.through_reflection.name).delete_all(:delete_all)
+              association(name).reset
+              super()
+            end
+          }
         end
       end
   end

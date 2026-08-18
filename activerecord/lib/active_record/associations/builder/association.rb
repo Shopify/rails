@@ -21,21 +21,50 @@ module ActiveRecord::Associations::Builder # :nodoc:
     VALID_OPTIONS = [
       :anonymous_class, :primary_key, :foreign_key, :dependent, :validate, :inverse_of, :strict_loading, :query_constraints, :deprecated
     ].freeze # :nodoc:
+    VARIANT_INVARIANT_OPTIONS = [:dependent, :validate, :autosave, :deprecated].freeze # :nodoc:
+
+
 
     def self.build(model, name, scope, options, &block)
-      if model.dangerous_attribute_method?(name)
-        raise ArgumentError, "You tried to define an association named #{name} on the model #{model.name}, but " \
-                             "this will conflict with a method #{name} already defined by Active Record. " \
-                             "Please choose a different association name."
-      end
+      check_name_conflict!(model, name)
+
 
       reflection = create_reflection(model, name, scope, options, &block)
-      define_accessors(model, reflection)
-      define_callbacks(model, reflection)
-      define_validations(model, reflection)
-      define_change_tracking_methods(model, reflection)
+      define_model_methods(model, reflection)
       reflection
     end
+
+    def self.build_with_variants(model, name, variants, resolver)
+      validate_variant_definition(model, name, variants, resolver)
+
+      reflections = variants.transform_values do |options|
+        create_reflection(model, name, nil, options.dup)
+      end
+
+      build_variant_reflection(model, name, reflections, resolver)
+    end
+
+    def self.validate_variant_definition(model, name, variants, resolver)
+      check_name_conflict!(model, name)
+      raise ArgumentError, "A variant resolver block is required" unless resolver
+      raise ArgumentError, "At least one association variant is required" if variants.empty?
+
+      variants.each do |variant, options|
+        raise ArgumentError, "Association variant names must be Symbols" unless variant.is_a?(Symbol)
+        raise ArgumentError, "Options for association variant #{variant.inspect} must be a Hash" unless options.is_a?(Hash)
+      end
+    end
+
+    def self.build_variant_reflection(model, name, reflections, resolver)
+      validate_variant_invariants(model, name, reflections)
+      reflection = ActiveRecord::Reflection::VariantReflection.new(reflections, resolver)
+      define_model_methods(model, reflections.values.first)
+      synchronize_variant_invariant_options(reflections)
+      reflection
+    end
+
+
+
 
     def self.create_reflection(model, name, scope, options, &block)
       raise ArgumentError, "association names must be a Symbol" unless name.kind_of?(Symbol)
@@ -57,6 +86,55 @@ module ActiveRecord::Associations::Builder # :nodoc:
         scope
       end
     end
+    def self.check_name_conflict!(model, name)
+      if model.dangerous_attribute_method?(name)
+        raise ArgumentError, "You tried to define an association named #{name} on the model #{model.name}, but " \
+                             "this will conflict with a method #{name} already defined by Active Record. " \
+                             "Please choose a different association name."
+      end
+    end
+
+    def self.define_model_methods(model, reflection)
+      define_accessors(model, reflection)
+      define_callbacks(model, reflection)
+      define_validations(model, reflection)
+      define_change_tracking_methods(model, reflection)
+    end
+
+    def self.variant_invariant_options
+      VARIANT_INVARIANT_OPTIONS
+    end
+
+    def self.validate_variant_invariants(model, name, reflections)
+      association_classes = reflections.each_value.map(&:association_class).uniq
+      if association_classes.many?
+        raise ArgumentError, "All variants of #{model.name}##{name} must use the same association type"
+      end
+
+      variant_invariant_options.each do |option|
+        values = reflections.each_value.map { |reflection| reflection.options[option] }
+        next if values.all? { |value| value == values.first }
+
+        raise ArgumentError, "The :#{option} option must be the same for every variant of #{model.name}##{name}"
+      end
+    end
+    def self.synchronize_variant_invariant_options(reflections)
+      source_options = reflections.values.first.options
+
+      reflections.each_value.with_index do |reflection, index|
+        next if index == 0
+
+        variant_invariant_options.each do |option|
+          if source_options.key?(option)
+            reflection.options[option] = source_options[option]
+          else
+            reflection.options.delete(option)
+          end
+        end
+      end
+    end
+
+
 
     def self.macro
       raise NotImplementedError
@@ -174,7 +252,9 @@ module ActiveRecord::Associations::Builder # :nodoc:
     end
 
     private_class_method :build_scope, :macro, :valid_options, :validate_options, :define_extensions,
-      :define_callbacks, :define_accessors, :define_readers, :define_writers, :define_validations,
+      :check_name_conflict!, :define_model_methods, :variant_invariant_options,
+      :validate_variant_invariants, :synchronize_variant_invariant_options, :define_callbacks,
+      :define_accessors, :define_readers, :define_writers, :define_validations,
       :define_change_tracking_methods, :valid_dependent_options, :check_dependent_options,
       :add_destroy_callbacks, :add_after_commit_jobs_callback
   end
