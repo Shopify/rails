@@ -101,6 +101,46 @@ class BelongsToAssociationsTest < ActiveRecord::TestCase
     assert_equal 1, comment.post_id
   end
 
+  def test_belongs_to_with_variants_resolves_decoupled_query_constraints
+    variant = :regular
+    comment_class = Class.new(ActiveRecord::Base) do
+      def self.name = "VariantConstrainedComment"
+
+      self.table_name = "comments"
+      self.inheritance_column = nil
+
+      belongs_to_with_variants :variant_post,
+        regular: { class_name: "Post", foreign_key: :post_id },
+        constrained: {
+          class_name: "Post",
+          foreign_key: :post_id,
+          query_constraints: { body: :title },
+        } do
+          variant
+        end
+    end
+    post = Post.find(1)
+    comment = comment_class.create!(post_id: post.id, body: "Different title")
+    reflection = comment_class.reflect_on_association(:variant_post)
+
+    assert_equal post, comment.variant_post
+
+    variant = :constrained
+
+    assert_equal ["body", "post_id"], reflection.join_query_constraints_foreign_key
+    assert_equal ["title", "id"], reflection.join_query_constraints_primary_key
+    assert_nil comment.variant_post
+
+    comment.body = post.title
+    comment.association(:variant_post).reset
+    assert_equal post, comment.variant_post
+
+    other_post = Post.find(2)
+    comment.variant_post = other_post
+    assert_equal other_post.id, comment.post_id
+    assert_equal post.title, comment.body
+  end
+
 
   def test_where_with_custom_primary_key
     assert_equal [authors(:david)], Author.where(owned_essay: essays(:david_modest_proposal))

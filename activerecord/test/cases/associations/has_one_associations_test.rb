@@ -91,6 +91,41 @@ class HasOneAssociationsTest < ActiveRecord::TestCase
     assert_not_same id_association, firm.association(:variant_account)
   end
 
+  def test_has_one_with_variants_resolves_decoupled_query_constraints
+    variant = :regular
+    firm_class = Class.new(ActiveRecord::Base) do
+      def self.name = "VariantConstrainedFirm"
+
+      self.table_name = "companies"
+      self.inheritance_column = nil
+
+      has_one_with_variants :variant_account,
+        regular: { class_name: "Account", foreign_key: :firm_id },
+        constrained: {
+          class_name: "Account",
+          foreign_key: :firm_id,
+          query_constraints: { name: :firm_name },
+        } do
+          variant
+        end
+    end
+    firm = firm_class.create!(name: "Variant constrained firm")
+    mismatching_account = Account.create!(firm_id: firm.id, firm_name: "Different firm", credit_limit: 100)
+    reflection = firm_class.reflect_on_association(:variant_account)
+
+    assert_equal mismatching_account, firm.variant_account
+
+    variant = :constrained
+
+    assert_equal ["name", "id"], reflection.join_query_constraints_foreign_key
+    assert_equal ["firm_name", "firm_id"], reflection.join_query_constraints_primary_key
+    assert_nil firm.variant_account
+
+    built_account = firm.build_variant_account
+    assert_equal firm.id, built_account.firm_id
+    assert_nil built_account.firm_name
+  end
+
 
   def test_has_one_does_not_use_order_by
     sql_log = capture_sql { companies(:first_firm).account }

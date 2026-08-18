@@ -3314,6 +3314,52 @@ class HasManyAssociationsTest < ActiveRecord::TestCase
     assert_not_same regular_association, post.association(:variant_comments)
   end
 
+  def test_has_many_with_variants_resolves_decoupled_query_constraints
+    variant = :regular
+    post_class = Class.new(ActiveRecord::Base) do
+      def self.name = "VariantConstrainedPost"
+
+      self.table_name = "posts"
+      self.inheritance_column = nil
+
+      has_many_with_variants :variant_comments,
+        regular: { class_name: "Comment", foreign_key: :post_id },
+        constrained: {
+          class_name: "Comment",
+          foreign_key: :post_id,
+          query_constraints: { title: :body },
+        } do
+          variant
+        end
+    end
+    post = post_class.find(7)
+    matching_comment = Comment.create!(post_id: post.id, body: post.title)
+    mismatching_comment = Comment.create!(post_id: post.id, body: "Different title")
+    reflection = post_class.reflect_on_association(:variant_comments)
+
+    assert_includes post.variant_comments, matching_comment
+    assert_includes post.variant_comments, mismatching_comment
+    regular_association = post.association(:variant_comments)
+
+    variant = :constrained
+
+    assert_equal ["title", "id"], reflection.join_query_constraints_foreign_key
+    assert_equal ["body", "post_id"], reflection.join_query_constraints_primary_key
+    assert_includes post.variant_comments, matching_comment
+    assert_not_includes post.variant_comments, mismatching_comment
+    assert_not_same regular_association, post.association(:variant_comments)
+
+    built_comment = post.variant_comments.build
+    assert_equal post.id, built_comment.post_id
+    assert_nil built_comment.body
+
+    preloaded_post = post_class.where(id: post.id).preload(:variant_comments).first
+    assert_includes preloaded_post.variant_comments, matching_comment
+    assert_not_includes preloaded_post.variant_comments, mismatching_comment
+    assert post_class.joins(:variant_comments).where(posts: { id: post.id }, comments: { id: matching_comment.id }).exists?
+    assert_not post_class.joins(:variant_comments).where(posts: { id: post.id }, comments: { id: mismatching_comment.id }).exists?
+  end
+
   def test_has_many_with_variants_treats_each_keyword_as_a_variant
     variant = :regular
     post_class = Class.new(ActiveRecord::Base) do
