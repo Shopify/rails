@@ -173,6 +173,19 @@ module ActiveRecord
         false
       end
 
+      # Whether this reflection declares runtime variants. Only the abstract
+      # reflection registered on the model answers +true+; see
+      # ActiveRecord::Associations::ClassMethods#has_many_with_variants.
+      def has_variants?
+        false
+      end
+
+      # Whether this reflection is one concrete resolution of a variant
+      # association rather than an association declared in its own right.
+      def variant?
+        false
+      end
+
       def table_name
         klass.table_name
       end
@@ -539,7 +552,37 @@ module ActiveRecord
 
         @deprecated = !!options[:deprecated]
 
+        @variant_reflections = nil
+        @variant_selector = nil
+        @variant_name = nil
+
         ensure_option_not_given_as_class!(:class_name)
+      end
+
+      # The concrete reflections for each declared variant, keyed by variant name,
+      # and the block that selects between them. Both are +nil+ unless this is the
+      # abstract reflection of a variant association.
+      attr_reader :variant_reflections, :variant_selector
+
+      # The name of the variant this reflection concretely represents, or +nil+
+      # if it is not a variant reflection.
+      attr_reader :variant_name
+
+      def declare_variants(variant_reflections, variant_selector) # :nodoc:
+        @variant_reflections = variant_reflections.freeze
+        @variant_selector = variant_selector
+      end
+
+      def declare_variant_name(variant_name) # :nodoc:
+        @variant_name = variant_name
+      end
+
+      def has_variants?
+        !@variant_reflections.nil?
+      end
+
+      def variant?
+        !@variant_name.nil?
       end
 
       def association_scope_cache(klass, owner, &block)
@@ -910,6 +953,11 @@ module ActiveRecord
           reflection.options[:inverse_of] != false &&
             !reflection.options[:through] &&
             !reflection.options[:foreign_key] &&
+            # Two associations can be inverse-compatible under one variant and not
+            # under another, and inference memoizes per reflection. Decline rather
+            # than cache an answer that is only true for the current context; an
+            # explicit +inverse_of+ is a shared option and so holds for every variant.
+            !reflection.has_variants? && !reflection.variant? &&
             scope_allows_automatic_inverse_of?(reflection, inverse_reflection)
         end
 
@@ -1447,6 +1495,113 @@ module ActiveRecord
           type = @previous_reflection.foreign_type
           source_type = @previous_reflection.options[:source_type]
           lambda { |object| where(type => source_type) }
+        end
+    end
+
+    # Binds the abstract reflection of a variant association to a single
+    # ActiveRecord::Associations::Association, and therefore to a single owner record.
+    #
+    # Reflections are shared class-level metadata, so the selected variant cannot be
+    # stored on the abstract reflection without one record's selection leaking into
+    # every other record of that class. Instead each association instance wraps the
+    # abstract reflection in one of these.
+    #
+    # Delegation defaults to the *selected variant's* reflection, so everything
+    # derived from options -- keys, class name, scope, validity -- is already correct
+    # without needing to be enumerated here. Only members whose meaning belongs to
+    # the association as a whole, rather than to one variant of it, are overridden.
+    class AssociationVariantReflection < SimpleDelegator # :nodoc:
+      attr_reader :association, :abstract_reflection
+
+      def initialize(reflection, association)
+        @abstract_reflection = reflection
+        @association = association
+        @variant_name = nil
+        super(reflection)
+      end
+
+      # Anything not overridden below resolves against the selected variant.
+      def __getobj__
+        @abstract_reflection.variant_reflections.fetch(variant_name)
+      end
+
+      def __setobj__(reflection)
+        @abstract_reflection = reflection
+      end
+
+      def has_variants?
+        true
+      end
+
+      # This is the abstract association, not one concrete variant of it.
+      def variant?
+        false
+      end
+
+      # The selected variant name, memoized so that a single association access
+      # evaluates the selector once. Association#reset clears it, and
+      # Association#stale_target? refreshes it at each read.
+      def variant_name
+        @variant_name ||= select_variant_name
+      end
+
+      def reset_variant_name # :nodoc:
+        @variant_name = nil
+      end
+
+      # Re-evaluates the selector. Returns true when a previously selected variant
+      # has been replaced by a different one, which makes any loaded target stale.
+      def refresh_variant_name # :nodoc:
+        previous = @variant_name
+        @variant_name = select_variant_name
+        !previous.nil? && previous != @variant_name
+      end
+
+      # SQL built for one variant must never be reused for another, so the selected
+      # variant participates in the statement cache key. Each variant name maps to a
+      # set of options fixed at definition time, which makes the name a stable
+      # signature for the shape of the query -- so variant associations keep
+      # statement caching instead of opting out of it.
+      def association_scope_cache(klass, owner, &block)
+        key = [@abstract_reflection, variant_name]
+        if polymorphic?
+          key = [key, owner.read_attribute(foreign_type)]
+        end
+        klass.with_connection do |connection|
+          klass.cached_find_by_statement(connection, key, &block)
+        end
+      end
+
+      def inspect
+        "#<#{self.class.name} #{description} variant=#{@variant_name.inspect} " \
+          "of #{@abstract_reflection.variant_reflections.keys.inspect}>"
+      end
+
+      private
+        # Note that this runs while +@variant_name+ is still unset, so it must not
+        # call any delegated method: doing so would resolve +__getobj__+ and
+        # re-enter here. Everything below goes through +@abstract_reflection+.
+        #
+        # The selector runs against the owner record, and also receives it as an
+        # argument, so that either style reads naturally.
+        def select_variant_name
+          owner = association.owner
+          selected = owner.instance_exec(owner, &@abstract_reflection.variant_selector)
+          selected = selected.to_sym if selected.is_a?(String)
+          declared = @abstract_reflection.variant_reflections
+
+          unless selected.is_a?(Symbol) && declared.key?(selected)
+            # Delegator undefines Kernel#raise, so a bare `raise` here would be
+            # forwarded to __getobj__ and re-enter this method.
+            ::Kernel.raise ArgumentError, "The #{description} variant selector returned " \
+              "#{selected.inspect}, which is not one of #{declared.keys.inspect}"
+          end
+
+          selected
+        end
+
+        def description
+          "#{@abstract_reflection.active_record.name}##{@abstract_reflection.name}"
         end
     end
 

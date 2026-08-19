@@ -1431,6 +1431,50 @@ module ActiveRecord
           Reflection.add_reflection(self, name, reflection)
         end
 
+        # Specifies a +has_many+ association whose join columns are chosen when the
+        # association is used, rather than when it is declared. The motivating case is
+        # migrating an association from one key pair to another behind a runtime check,
+        # without exposing two associations and having to update every caller:
+        #
+        #   class Post < ApplicationRecord
+        #     has_many_with_variants :comments, dependent: :destroy,
+        #       variants: {
+        #         default: { foreign_key: :post_id },
+        #         uuid:    { foreign_key: :post_uuid, primary_key: :uuid },
+        #       } do
+        #         Feature.enabled?(:comment_uuids) ? :uuid : :default
+        #       end
+        #   end
+        #
+        # Options given directly to the macro are shared by every variant. Only the
+        # options under +:variants+ differ between them, and only
+        # +:primary_key+, +:foreign_key+, and +:query_constraints+ may appear there --
+        # anything that installs a callback or a method on the model has to be shared,
+        # since those are generated once at definition time.
+        #
+        # The block selects the active variant by name. It runs against the owner
+        # record and also receives it, so both of these work:
+        #
+        #   has_many_with_variants(:comments, variants: {...}) { uuid? ? :uuid : :default }
+        #   has_many_with_variants(:comments, variants: {...}) { |post| post.uuid? ? :uuid : :default }
+        #
+        # It is re-evaluated on each association access. Changing the answer marks a
+        # loaded target as stale, so the next read reloads it through the newly
+        # selected variant. Each variant caches its own prepared statement.
+        #
+        # Because the block takes the place of +has_many+'s extension block, extensions
+        # must be passed with the +:extend+ option instead.
+        #
+        # Variant associations resolve per owner record, which query planning done
+        # against the class cannot do. Preloading, eager loading, joining, and
+        # +:through+ therefore raise
+        # ActiveRecord::AssociationVariantNotSupported rather than silently falling back
+        # to the conventional columns.
+        def has_many_with_variants(name, scope = nil, **options, &variant_selector)
+          reflection = Builder::HasMany.build_with_variants(self, name, scope, options, variant_selector)
+          Reflection.add_reflection(self, name, reflection)
+        end
+
         # Specifies a one-to-one association with another class. This method
         # should only be used if the other class contains the foreign key. If
         # the current class contains the foreign key, then you should use

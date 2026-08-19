@@ -250,6 +250,23 @@ module ActiveRecord
     end
   end
 
+  # This error is raised when an association declared with variants is used through a
+  # code path that resolves the association against the model class rather than against
+  # an owner record, such as preloading, eager loading, or joining. Those paths build one
+  # query for many owners, so they cannot honour a variant selected per record.
+  #
+  # See ActiveRecord::Associations::ClassMethods#has_many_with_variants.
+  class AssociationVariantNotSupported < ActiveRecordError
+    def initialize(reflection = nil, context = nil)
+      if reflection
+        super("Cannot #{context} #{reflection.name.inspect} because it declares association variants, " \
+              "which are selected per record and cannot be resolved for a whole relation")
+      else
+        super("Association variants are not supported here.")
+      end
+    end
+  end
+
   # This error is raised when trying to destroy a parent instance in N:1 or 1:1 associations
   # (has_many, has_one) when there is at least 1 child associated instance.
   # ex: if @project.tasks.size > 0, DeleteRestrictionError will be raised when trying to destroy @project

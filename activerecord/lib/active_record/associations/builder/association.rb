@@ -37,6 +37,74 @@ module ActiveRecord::Associations::Builder # :nodoc:
       reflection
     end
 
+    # The options that may differ between the variants of a single association.
+    #
+    # This is deliberately limited to the columns an association joins on, which is
+    # what runtime variants exist for. Everything else is declared once for the
+    # association as a whole: options that install callbacks, validations, or methods
+    # on the model are applied at definition time from the abstract reflection and so
+    # cannot vary per record, and keeping the target class shared is what lets
+    # counter caches and +inverse_of+ continue to reason about one relationship.
+    #
+    # Widening this list stays backward compatible; narrowing it does not.
+    VARIANT_OPTIONS = [
+      :primary_key, :foreign_key, :query_constraints
+    ].freeze # :nodoc:
+
+    def self.build_with_variants(model, name, scope, options, variant_selector)
+      variants = options.delete(:variants)
+      validate_variants(model, name, variants, options, variant_selector)
+
+      # One concrete reflection per variant, each built exactly like an ordinary
+      # association's. Options are checked here, so a variant naming an option that
+      # does not exist fails at definition time; the rest of the validation is as lazy
+      # as it is for any association, and happens when the variant is first selected.
+      variant_reflections = variants.to_h do |variant_name, variant_options|
+        variant_reflection = create_reflection(model, name, scope, options.merge(variant_options))
+        variant_reflection.declare_variant_name(variant_name)
+        [variant_name, variant_reflection]
+      end.freeze
+
+      # The abstract reflection carries only the shared options, so every model
+      # method and callback generated from it below holds for all variants.
+      reflection = build(model, name, scope, options)
+      reflection.declare_variants(variant_reflections, variant_selector)
+      reflection
+    end
+
+    def self.validate_variants(model, name, variants, options, variant_selector)
+      unless variant_selector
+        raise ArgumentError, "#{model.name}##{name} requires a block returning the name of the active variant"
+      end
+
+      unless variants.is_a?(Hash) && !variants.empty?
+        raise ArgumentError, "#{model.name}##{name} requires a `variants:` Hash naming at least one variant"
+      end
+
+      if options[:through]
+        raise ArgumentError, "#{model.name}##{name} cannot combine `:through` with `variants:`, because only " \
+                             "the first reflection of a through chain would resolve per variant"
+      end
+
+      variants.each do |variant_name, variant_options|
+        unless variant_name.is_a?(Symbol)
+          raise ArgumentError, "Variant names of #{model.name}##{name} must be Symbols, got #{variant_name.inspect}"
+        end
+
+        unless variant_options.is_a?(Hash)
+          raise ArgumentError, "Options for variant #{variant_name.inspect} of #{model.name}##{name} must be a Hash"
+        end
+
+        shared_only = variant_options.keys - VARIANT_OPTIONS
+        if shared_only.any?
+          raise ArgumentError, "#{shared_only.map(&:inspect).join(", ")} cannot differ between the variants of " \
+                               "#{model.name}##{name}. Declare #{shared_only.one? ? "it" : "them"} on the " \
+                               "association itself, alongside `variants:`. Variants may only differ in " \
+                               "#{VARIANT_OPTIONS.map(&:inspect).join(", ")}."
+        end
+      end
+    end
+
     def self.create_reflection(model, name, scope, options, &block)
       raise ArgumentError, "association names must be a Symbol" unless name.kind_of?(Symbol)
 
@@ -173,7 +241,8 @@ module ActiveRecord::Associations::Builder # :nodoc:
       end
     end
 
-    private_class_method :build_scope, :macro, :valid_options, :validate_options, :define_extensions,
+    private_class_method :build_scope, :macro, :valid_options, :validate_options, :validate_variants,
+      :define_extensions,
       :define_callbacks, :define_accessors, :define_readers, :define_writers, :define_validations,
       :define_change_tracking_methods, :valid_dependent_options, :check_dependent_options,
       :add_destroy_callbacks, :add_after_commit_jobs_callback

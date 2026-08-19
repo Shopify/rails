@@ -220,8 +220,15 @@ module ActiveRecord
         end
 
         def find_reflection(klass, name)
-          klass._reflect_on_association(name) ||
+          reflection = klass._reflect_on_association(name) ||
             raise(ConfigurationError, "Can't join '#{klass.name}' to association named '#{name}'; perhaps you misspelled it?")
+
+          # A join is built from the class, so there is no owner record to select a
+          # variant with. Refuse rather than join on the conventional columns, which
+          # would silently return rows from whichever variant was not selected.
+          raise AssociationVariantNotSupported.new(reflection, "join") if reflection.has_variants?
+
+          reflection
         end
 
         def build(associations, base_klass)

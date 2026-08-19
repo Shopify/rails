@@ -1,3 +1,35 @@
+*   Add `has_many_with_variants`, which chooses an association's join columns when
+    the association is used rather than when it is declared.
+
+    The motivating case is moving an association from one key pair to another
+    behind a runtime check, without exposing two associations and updating every
+    caller:
+
+    ``` ruby
+    class Post < ApplicationRecord
+      has_many_with_variants :comments, dependent: :destroy,
+        variants: {
+          default: { foreign_key: :post_id },
+          uuid:    { foreign_key: :post_uuid, primary_key: :uuid },
+        } do
+          Feature.enabled?(:comment_uuids) ? :uuid : :default
+        end
+    end
+    ```
+
+    Options given to the macro are shared by every variant, and only
+    `:primary_key`, `:foreign_key`, and `:query_constraints` may differ between
+    them. The block selects a variant per owner record, and is re-evaluated on each
+    access: changing its answer makes a loaded target stale, so the next read
+    reloads it through the newly selected variant. Each variant caches its own
+    prepared statement.
+
+    Because a variant is chosen per record, paths that build one query for a whole
+    relation — preloading, eager loading, joining, and `:through` — raise
+    `ActiveRecord::AssociationVariantNotSupported` rather than falling back to the
+    conventional columns.
+
+    *Nikita Vasilevsky*
 *   Support `query_constraints` on associations, decoupled from `foreign_key`.
 
     `query_constraints` declares *additional* columns to match when querying an

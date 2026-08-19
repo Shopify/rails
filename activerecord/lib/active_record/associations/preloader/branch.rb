@@ -82,6 +82,14 @@ module ActiveRecord
           polymorphic_parent = !root? && parent.polymorphic?
           source_records.each do |record|
             reflection = record.class._reflect_on_association(association)
+
+            # Preloading issues one query for a group of owners, so it cannot honour a
+            # variant chosen per owner. Refuse rather than preload through the
+            # conventional columns and hand back records the association would not load.
+            if reflection&.has_variants?
+              raise AssociationVariantNotSupported.new(reflection, "preload")
+            end
+
             next if polymorphic_parent && !reflection || !record.association(association).klass
             (h[reflection] ||= []) << record
           end

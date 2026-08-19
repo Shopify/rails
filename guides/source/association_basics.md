@@ -705,6 +705,66 @@ end
 This relation can be [bi-directional](#bi-directional-associations) when used in
 combination with `belongs_to` on the other model.
 
+#### Choosing Join Columns at Runtime
+
+Occasionally an association needs to be moved from one pair of columns to
+another, and you would rather not expose two associations and update every
+caller while the move is underway. `has_many_with_variants` declares one
+association with several named sets of join columns, and a block that picks the
+one to use:
+
+```ruby
+class Post < ApplicationRecord
+  has_many_with_variants :comments, dependent: :destroy,
+    variants: {
+      default: { foreign_key: :post_id },
+      uuid:    { foreign_key: :post_uuid, primary_key: :uuid },
+    } do
+      Feature.enabled?(:comment_uuids) ? :uuid : :default
+    end
+end
+```
+
+Callers keep using `post.comments`, and the columns it is keyed on follow the
+block.
+
+Options passed to the macro itself, like `dependent: :destroy` above, are shared
+by every variant. Only `:primary_key`, `:foreign_key`, and `:query_constraints`
+may appear inside `variants:`; anything that adds a callback or a method to the
+model has to be shared, because those are generated once when the association is
+declared.
+
+The block runs against the owner record and also receives it, so both of these
+work:
+
+```ruby
+has_many_with_variants(:comments, variants: { ... }) { uuid? ? :uuid : :default }
+has_many_with_variants(:comments, variants: { ... }) { |post| post.uuid? ? :uuid : :default }
+```
+
+Since the block takes the place of the extension block that `has_many` accepts,
+association extensions have to be passed with the `:extend` option instead.
+
+The block runs on each access, so different records can use different variants,
+and a record can move from one to another. When the answer changes for a record
+whose association is already loaded, the loaded records are discarded and the
+association is loaded again through the newly selected variant. Each variant
+keeps its own prepared statement, so switching does not reuse another variant's
+query.
+
+Because a variant is chosen per record, code paths that build a single query for
+a whole relation cannot honour it. Preloading, eager loading, joining, and
+`:through` raise `ActiveRecord::AssociationVariantNotSupported` rather than
+quietly querying the conventional columns:
+
+```ruby
+Post.preload(:comments)   # raises ActiveRecord::AssociationVariantNotSupported
+Post.joins(:comments)     # raises ActiveRecord::AssociationVariantNotSupported
+```
+
+If a caller needs to preload or join, keep a plain association for the columns it
+should use and point that caller at it.
+
 #### Methods Added by `has_many`
 
 When you declare a `has_many` association, the declaring class gains numerous

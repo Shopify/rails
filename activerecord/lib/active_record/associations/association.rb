@@ -39,13 +39,19 @@ module ActiveRecord
       delegate :options, to: :reflection
 
       def initialize(owner, reflection)
-        reflection.check_validity!
+        @owner = owner
+        @reflection = bind_reflection(reflection)
+        @has_variants = @reflection.has_variants?
 
-        @owner, @reflection = owner, reflection
-        @disable_joins = @reflection.options[:disable_joins] || false
-
+        # Before anything that reads the reflection: +reset+ clears the selected
+        # variant, so running it afterwards would throw away the selection made by
+        # the reads below and evaluate the selector a second time on first use.
         reset
         reset_scope
+
+        @reflection.check_validity!
+
+        @disable_joins = @reflection.options[:disable_joins] || false
 
         @skip_strict_loading = nil
       end
@@ -61,6 +67,7 @@ module ActiveRecord
       def reset
         @loaded = false
         @stale_state = nil
+        @reflection.reset_variant_name if @has_variants
       end
 
       def reset_negative_cache # :nodoc:
@@ -85,7 +92,7 @@ module ActiveRecord
       # Asserts the \target has been loaded setting the \loaded flag to +true+.
       def loaded!
         @loaded = true
-        @stale_state = stale_state
+        @stale_state = current_state
       end
 
       # The target is stale if the target no longer points to the record(s) that the
@@ -93,9 +100,17 @@ module ActiveRecord
       # on the owner will reload the target. It's up to subclasses to implement the
       # stale_state method if relevant.
       #
+      # A variant association is also stale when its selector now names a different
+      # variant than the one the target was loaded through, since the target was
+      # matched on that variant's columns.
+      #
       # Note that if the target has not been loaded, it is not considered stale.
       def stale_target?
-        loaded? && @stale_state != stale_state
+        # Re-evaluated here rather than on every reflection call: this is the boundary
+        # every association read passes through, so the selector runs once per access.
+        @reflection.refresh_variant_name if @has_variants
+
+        loaded? && @stale_state != current_state
       end
 
       # Sets the target of this association to <tt>\target</tt>, and the \loaded flag to +true+.
@@ -118,6 +133,7 @@ module ActiveRecord
 
       def reset_scope
         @association_scope = nil
+        @association_scope_variant = nil
       end
 
       def set_strict_loading(record)
@@ -211,7 +227,8 @@ module ActiveRecord
       def marshal_load(data)
         reflection_name, ivars = data
         ivars.each { |name, val| instance_variable_set(name, val) }
-        @reflection = @owner.class._reflect_on_association(reflection_name)
+        @reflection = bind_reflection(@owner.class._reflect_on_association(reflection_name))
+        @has_variants = @reflection.has_variants?
       end
 
       def initialize_attributes(record, except_from_scope_attributes = nil) # :nodoc:
@@ -301,11 +318,21 @@ module ActiveRecord
         # actually gets built.
         def association_scope
           if klass
-            @association_scope ||= if disable_joins
-              DisableJoinsAssociationScope.scope(self)
-            else
-              AssociationScope.scope(self)
+            # Keyed by the selected variant rather than reset on every call, so
+            # variant associations keep the memo while still rebuilding the scope
+            # when the selection changes.
+            variant = @reflection.variant_name if @has_variants
+
+            if @association_scope.nil? || @association_scope_variant != variant
+              @association_scope_variant = variant
+              @association_scope = if disable_joins
+                DisableJoinsAssociationScope.scope(self)
+              else
+                AssociationScope.scope(self)
+              end
             end
+
+            @association_scope
           end
         end
 
@@ -379,6 +406,25 @@ module ActiveRecord
         #
         # This is only relevant to certain associations, which is why it returns +nil+ by default.
         def stale_state
+        end
+
+        # +stale_state+ plus anything else that makes a loaded target no longer
+        # correct. For a variant association the selected variant belongs here: the
+        # target was matched on that variant's columns, so selecting another variant
+        # invalidates it just as changing a foreign key value would.
+        def current_state
+          return stale_state unless @has_variants
+          [@reflection.variant_name, stale_state]
+        end
+
+        # Variant associations select their options per owner record, so the shared
+        # class-level reflection is bound to this association before use.
+        def bind_reflection(reflection)
+          if reflection.has_variants?
+            Reflection::AssociationVariantReflection.new(reflection, self)
+          else
+            reflection
+          end
         end
 
         def build_record(attributes)

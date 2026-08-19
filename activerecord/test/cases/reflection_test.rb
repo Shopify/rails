@@ -952,3 +952,126 @@ class DeprecatedReflectionsTest < ActiveRecord::TestCase
       assert_predicate model.reflect_on_association(name), :deprecated?
     end
 end
+
+class AssociationVariantReflectionTest < ActiveRecord::TestCase
+  fixtures :posts, :comments
+
+  def variant_post_class(&selector)
+    selector ||= proc { variant || :by_post }
+
+    Class.new(ActiveRecord::Base) do
+      def self.name = "VariantPost"
+
+      self.table_name = "posts"
+      self.inheritance_column = nil
+
+      attr_accessor :variant
+
+      has_many_with_variants :variant_comments, class_name: "Comment",
+        variants: {
+          by_post: { foreign_key: :post_id },
+          by_body: { foreign_key: :body, primary_key: :title },
+        }, &selector
+    end
+  end
+
+  # The reflection registered on the model is the abstract one, and it stays a
+  # plain, static reflection: nothing about it varies between reads.
+  def test_registered_reflection_is_abstract_and_static
+    reflection = variant_post_class.reflect_on_association(:variant_comments)
+
+    assert_instance_of ActiveRecord::Reflection::HasManyReflection, reflection
+    assert_predicate reflection, :has_variants?
+    assert_not_predicate reflection, :variant?
+    assert_equal reflection.foreign_key, reflection.foreign_key
+  end
+
+  def test_each_variant_gets_its_own_concrete_reflection
+    reflection = variant_post_class.reflect_on_association(:variant_comments)
+
+    assert_equal [:by_post, :by_body], reflection.variant_reflections.keys
+    assert reflection.variant_reflections.each_value.all?(&:variant?)
+    assert_equal [:by_post, :by_body], reflection.variant_reflections.each_value.map(&:variant_name)
+    assert_equal "post_id", reflection.variant_reflections[:by_post].foreign_key
+    assert_equal "body", reflection.variant_reflections[:by_body].foreign_key
+    assert_equal "title", reflection.variant_reflections[:by_body].active_record_primary_key
+  end
+
+  def test_association_wraps_the_abstract_reflection
+    post = variant_post_class.first
+    reflection = post.association(:variant_comments).reflection
+
+    assert_instance_of ActiveRecord::Reflection::AssociationVariantReflection, reflection
+    assert_predicate reflection, :has_variants?
+    assert_not_predicate reflection, :variant?
+    assert_same post.class.reflect_on_association(:variant_comments), reflection.abstract_reflection
+  end
+
+  # Delegation defaults to the selected variant, so option-derived values follow the
+  # selection without each one having to be listed on the wrapper.
+  def test_wrapper_delegates_option_derived_values_to_the_selected_variant
+    post = variant_post_class.first
+    reflection = post.association(:variant_comments).reflection
+
+    post.variant = :by_post
+    assert_equal :by_post, reflection.variant_name
+    assert_equal "post_id", reflection.foreign_key
+    assert_equal "id", reflection.active_record_primary_key
+
+    post.variant = :by_body
+    post.association(:variant_comments).stale_target?
+    assert_equal :by_body, reflection.variant_name
+    assert_equal "body", reflection.foreign_key
+    assert_equal "title", reflection.active_record_primary_key
+  end
+
+  # Two associations can be inverse-compatible under one variant and not another, and
+  # inference memoizes, so it is declined rather than cached for the wrong context.
+  def test_automatic_inverse_of_is_declined_for_variants
+    reflection = variant_post_class.reflect_on_association(:variant_comments)
+
+    assert_nil reflection.inverse_of
+    assert_nil reflection.variant_reflections[:by_post].inverse_of
+  end
+
+  def test_inspect_names_the_association_and_the_declared_variants
+    post = variant_post_class.first
+    post.variant = :by_body
+    reflection = post.association(:variant_comments).reflection
+    reflection.variant_name
+
+    assert_match(/VariantPost#variant_comments/, reflection.inspect)
+    assert_match(/variant=:by_body/, reflection.inspect)
+    assert_match(/\[:by_post, :by_body\]/, reflection.inspect)
+  end
+
+  def test_selector_receives_the_owner_and_runs_against_it
+    seen = []
+    klass = variant_post_class { |owner| seen << owner; (title if false) || :by_post }
+    post = klass.first
+    post.association(:variant_comments).reflection.variant_name
+
+    assert_equal [post], seen
+  end
+
+  def test_selector_may_return_a_string
+    post = variant_post_class { "by_body" }.first
+
+    assert_equal :by_body, post.association(:variant_comments).reflection.variant_name
+  end
+
+  def test_selector_returning_an_undeclared_variant_raises
+    post = variant_post_class { :nonexistent }.first
+
+    error = assert_raises(ArgumentError) { post.variant_comments.to_a }
+    assert_match "VariantPost#variant_comments variant selector returned :nonexistent", error.message
+    assert_match "[:by_post, :by_body]", error.message
+  end
+
+  def test_selector_returning_a_non_symbol_raises
+    post = variant_post_class { 42 }.first
+
+    error = assert_raises(ArgumentError) { post.variant_comments.to_a }
+    assert_match "returned 42", error.message
+  end
+end
