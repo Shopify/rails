@@ -44,6 +44,20 @@ class HasOneContainedKeyOwner < ActiveRecord::Base
   has_one :contained_key_child, class_name: "HasOneContainedKeyChild", as: :poly_human_without_inverse
 end
 
+class HasOneSharedIdentityChild < ActiveRecord::Base
+  self.table_name = "faces"
+  self.primary_key = [:human_id, :poly_human_without_inverse_id]
+end
+
+class HasOneSharedIdentityOwner < ActiveRecord::Base
+  self.table_name = "cpk_orders"
+  has_one :shared_identity_child,
+    class_name: "HasOneSharedIdentityChild",
+    foreign_key: [:human_id, :poly_human_without_inverse_id],
+    primary_key: [:id, :shop_id],
+    inverse_of: false
+end
+
 class HasOneAssociationsTest < ActiveRecord::TestCase
   self.use_transactional_tests = false unless supports_savepoints?
   fixtures :accounts, :companies, :developers, :projects, :developers_projects,
@@ -189,6 +203,36 @@ class HasOneAssociationsTest < ActiveRecord::TestCase
     child = HasOneContainedKeyChild.find_by!(id: child.read_attribute(:id))
     assert_nil child.poly_human_without_inverse_id
     assert_nil child.poly_human_without_inverse_type
+  end
+
+  def test_replacing_has_one_preserves_persisted_child_whose_foreign_key_covers_its_entire_primary_key
+    owner = HasOneSharedIdentityOwner.create!(shop_id: 10)
+    child = HasOneSharedIdentityChild.create!(human_id: owner.id, poly_human_without_inverse_id: 10)
+
+    assert_equal child, owner.shared_identity_child
+
+    assert_nothing_raised do
+      owner.shared_identity_child = HasOneSharedIdentityChild.new(description: "someone")
+    end
+
+    assert_equal owner.id, child.human_id
+    assert_equal 10, child.poly_human_without_inverse_id
+    assert_equal [owner.id, 10], HasOneSharedIdentityChild.find_by!(description: nil).id
+  end
+
+  def test_clearing_has_one_preserves_persisted_child_whose_foreign_key_covers_its_entire_primary_key
+    owner = HasOneSharedIdentityOwner.create!(shop_id: 10)
+    child = HasOneSharedIdentityChild.create!(human_id: owner.id, poly_human_without_inverse_id: 10)
+
+    assert_equal child, owner.shared_identity_child
+
+    assert_nothing_raised do
+      owner.shared_identity_child = nil
+    end
+
+    assert_equal owner.id, child.human_id
+    assert_equal 10, child.poly_human_without_inverse_id
+    assert_equal [owner.id, 10], HasOneSharedIdentityChild.first.id
   end
 
   def test_nullification_on_destroyed_association

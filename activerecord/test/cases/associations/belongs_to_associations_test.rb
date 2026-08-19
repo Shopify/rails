@@ -55,6 +55,18 @@ class BelongsToContainedKeyChapter < Cpk::Chapter
     inverse_of: false
 end
 
+class BelongsToSharedIdentityOrderTag < ActiveRecord::Base
+  self.table_name = "cpk_order_tags"
+  self.primary_key = [:order_id, :tag_id]
+
+  belongs_to :shared_identity_order,
+    class_name: "Cpk::Order",
+    foreign_key: [:order_id, :tag_id],
+    primary_key: [:id, :shop_id],
+    optional: true,
+    inverse_of: false
+end
+
 class BelongsToAssociationsTest < ActiveRecord::TestCase
   fixtures :accounts, :companies, :developers, :projects, :topics,
            :developers_projects, :computers, :authors, :author_addresses,
@@ -538,6 +550,34 @@ class BelongsToAssociationsTest < ActiveRecord::TestCase
     order_tag.tag = nil
 
     assert_nil order_tag.tag_id
+  end
+
+  def test_clearing_belongs_to_nullifies_foreign_key_contained_in_composite_pk_of_persisted_record
+    order_tag = Cpk::OrderTag.create!(order_id: 1, tag_id: 2)
+
+    order_tag.tag = nil
+
+    assert_nil order_tag.tag_id
+    assert_equal 1, order_tag.order_id
+  end
+
+  def test_clearing_belongs_to_nullifies_foreign_key_covering_the_entire_primary_key_of_a_new_record
+    order_tag = BelongsToSharedIdentityOrderTag.new(order_id: 1, tag_id: 2)
+
+    order_tag.shared_identity_order = nil
+
+    assert_nil order_tag.order_id
+    assert_nil order_tag.tag_id
+  end
+
+  def test_clearing_belongs_to_preserves_foreign_key_covering_the_entire_primary_key_of_a_persisted_record
+    order_tag = BelongsToSharedIdentityOrderTag.create!(order_id: 1, tag_id: 2)
+
+    order_tag.shared_identity_order = nil
+
+    assert_nil order_tag.shared_identity_order
+    assert_equal 1, order_tag.order_id
+    assert_equal 2, order_tag.tag_id
   end
 
   def test_clearing_polymorphic_belongs_to_nullifies_both_columns_contained_in_composite_pk

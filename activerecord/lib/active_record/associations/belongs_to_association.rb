@@ -148,9 +148,13 @@ module ActiveRecord
 
           owner_pk = ActiveRecord::Key.for(owner.class.primary_key)
 
-          # Preserve shared primary key columns only if another foreign key
-          # column can be cleared to disassociate the record.
-          preserve_owner_pk = record.nil? && foreign_key.any? { |key| !owner_pk.include?(key) }
+          # Preserve shared primary key columns if another foreign key column
+          # can be cleared to disassociate the record, or if the owner is
+          # persisted and clearing would erase its entire primary key: such a
+          # record could never be saved afterwards.
+          preserve_owner_pk = record.nil? &&
+            (foreign_key.any? { |key| !owner_pk.include?(key) } ||
+              (owner.persisted? && owner_pk.all? { |key| foreign_key.include?(key) }))
 
           foreign_key.each_with_index do |key, index|
             next if preserve_owner_pk && owner_pk.include?(key)
