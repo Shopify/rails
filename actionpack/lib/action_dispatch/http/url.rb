@@ -109,11 +109,33 @@ module ActionDispatch
         end
       end
 
-      mattr_accessor :secure_protocol, default: false
-      mattr_accessor :tld_length, default: 1
-      mattr_accessor :domain_extractor, default: DomainExtractor
+      # These were previously defined with `mattr_accessor`, which is backed by a
+      # class variable. Class variables cannot be read from non-main Ractors, which
+      # breaks URL generation (e.g. `posts_url`) from inside a Ractor. Backing them
+      # with class-level instance variables holding Ractor-shareable values keeps
+      # them readable from any Ractor; they are only written at boot on the main
+      # Ractor (see ActionDispatch::Railtie).
+      @secure_protocol  = false
+      @tld_length       = 1
+      @domain_extractor = DomainExtractor
+
+      # Instance-level readers, preserved for backwards compatibility with the
+      # previous `mattr_accessor` (this module is mixed into Request/Response).
+      def secure_protocol
+        ActionDispatch::Http::URL.secure_protocol
+      end
+
+      def tld_length
+        ActionDispatch::Http::URL.tld_length
+      end
+
+      def domain_extractor
+        ActionDispatch::Http::URL.domain_extractor
+      end
 
       class << self
+        attr_accessor :secure_protocol, :tld_length, :domain_extractor
+
         # Returns the domain part of a host given the domain level.
         #
         #     # Top-level domain example
@@ -246,7 +268,7 @@ module ActionDispatch
           def normalize_host(_host, options)
             return _host unless named_host?(_host)
 
-            tld_length = options[:tld_length] || @@tld_length
+            tld_length = options[:tld_length] || ActionDispatch::Http::URL.tld_length
             subdomain  = options.fetch :subdomain, true
             domain     = options[:domain]
 
@@ -419,7 +441,7 @@ module ActionDispatch
       # Returns the domain part of a host, such as "rubyonrails.org" in
       # "www.rubyonrails.org". You can specify a different `tld_length`, such as 2 to
       # catch rubyonrails.co.uk in "www.rubyonrails.co.uk".
-      def domain(tld_length = @@tld_length)
+      def domain(tld_length = ActionDispatch::Http::URL.tld_length)
         ActionDispatch::Http::URL.extract_domain(host, tld_length)
       end
 
@@ -427,14 +449,14 @@ module ActionDispatch
       # for "dev.www.rubyonrails.org". You can specify a different `tld_length`, such
       # as 2 to catch `["www"]` instead of `["www", "rubyonrails"]` in
       # "www.rubyonrails.co.uk".
-      def subdomains(tld_length = @@tld_length)
+      def subdomains(tld_length = ActionDispatch::Http::URL.tld_length)
         ActionDispatch::Http::URL.extract_subdomains(host, tld_length)
       end
 
       # Returns all the subdomains as a string, so `"dev.www"` would be returned for
       # "dev.www.rubyonrails.org". You can specify a different `tld_length`, such as 2
       # to catch `"www"` instead of `"www.rubyonrails"` in "www.rubyonrails.co.uk".
-      def subdomain(tld_length = @@tld_length)
+      def subdomain(tld_length = ActionDispatch::Http::URL.tld_length)
         ActionDispatch::Http::URL.extract_subdomain(host, tld_length)
       end
     end

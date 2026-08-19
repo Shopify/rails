@@ -38,6 +38,7 @@ module ActionDispatch
           required_names
           offsets
           to_regexp
+          requirements_for_missing_keys_check
           @ast = nil
         end
 

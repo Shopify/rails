@@ -90,6 +90,11 @@ module ActionDispatch
           @url_helpers = Set.new
           @url_helpers_module  = Module.new
           @path_helpers_module = Module.new
+          # Records every url helper definition (`[kind, mod, name, helper, extra]`)
+          # so the helper methods can be regenerated as Ractor-shareable procs
+          # once the route set has been finalized and frozen. See
+          # #make_helpers_shareable!.
+          @url_helper_defs = []
         end
 
         def route_defined?(name)
@@ -113,6 +118,7 @@ module ActionDispatch
           @routes.clear
           @path_helpers.clear
           @url_helpers.clear
+          @url_helper_defs.clear
         end
 
         def add(name, route)
@@ -129,9 +135,26 @@ module ActionDispatch
           helper = UrlHelper.create(route, route.defaults, name)
           define_url_helper @path_helpers_module, path_name, helper, PATH
           define_url_helper @url_helpers_module, url_name, helper, UNKNOWN
+          @url_helper_defs << [:standard, @path_helpers_module, path_name, helper, PATH]
+          @url_helper_defs << [:standard, @url_helpers_module, url_name, helper, UNKNOWN]
 
           @path_helpers << path_name
           @url_helpers << url_name
+        end
+
+        # Regenerate every url helper method as a Ractor-shareable proc. The
+        # helper objects (and the routes they close over) must already be
+        # Ractor-shareable (i.e. the route set has been frozen) so that
+        # +shareable_proc+ can succeed. Called by RouteSet#make_shareable!.
+        def make_helpers_shareable!
+          @url_helper_defs.each do |kind, mod, name, helper, extra|
+            case kind
+            when :standard
+              define_url_helper(mod, name, helper, extra, shareable: true)
+            when :custom
+              define_custom_url_helper(mod, name, helper, extra, shareable: true)
+            end
+          end
         end
 
         def get(name)
@@ -167,17 +190,10 @@ module ActionDispatch
           path_name = :"#{name}_path"
           url_name = :"#{name}_url"
 
-          @path_helpers_module.module_eval do
-            redefine_method(path_name) do |*args|
-              helper.call(self, args, true)
-            end
-          end
-
-          @url_helpers_module.module_eval do
-            redefine_method(url_name) do |*args|
-              helper.call(self, args, false)
-            end
-          end
+          define_custom_url_helper @path_helpers_module, path_name, helper, true
+          define_custom_url_helper @url_helpers_module, url_name, helper, false
+          @url_helper_defs << [:custom, @path_helpers_module, path_name, helper, true]
+          @url_helper_defs << [:custom, @url_helpers_module, url_name, helper, false]
 
           @path_helpers << path_name
           @url_helpers << url_name
@@ -330,8 +346,15 @@ module ActionDispatch
           #
           #     foo_url(bar, baz, bang, sort_by: 'baz')
           #
-          def define_url_helper(mod, name, helper, url_strategy)
-            mod.define_method(name) do |*args|
+          #
+          # When `shareable` is true the method body is wrapped in a
+          # Ractor-shareable proc so the helper can be called from any Ractor.
+          # This is only valid once `helper`, `name`, and `url_strategy` are all
+          # Ractor-shareable (i.e. after the route set has been frozen), which is
+          # why it is driven by NamedRouteCollection#make_helpers_shareable!
+          # rather than being applied at route-draw time.
+          def define_url_helper(mod, name, helper, url_strategy, shareable: false)
+            block = proc do |*args|
               last = args.last
               options = \
                 case last
@@ -342,6 +365,18 @@ module ActionDispatch
                 end
               helper.call(self, name, args, options, url_strategy)
             end
+            block = ActiveSupport::Ractors.shareable_proc(&block) if shareable
+            mod.silence_redefinition_of_method(name)
+            mod.define_method(name, &block)
+          end
+
+          def define_custom_url_helper(mod, name, helper, path, shareable: false)
+            block = proc do |*args|
+              helper.call(self, args, path)
+            end
+            block = ActiveSupport::Ractors.shareable_proc(&block) if shareable
+            mod.silence_redefinition_of_method(name)
+            mod.define_method(name, &block)
           end
       end
 
@@ -408,6 +443,49 @@ module ActionDispatch
         routes.each(&:eager_load!)
         formatter.eager_load!
         nil
+      end
+
+      # Freeze the route set and its generated url helpers so they can be used
+      # from any Ractor.
+      #
+      # URL generation touches a lot of lazily-built, memoized state (the
+      # Journey formatter cache, the generated url helper modules, the proxy
+      # objects behind `url_helpers`, ...). This method pre-warms all of it,
+      # deep-freezes the route set via +Ractor.make_shareable+, and then
+      # regenerates the url helper methods as Ractor-shareable procs (which is
+      # only possible once the routes they close over are frozen). After this
+      # call `routes.url_helpers.posts_path` and friends can be invoked from a
+      # non-main Ractor. Mutating the route set afterwards (e.g. reloading
+      # routes in development) is no longer possible.
+      def make_shareable!
+        return self if ActiveSupport::Ractors.shareable?(self)
+
+        finalize! unless @finalized
+        eager_load!
+
+        # Memoize the generated url helper modules and their proxies before
+        # freezing, otherwise the lazy `||=` assignments would raise FrozenError.
+        with_paths    = url_helpers(true)
+        without_paths = url_helpers(false)
+        mounted_helpers
+
+        ActiveSupport::Ractors.make_shareable(self)
+
+        # `make_shareable` treats Modules as shareable-by-identity and does not
+        # freeze their instance variables, so the `@_proxy` each url helpers
+        # module holds is still unshareable. Make it shareable explicitly so the
+        # module-level `_routes` reader can be used from another Ractor.
+        [with_paths, without_paths].each do |mod|
+          proxy = mod.instance_variable_get(:@_proxy)
+          ActiveSupport::Ractors.make_shareable(proxy) if proxy
+        end
+
+        # The named route helpers (`posts_path`, ...) were defined at draw time
+        # with plain (unshareable) procs. Now that the routes and helper objects
+        # are frozen, redefine them as Ractor-shareable procs.
+        named_routes.make_helpers_shareable!
+
+        self
       end
 
       def relative_url_root
