@@ -606,13 +606,23 @@ module ActionDispatch
           end
 
           # plus a singleton class method called _routes ...
+          #
+          # These readers must not close over the `routes` local: `routes` is a
+          # RouteSet, which is not Ractor-shareable, so the resulting Proc could
+          # not be made shareable and `_routes` could not be called from a Ractor
+          # other than the one that defined it. Instead we capture this module
+          # (Modules are Ractor-shareable) and delegate to its own `_routes`
+          # singleton (defined above via `@_proxy`), which returns the very same
+          # route set. This keeps the readers shareable while preserving the
+          # original `@_routes || routes` semantics exactly.
+          helper_module = self
           included do
-            redefine_singleton_method(:_routes) { routes }
+            redefine_singleton_method(:_routes, &ActiveSupport::Ractors.try_shareable_proc { helper_module._routes })
           end
 
           # And an instance method _routes. Note that UrlFor (included in this module) add
           # extra conveniences for working with @_routes.
-          define_method(:_routes) { @_routes || routes }
+          define_method(:_routes, ActiveSupport::Ractors.try_shareable_proc { @_routes || helper_module._routes })
 
           define_method(:_generate_paths_by_default) do
             supports_path
