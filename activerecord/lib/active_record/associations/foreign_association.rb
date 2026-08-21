@@ -25,14 +25,9 @@ module ActiveRecord::Associations
       def set_owner_attributes(record)
         return if options[:through]
 
-        primary_key_attribute_names = reflection.join_primary_key_definition
-        foreign_key_attribute_names = reflection.join_foreign_key_definition
-
-        primary_key_foreign_key_pairs = primary_key_attribute_names.zip(foreign_key_attribute_names)
-
-        primary_key_foreign_key_pairs.each do |primary_key, foreign_key|
-          value = owner.read_attr(foreign_key)
-          record.write_attribute(primary_key, value)
+        reflection.query_key_mapping.foreign_key_pairs.each do |active_record_column, associated_record_column|
+          value = owner.read_attr(active_record_column)
+          record.write_attribute(associated_record_column, value)
         end
 
         if reflection.type

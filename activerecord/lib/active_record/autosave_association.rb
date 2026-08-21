@@ -516,12 +516,11 @@ module ActiveRecord
           return unless (autosave && record.changed_for_autosave?) || _record_changed?(reflection, record, primary_key_value)
 
           unless reflection.through_reflection
-            foreign_key = reflection.foreign_key_definition
-            primary_key_foreign_key_pairs = primary_key.zip(foreign_key)
-
-            primary_key_foreign_key_pairs.each do |primary_key, foreign_key|
-              association_id = read_attr(primary_key)
-              record.write_attribute(foreign_key, association_id) unless record.read_attr(foreign_key) == association_id
+            reflection.query_key_mapping.foreign_key_pairs.each do |active_record_column, associated_record_column|
+              association_id = read_attr(active_record_column)
+              if record.read_attr(associated_record_column) != association_id
+                record.write_attribute(associated_record_column, association_id)
+              end
             end
             association.set_inverse_instance(record)
           end
@@ -590,13 +589,9 @@ module ActiveRecord
             end
 
             if association.updated?
-              primary_key = reflection.association_primary_key_definition(record.class)
-              foreign_key = reflection.foreign_key_definition
-
-              primary_key_foreign_key_pairs = primary_key.zip(foreign_key)
-              primary_key_foreign_key_pairs.each do |primary_key, foreign_key|
-                association_id = record.read_attr(primary_key)
-                write_attribute(foreign_key, association_id) unless read_attr(foreign_key) == association_id
+              reflection.query_key_mapping(record.class).foreign_key_pairs.each do |active_record_column, associated_record_column|
+                association_id = record.read_attr(associated_record_column)
+                write_attribute(active_record_column, association_id) unless read_attr(active_record_column) == association_id
               end
               association.loaded!
             end

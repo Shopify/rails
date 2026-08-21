@@ -9,12 +9,12 @@ module ActiveRecord
       end
 
       def queries
-        return [ reflection.join_foreign_key => values ] if values.empty?
+        return [ reflection.query_foreign_key => values ] if values.empty?
 
         type_to_ids_mapping.map do |type, ids|
           query = {}
           query[reflection.join_foreign_type] = type if type
-          query[reflection.join_foreign_key] = ids
+          query[reflection.query_foreign_key] = ids
           query
         end
       end
@@ -26,7 +26,7 @@ module ActiveRecord
           default_hash = Hash.new { |hsh, key| hsh[key] = [] }
           values.each_with_object(default_hash) do |value, hash|
             ids = hash[klass(value)&.polymorphic_name]
-            if value.is_a?(Relation) && reflection.join_primary_key_definition(value.model).composite?
+            if value.is_a?(Relation) && ActiveRecord::Key.for(primary_key(value)).composite?
               ids.concat(value.pluck(primary_key(value)))
             else
               ids << convert_to_id(value)
@@ -35,7 +35,7 @@ module ActiveRecord
         end
 
         def primary_key(value)
-          reflection.join_primary_key(klass(value))
+          reflection.query_primary_key(klass(value))
         end
 
         def klass(value)
@@ -48,7 +48,7 @@ module ActiveRecord
 
         def convert_to_id(value)
           if value.is_a?(Base)
-            reflection.join_primary_key_definition(klass(value)).value_of(value)
+            ActiveRecord::Key.for(primary_key(value)).value_of(value)
           elsif value.is_a?(Relation)
             value.select(primary_key(value))
           else
