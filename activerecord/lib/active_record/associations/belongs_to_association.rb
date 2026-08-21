@@ -38,7 +38,7 @@ module ActiveRecord
             id = [id]
           end
           association_class = if reflection.polymorphic?
-            owner.public_send(foreign_type)
+            target.class
           else
             klass
           end
