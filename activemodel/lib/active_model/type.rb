@@ -36,7 +36,7 @@ module ActiveModel
       end
 
       def default_value # :nodoc:
-        @default_value ||= Value.new
+        @default_value ||= ActiveSupport::Ractors.make_shareable(Value.new)
       end
     end
 

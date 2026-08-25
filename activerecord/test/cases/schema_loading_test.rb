@@ -72,6 +72,34 @@ class SchemaLoadingTest < ActiveRecord::TestCase
     end
   end
 
+  def test_schema_loads_from_schema_cache_when_no_connection_can_be_established
+    with_temporary_connection_pool do
+      if in_memory_db?
+        ActiveRecord::Base.connection_pool.with_connection do |connection|
+          connection.create_table :tasks do |t|
+            t.datetime :starting
+            t.datetime :ending
+          end
+        end
+      end
+
+      klass = define_model do |c|
+        c.table_name = :tasks
+      end
+
+      klass.connection_pool.schema_cache.load!
+      klass.connection_pool.schema_cache.add("tasks")
+      klass.connection_pool.disconnect!
+      klass.send(:reload_schema_from_cache)
+
+      klass.connection_pool.stub(:with_connection, ->(*) { raise ActiveRecord::ConnectionNotEstablished, "no database" }) do
+        assert_not_empty klass.columns
+      end
+
+      assert_not_empty klass._returning_columns_for_insert(klass.lease_connection)
+    end
+  end
+
   private
     def define_model
       Class.new(ActiveRecord::Base) do

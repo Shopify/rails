@@ -19,8 +19,8 @@ module ActiveModel
         type = resolve_type_name(type, **options) if type.is_a?(Symbol)
         type = hook_attribute_type(name, type) if type
 
-        pending_attribute_modifications << PendingType.new(name, type) if type || no_default
-        pending_attribute_modifications << PendingDefault.new(name, default) unless no_default
+        add_pending_attribute_modification(PendingType.new(name, type)) if type || no_default
+        add_pending_attribute_modification(PendingDefault.new(name, default)) unless no_default
 
         reset_default_attributes
       end
@@ -28,7 +28,7 @@ module ActiveModel
       def decorate_attributes(names = nil, &decorator) # :nodoc:
         names = names&.map { |name| resolve_attribute_name(name) }
 
-        pending_attribute_modifications << PendingDecorator.new(names, decorator)
+        add_pending_attribute_modification(PendingDecorator.new(names, decorator))
 
         reset_default_attributes
       end
@@ -92,6 +92,18 @@ module ActiveModel
 
         def pending_attribute_modifications
           @pending_attribute_modifications ||= []
+        end
+
+        def add_pending_attribute_modification(modification)
+          @pending_attribute_modifications = [*@pending_attribute_modifications, modification]
+        end
+
+        def make_pending_attribute_modifications_shareable
+          if superclass.respond_to?(:make_pending_attribute_modifications_shareable, true)
+            superclass.send(:make_pending_attribute_modifications_shareable)
+          end
+
+          @pending_attribute_modifications = ActiveSupport::Ractors.make_shareable(@pending_attribute_modifications || [])
         end
 
         def reset_default_attributes
