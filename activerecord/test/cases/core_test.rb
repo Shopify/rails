@@ -290,17 +290,28 @@ class CoreTest < ActiveRecord::TestCase
     assert_not_equal Cpk::Book.new(author_id: 1, title: "Same title").hash, Cpk::Book.new(author_id: 1, title: "Same title").hash
   end
 
-  if RUBY_VERSION >= "4.0"
+  if RUBY_VERSION >= "4.0" && !in_memory_db?
     class RactorTest < ActiveRecord::TestCase
       include ActiveSupport::Testing::Isolation
       include ActiveSupport::Testing::RactorsAssertions
 
+      def test_schema_context_is_ractor_shareable_and_accessible_on_a_non_main_ractor
+        model = Class.new(ActiveRecord::Base) do
+          def self.name = "ractor_safe_schema_context"
+          self.table_name = "topics"
+        end
+        context = model.schema_context
+
+        assert_ractor_shareable context
+        assert_same context, on_ractor { model.schema_context }
+      end
+
       def test_find_by_statement_cache_is_ractor_local
-        skip "SchemaContext is not yet Ractor-shareable; will be enabled when SC is made shareable"
         model = Class.new(ActiveRecord::Base) do
           def self.name = "ractor_safe_find_by_cache"
           self.table_name = "topics"
         end
+        model.load_schema
 
         worker_marker, worker_stable = on_ractor do
           cache = model.schema_context.find_by_statement_cache

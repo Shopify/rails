@@ -24,22 +24,6 @@ end
 
 module ActiveRecord
   class CustomPropertiesTest < ActiveRecord::TestCase
-    include ActiveSupport::Testing::RactorsAssertions
-
-    if RUBY_VERSION >= "4.0"
-      test "attribute type is available in a Ractor" do
-        skip "SchemaContext is not yet Ractor-shareable; attribute types are unreachable from a Ractor"
-
-        OverloadedType.reset_column_information
-
-        type = on_ractor do
-          OverloadedType.type_for_attribute("overloaded_float")
-        end
-
-        assert_equal :integer, type.type
-      end
-    end
-
     test "overloading types" do
       data = OverloadedType.new
 
@@ -464,23 +448,21 @@ module ActiveRecord
       assert_equal default_string_type.serialize(false), immutable_string_type.serialize(false)
     end
 
-    class RactorTest < ActiveRecord::TestCase
-      include ActiveSupport::Testing::RactorsAssertions
-      include ActiveSupport::Testing::Isolation unless in_memory_db?
+    if RUBY_VERSION >= "4.0" && !in_memory_db?
 
-      test "default_attributes are Ractor-shareable" do
-        skip "SchemaContext is not yet Ractor-shareable; _default_attributes is unreachable from a Ractor"
-        model = Class.new(ActiveRecord::Base) do
-          def self.name = "ractor_safe_default_attributes"
-          self.table_name = "topics"
-        end
+      class RactorTest < ActiveRecord::TestCase
+        include ActiveSupport::Testing::RactorsAssertions
+        include ActiveSupport::Testing::Isolation
 
-        previous = ActiveSupport::Ractors.unshareable_proc_action
-        ActiveSupport::Ractors.unshareable_proc_action = :raise
-        begin
-          assert_ractor_shareable model._default_attributes
-        ensure
-          ActiveSupport::Ractors.unshareable_proc_action = previous
+
+        test "attribute type is available in a Ractor" do
+          OverloadedType.reset_column_information
+
+          type = on_ractor do
+            OverloadedType.type_for_attribute("overloaded_float")
+          end
+
+          assert_equal :integer, type.type
         end
       end
     end
