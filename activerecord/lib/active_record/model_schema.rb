@@ -461,7 +461,14 @@ module ActiveRecord
       end
 
       def attributes_builder # :nodoc:
-        schema_context.attributes.builder
+        @attributes_builder || ActiveSupport::Ractors.on_main(self) do
+          @attributes_builder ||= begin
+            defaults = _default_attributes.except(*(column_names - Array(primary_key)))
+            builder = ActiveModel::AttributeSet::Builder.new(attribute_types, defaults)
+            ActiveSupport::Ractors.try_make_shareable(builder)
+            builder
+          end
+        end
       end
 
       def columns_hash # :nodoc:
@@ -507,7 +514,9 @@ module ActiveRecord
       # Returns a hash where the keys are column names and the values are
       # default values when instantiating the Active Record object for this table.
       def column_defaults
-        schema_context.attributes.column_defaults
+        @column_defaults || ActiveSupport::Ractors.on_main(self) do
+          @column_defaults ||= ActiveSupport::Ractors.try_make_shareable(_default_attributes.deep_dup.to_hash.freeze)
+        end
       end
 
       # Returns an array of column names as strings.
@@ -599,6 +608,8 @@ module ActiveRecord
 
         def reload_schema_contexts_from_cache
           @schema_context = nil
+          @attributes_builder = nil
+          @column_defaults = nil
           @_returning_columns_for_insert = nil
           @_returning_columns_for_update = nil
         end

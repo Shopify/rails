@@ -104,6 +104,12 @@ module ActiveModel
       end
     end
 
+    def freeze
+      value
+      value_for_database
+      super
+    end
+
     def type_cast(*)
       raise NotImplementedError
     end

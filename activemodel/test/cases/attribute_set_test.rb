@@ -233,6 +233,35 @@ module ActiveModel
       assert_equal({ foo: "1" }, attributes.to_hash)
     end
 
+    test "a deep_dup of a set with frozen attributes supports reads and database serialization" do
+      mutable_type = Class.new(Type::Value) do
+        def cast(value)
+          Array(value)
+        end
+      end.new
+
+      attributes = AttributeSet.new(
+        id: Attribute.from_database(:id, "1", Type::Integer.new),
+        tags: Attribute.from_database(:tags, "raw", mutable_type),
+      )
+      attributes.each_value(&:freeze)
+      attributes.freeze
+
+      # Mirrors record instantiation from shared frozen defaults: immutable
+      # attributes are shared as-is, mutable ones are duped.
+      record_attributes = attributes.deep_dup
+      assert_same attributes[:id], record_attributes[:id]
+      assert_not_same attributes[:tags], record_attributes[:tags]
+
+      assert_equal 1, record_attributes.fetch_value(:id)
+      assert_equal ["raw"], record_attributes.fetch_value(:tags)
+
+      # Full-insert serialization touches every attribute, including the
+      # shared frozen ones.
+      assert_equal({ id: 1, tags: ["raw"] }, record_attributes.values_for_database)
+      assert_equal({ id: 1, tags: ["raw"] }, attributes.deep_dup.to_hash)
+    end
+
     test "marshalling dump/load materialized attribute hash" do
       builder = AttributeSet::Builder.new(foo: Type::String.new)
 

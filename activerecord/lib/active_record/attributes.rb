@@ -246,16 +246,25 @@ module ActiveRecord
         default: NO_DEFAULT_PROVIDED,
         user_provided_default: true
       )
-        attribute_types[name] = cast_type
-        define_default_attribute(name, default, cast_type, from_user: user_provided_default)
+        add_pending_attribute_modification(
+          PendingDefinition.new(name, cast_type, default, user_provided_default)
+        )
+        reset_default_attributes
       end
 
       def _default_attributes # :nodoc:
-        schema_context.attributes.defaults
+        @default_attributes || ActiveSupport::Ractors.on_main(self) do
+          @default_attributes ||= build_default_attributes
+        end
       end
 
       def attribute_types # :nodoc:
-        schema_context.attributes.types
+        @attribute_types || ActiveSupport::Ractors.on_main(self) do
+          @attribute_types ||= _default_attributes.cast_types.tap do |hash|
+            hash.default = Type.default_value
+            ActiveSupport::Ractors.try_make_shareable(hash)
+          end
+        end
       end
 
       def type_for_column(column) # :nodoc:
@@ -280,24 +289,48 @@ module ActiveRecord
           super
         end
 
+        # Eagerly build the attribute data while schema loading already runs
+        # on the main Ractor, so the shareable results are hosted on the class
+        # before any other Ractor reads them.
+        def load_schema! # :nodoc:
+          super
+          _default_attributes
+          attribute_types
+        end
+
       private
         NO_DEFAULT_PROVIDED = Object.new.freeze # :nodoc:
         private_constant :NO_DEFAULT_PROVIDED
 
-        def define_default_attribute(name, value, type, from_user:)
-          if value == NO_DEFAULT_PROVIDED
-            default_attribute = _default_attributes[name].with_type(type)
-          elsif from_user
-            default_attribute = ActiveModel::Attribute::UserProvidedDefault.new(
-              name,
-              value,
-              type,
-              _default_attributes.fetch(name.to_s) { nil },
-            )
-          else
-            default_attribute = ActiveModel::Attribute.from_database(name, value, type)
+        PendingDefinition = Struct.new(:name, :type, :default, :from_user) do # :nodoc:
+          def apply_to(attribute_set)
+            attribute_set[name] = if default == NO_DEFAULT_PROVIDED
+              attribute_set[name].with_type(type)
+            elsif from_user
+              ActiveModel::Attribute::UserProvidedDefault.new(
+                name,
+                default,
+                type,
+                attribute_set.fetch(name.to_s) { nil },
+              )
+            else
+              ActiveModel::Attribute.from_database(name, default, type)
+            end
           end
-          _default_attributes[name] = default_attribute
+        end
+
+        def build_default_attributes
+          attributes_hash = columns_hash.transform_values do |column|
+            ActiveModel::Attribute.from_database(column.name, column.default, type_for_column(column))
+          end
+
+          attribute_set = ActiveModel::AttributeSet.new(attributes_hash)
+          apply_pending_attribute_modifications(attribute_set)
+
+          # Attribute#freeze materializes the lazily cast values that shared
+          # frozen attributes could no longer memoize.
+          ActiveSupport::Ractors.try_make_shareable(attribute_set)
+          attribute_set
         end
 
         def reset_default_attributes

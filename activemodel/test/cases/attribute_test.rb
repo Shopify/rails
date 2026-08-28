@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "cases/helper"
+require "active_model/attribute/user_provided_default"
 
 module ActiveModel
   class AttributeTest < ActiveModel::TestCase
@@ -327,6 +328,62 @@ module ActiveModel
       attribute.value << "1"
 
       assert_equal 1, attribute.with_type(Type::Integer.new).value
+    end
+
+    test "freezing an immutable-typed attribute materializes its value" do
+      attribute = Attribute.from_database(:foo, "1", Type::Integer.new)
+      attribute.freeze
+
+      assert_predicate attribute, :has_been_read?
+      assert_equal 1, attribute.value
+    end
+
+    test "freezing a mutable-typed attribute does not materialize its value" do
+      type = Class.new(Type::Value) do
+        def cast(value)
+          Array(value)
+        end
+      end.new
+
+      attribute = Attribute.from_database(:foo, "raw", type)
+      attribute.freeze
+
+      assert_not_predicate attribute, :has_been_read?
+
+      # Dups of the frozen attribute cast independently, so records never
+      # share nested structure through a pre-materialized value.
+      first, second = attribute.dup, attribute.dup
+      assert_equal ["raw"], first.value
+      assert_equal ["raw"], second.value
+      assert_not_same first.value, second.value
+    end
+
+    test "freezing a proc default does not evaluate the proc" do
+      calls = 0
+      default = -> { calls += 1 }
+      attribute = Attribute::UserProvidedDefault.new(:foo, default, Type::Integer.new, nil)
+      attribute.freeze
+
+      assert_equal 0, calls
+      assert_equal 1, attribute.dup.value
+      assert_equal 2, attribute.dup.value
+    end
+
+    test "frozen attributes compute value_for_database without memoizing" do
+      serialize_calls = 0
+      type = Class.new(Type::Integer) do
+        define_method(:serialize) do |value|
+          serialize_calls += 1
+          super(value)
+        end
+      end.new
+
+      attribute = Attribute.from_database(:foo, "1", type)
+      attribute.freeze
+
+      assert_equal 1, attribute.value_for_database
+      assert_equal 1, attribute.value_for_database
+      assert_equal 2, serialize_calls
     end
   end
 end

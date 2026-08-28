@@ -456,6 +456,9 @@ module ActiveRecord
 
 
         test "attribute type is available in a Ractor" do
+          previous = ActiveSupport::Ractors.unshareable_proc_action
+          ActiveSupport::Ractors.unshareable_proc_action = :raise
+
           OverloadedType.reset_column_information
 
           type = on_ractor do
@@ -463,6 +466,8 @@ module ActiveRecord
           end
 
           assert_equal :integer, type.type
+        ensure
+          ActiveSupport::Ractors.unshareable_proc_action = previous
         end
       end
     end

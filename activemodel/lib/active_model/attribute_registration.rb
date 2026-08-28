@@ -12,7 +12,6 @@ module ActiveModel
       def inherited(base)
         super
         base.instance_variable_set(:@pending_attribute_modifications, nil)
-        base.instance_variable_set(:@pending_attribute_modifications_shareable, false)
       end
 
       def attribute(name, type = nil, default: (no_default = true), **options)
@@ -67,10 +66,6 @@ module ActiveModel
         end
       end
 
-      def pending_attribute_modifications_shareable? # :nodoc:
-        @pending_attribute_modifications_shareable
-      end
-
       private
         PendingType = Struct.new(:name, :type) do # :nodoc:
           def apply_to(attribute_set)
@@ -103,15 +98,6 @@ module ActiveModel
           @pending_attribute_modifications = [*@pending_attribute_modifications, modification]
         end
 
-        def make_pending_attribute_modifications_shareable
-          if superclass.respond_to?(:make_pending_attribute_modifications_shareable, true)
-            superclass.send(:make_pending_attribute_modifications_shareable)
-          end
-
-          @pending_attribute_modifications = ActiveSupport::Ractors.make_shareable(@pending_attribute_modifications || [])
-          @pending_attribute_modifications_shareable = true
-        end
-
         def reset_default_attributes
           reset_default_attributes!
           subclasses.each { |subclass| subclass.send(:reset_default_attributes) }
@@ -120,7 +106,6 @@ module ActiveModel
         def reset_default_attributes!
           @default_attributes = nil
           @attribute_types = nil
-          @pending_attribute_modifications_shareable = false
         end
 
         def resolve_attribute_name(name)

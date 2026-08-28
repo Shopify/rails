@@ -4,63 +4,15 @@
 
 module ActiveRecord
   module ModelSchema
-    # SchemaContext owns all schema-derived state for a model: columns,
-    # attribute types, and column defaults.
+    # SchemaContext owns the column-derived state for a model: the columns
+    # themselves, and the caches keyed off them.
     class SchemaContext # :nodoc:
-      # Attributes owns a model's attribute-derived state: attribute
-      # defaults, attribute types, and column defaults.
-      class Attributes # :nodoc:
-        attr_reader :model_class
-
-        def initialize(model_class)
-          @model_class = model_class
-        end
-
-        def defaults
-          @defaults ||= begin
-            unless ActiveSupport::Ractors.main? || model_class.pending_attribute_modifications_shareable?
-              ActiveSupport::Ractors.on_main(model_class) { make_pending_attribute_modifications_shareable }
-            end
-
-            attributes_hash = model_class.columns_hash.transform_values do |column|
-              ActiveModel::Attribute.from_database(column.name, column.default, model_class.type_for_column(column))
-            end
-
-            attribute_set = ActiveModel::AttributeSet.new(attributes_hash)
-            model_class.apply_pending_attribute_modifications(attribute_set)
-            attribute_set
-          end
-        end
-
-        def types
-          @types ||= defaults.cast_types.tap do |hash|
-            hash.default = ActiveModel::Type.default_value
-          end
-        end
-
-        def builder
-          primary_key_defaults = defaults.except(*(model_class.column_names - Array(model_class.primary_key)))
-          ActiveModel::AttributeSet::Builder.new(types, primary_key_defaults)
-        end
-
-        def column_defaults
-          @column_defaults ||= defaults.deep_dup.to_hash.freeze
-        end
-      end
-
       attr_reader :model_class, :columns_hash, :columns, :column_names,
                   :content_columns
 
       def initialize(model_class)
         @model_class = model_class
         @schema_loaded = false
-        @attributes_key = :"active_record_schema_attributes_#{object_id}"
-      end
-
-      def attributes
-        ActiveSupport::Ractors.store_if_absent(@attributes_key) do
-          Attributes.new(model_class)
-        end
       end
 
       def table_name
