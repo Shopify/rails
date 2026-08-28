@@ -14,6 +14,7 @@ require_relative "../support/connection"
 require_relative "../support/adapter_helper"
 require_relative "../support/load_schema_helper"
 require_relative "../support/postgresql_config"
+require_relative "../support/ractor_test_runner"
 
 module ActiveRecord
   # = Active Record Test Case
@@ -349,6 +350,9 @@ module ActiveRecord
     ARTest.connect
     # Load database schema
     load_schema
+    # In the ractor section, run each test in its own non-main Ractor backed
+    # by the SQLite connections held on the main Ractor.
+    ARTest::RactorTestRunner.install if ARTest.connection_name == "ractor"
   end
 
   class PostgreSQLTestCase < TestCase

@@ -7,14 +7,18 @@ module ActiveRecord
     extend ActiveSupport::Concern
 
     def before_setup # :nodoc:
-      setup_fixtures
+      ActiveSupport::Ractors.on_main(self) do
+        setup_fixtures
+      end
       super
     end
 
     def after_teardown # :nodoc:
       super
     ensure
-      teardown_fixtures
+      ActiveSupport::Ractors.on_main(self) do
+        teardown_fixtures
+      end
     end
 
     included do

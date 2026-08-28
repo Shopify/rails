@@ -359,7 +359,7 @@ module ActiveRecord
             # Not folded into connect! (the shared bootstrap for every
             # adapter): only this callsite knows the connection is being
             # pinned. steal! clears the flag when the lease is taken back.
-            connection.reconnect = true
+            connection.leased = true
             @connections_lock.synchronize do
               token = (@next_connection_id += 1)
               @connections[token] = connection

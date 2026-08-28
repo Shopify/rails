@@ -34,7 +34,11 @@ module ARTest
 
     arunit_adapter = ActiveRecord::Base.lease_connection.pool.db_config.adapter
 
-    unless connection_name.include?(arunit_adapter)
+    # The ractor section runs the suite on non-main Ractors backed by SQLite
+    # connections held on the main Ractor.
+    expected_name = connection_name == "ractor" ? "sqlite3" : connection_name
+
+    unless expected_name.include?(arunit_adapter)
       raise ArgumentError, "The connection name did not match the adapter name. Connection name is '#{connection_name}' and the adapter name is '#{arunit_adapter}'."
     end
   end

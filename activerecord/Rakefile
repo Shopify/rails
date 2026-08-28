@@ -31,7 +31,7 @@ task :test do
   run_without_aborting(*tasks)
 end
 
-adapters = %w( mysql2 trilogy postgresql sqlite3 sqlite3_mem )
+adapters = %w( mysql2 trilogy postgresql sqlite3 sqlite3_mem ractor )
 
 namespace :test do
   task :railties do
@@ -74,7 +74,7 @@ end
 adapters.each do |adapter|
   namespace :test do
     Rake::TestTask.new(adapter => "#{adapter}:env") do |t|
-      adapter_short = adapter[/^[a-z0-9]+/]
+      adapter_short = adapter == "ractor" ? "sqlite3" : adapter[/^[a-z0-9]+/]
       t.libs << "test"
       files = (FileList["test/cases/**/*_test.rb"].reject {
         |x| x.include?("/adapters/") || x.include?("/encryption/performance")
