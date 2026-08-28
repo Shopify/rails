@@ -450,10 +450,12 @@ module ActiveRecord
 
     class RactorTest < ActiveRecord::TestCase
       include ActiveSupport::Testing::RactorsAssertions
-      include ActiveSupport::Testing::Isolation unless in_memory_db?
+      include ActiveSupport::Testing::Isolation
 
       if RUBY_VERSION >= "4.0"
         test "attribute type is available in a Ractor" do
+          skip("Can't test with in-memory dbs") if in_memory_db?
+
           OverloadedType.reset_column_information
 
           type = on_ractor do
