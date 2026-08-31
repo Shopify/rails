@@ -1,23 +1,10 @@
 # frozen_string_literal: true
 
-require "concurrent/map"
 require "action_view/dependency_tracker"
 
 module ActionView
   class Digestor
     class << self
-      def cache(details_key)
-        digest_cache_store[details_key] ||= Concurrent::Map.new
-      end
-
-      def digest_caches
-        digest_cache_store.values
-      end
-
-      def clear_cache
-        digest_cache_store.clear
-      end
-
       # Supported options:
       #
       # * <tt>name</tt>         - Template name
@@ -88,18 +75,6 @@ module ActionView
           finder.disable_cache do
             finder.find(name, prefixes, partial, keys)
           end
-        end
-
-        # The digest cache holds non-shareable Concurrent::Maps and the mutex
-        # isn't Ractor-shareable, so both live in Ractor-local storage: each
-        # request-serving Ractor owns its own copy, cold-filled once and reused
-        # across the requests that Ractor serves.
-        def digest_cache_store
-          Ractor[:av_digest_cache] ||= Concurrent::Map.new
-        end
-
-        def digest_mutex
-          Ractor[:av_digest_mutex] ||= Mutex.new
         end
     end
 

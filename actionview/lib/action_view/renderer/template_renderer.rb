@@ -3,7 +3,7 @@
 module ActionView
   class TemplateRenderer < AbstractRenderer # :nodoc:
     def render(context, options, &block)
-      @details = @lookup_context.details_for(options)
+      @details = extract_details(options)
       template = determine_template(options, &block)
 
       prepend_formats(template.format)

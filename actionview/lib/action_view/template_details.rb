@@ -2,6 +2,28 @@
 
 module ActionView
   class TemplateDetails # :nodoc:
+    class Requested
+      attr_reader :locale_idx, :handlers_idx, :formats_idx, :variants_idx
+
+      ANY_HASH = Hash.new(1).merge(nil => 0).freeze
+
+      def initialize(locale:, handlers:, formats:, variants:)
+        @locale_idx   = build_idx_hash(locale)
+        @handlers_idx = build_idx_hash(handlers)
+        @formats_idx  = build_idx_hash(formats)
+        if variants == :any
+          @variants_idx = ANY_HASH
+        else
+          @variants_idx = build_idx_hash(variants)
+        end
+      end
+
+      private
+        def build_idx_hash(arr)
+          [*arr, nil].each_with_index.to_h.freeze
+        end
+    end
+
     attr_reader :locale, :handler, :format, :variant
 
     def initialize(locale, handler, format, variant)
@@ -9,6 +31,32 @@ module ActionView
       @handler = handler
       @format = format
       @variant = variant
+    end
+
+    def matches?(requested)
+      requested.formats_idx[@format] &&
+        requested.locale_idx[@locale] &&
+        requested.variants_idx[@variant] &&
+        requested.handlers_idx[@handler]
+    end
+
+    def sort_key_for(requested)
+      [
+        requested.formats_idx[@format],
+        requested.locale_idx[@locale],
+        requested.variants_idx[@variant],
+        requested.handlers_idx[@handler]
+      ]
+    end
+
+    # A single pass over matches? and sort_key_for: the sort key when the
+    # template matches +requested+, nil otherwise.
+    def rank_for(requested)
+      format  = requested.formats_idx[@format]   or return
+      locale  = requested.locale_idx[@locale]    or return
+      variant = requested.variants_idx[@variant] or return
+      handler = requested.handlers_idx[@handler] or return
+      [format, locale, variant, handler]
     end
 
     def handler_class

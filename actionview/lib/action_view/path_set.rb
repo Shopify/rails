@@ -37,32 +37,29 @@ module ActionView # :nodoc:
       PathSet.new(paths + array)
     end
 
-    def find(path, prefixes, partial, details, cache, locals)
+    def find(path, prefixes, partial, details, details_key, locals)
       search_combinations(prefixes) do |resolver, prefix|
-        template = resolver.find(path, prefix, partial, details, cache, locals)
+        template = resolver.find(path, prefix, partial, details, details_key, locals)
         return template if template
       end
       nil
     end
 
-    def find!(path, prefixes, partial, details, cache, locals)
-      find(path, prefixes, partial, details, cache, locals) ||
-        raise(MissingTemplate.new(self, path, prefixes, partial, details.to_h, cache, locals))
+    def find!(path, prefixes, partial, details, details_key, locals)
+      find(path, prefixes, partial, details, details_key, locals) ||
+        raise(MissingTemplate.new(self, path, prefixes, partial, details, details_key, locals))
     end
 
-    def find_all(path, prefixes, partial, details, cache, locals)
+    def find_all(path, prefixes, partial, details, details_key, locals)
       search_combinations(prefixes) do |resolver, prefix|
-        templates = resolver.find_all(path, prefix, partial, details, cache, locals)
+        templates = resolver.find_all(path, prefix, partial, details, details_key, locals)
         return templates unless templates.empty?
       end
       []
     end
 
-    def exists?(path, prefixes, partial, details, cache, locals)
-      search_combinations(prefixes) do |resolver, prefix|
-        return true if resolver.find(path, prefix, partial, details, cache, locals)
-      end
-      false
+    def exists?(path, prefixes, partial, details, details_key, locals)
+      !find(path, prefixes, partial, details, details_key, locals).nil?
     end
 
     private
