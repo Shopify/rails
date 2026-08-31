@@ -106,6 +106,8 @@ module ActionText
       end
     end
 
+    # NOTE: this does not canonicalize, so it is not safe for untrusted content. See the
+    # note on ActionText::MarkdownConversion.node_to_markdown.
     def to_markdown
       @markdown ||= MarkdownConversion.node_to_markdown(source)
     end

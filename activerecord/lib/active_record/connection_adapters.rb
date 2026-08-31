@@ -80,6 +80,7 @@ module ActiveRecord
     autoload :RactorConnectionHandler, "active_record/connection_adapters/ractor_connection_handler"
     autoload :RactorConnectionPool, "active_record/connection_adapters/ractor_connection_pool"
     autoload :RactorConnectionProxy, "active_record/connection_adapters/ractor_connection_proxy"
+    autoload :RetryBudget
     autoload :SchemaCache
     autoload :BoundSchemaReflection, "active_record/connection_adapters/schema_cache"
     autoload :SchemaReflection, "active_record/connection_adapters/schema_cache"

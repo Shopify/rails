@@ -340,6 +340,13 @@ module ApplicationTests
       assert_instance_of Pathname, Rails.public_path
     end
 
+    test "Rails.app executor and reloader are named" do
+      app "development"
+
+      assert Rails.app.executor.name.starts_with?("ActiveSupport::Executor(#<AppTemplate::Application:")
+      assert Rails.app.reloader.name.starts_with?("ActiveSupport::Reloader(#<AppTemplate::Application:")
+    end
+
     test "config.enable_reloading is !config.cache_classes" do
       app "development"
 
@@ -3575,15 +3582,17 @@ module ApplicationTests
       assert_equal true, ActionView::Helpers::FormTagHelper.default_enforce_utf8
     end
 
-    test "ActionView::Template::Handlers::ERB.escape_ignore_list is frozen after boot" do
-      app "development"
+    if RUBY_VERSION >= "4.0"
+      test "ActionView::Template::Handlers::ERB.escape_ignore_list is frozen after boot" do
+        app "development"
 
-      escape_ignore_list = on_ractor do
-        ActionView::Template::Handlers::ERB.escape_ignore_list
+        escape_ignore_list = on_ractor do
+          ActionView::Template::Handlers::ERB.escape_ignore_list
+        end
+
+        assert_equal(["text/plain"], escape_ignore_list)
+        assert_predicate(escape_ignore_list, :frozen?)
       end
-
-      assert_equal(["text/plain"], escape_ignore_list)
-      assert_predicate(escape_ignore_list, :frozen?)
     end
 
     test "ActionView::Helpers::NavigationHelper.button_to_generates_button_tag is true by default" do
@@ -4419,6 +4428,34 @@ module ApplicationTests
       assert_equal \
         "-vf 'select=eq(n\\,0)+eq(key\\,1)+gt(scene\\,0.015),loop=loop=-1:size=2,trim=start_frame=1' -frames:v 1 -f image2",
         ActiveStorage.video_preview_arguments
+    end
+
+    test "ActiveStorage.video_preview_input_arguments is empty by default" do
+      app "development"
+
+      assert_equal "", ActiveStorage.video_preview_input_arguments
+    end
+
+    test "ActiveStorage.video_preview_input_arguments can be configured" do
+      add_to_config 'config.active_storage.video_preview_input_arguments = "-codec_whitelist h264"'
+
+      app "development"
+
+      assert_equal "-codec_whitelist h264", ActiveStorage.video_preview_input_arguments
+    end
+
+    test "ActiveStorage.ffprobe_arguments is empty by default" do
+      app "development"
+
+      assert_equal "", ActiveStorage.ffprobe_arguments
+    end
+
+    test "ActiveStorage.ffprobe_arguments can be configured" do
+      add_to_config 'config.active_storage.ffprobe_arguments = "-codec_whitelist h264"'
+
+      app "development"
+
+      assert_equal "-codec_whitelist h264", ActiveStorage.ffprobe_arguments
     end
 
     test "ActiveStorage.variant_processor uses mini_magick without Rails 7 defaults" do
@@ -5438,6 +5475,27 @@ module ApplicationTests
 
       get "/posts"
       assert_equal "[:active_record_connected_to_stack, :custom_key]", last_response.body
+    end
+
+    if RUBY_VERSION >= "4.0"
+      test "ActionDispatch configuration is frozen after boot" do
+        app "development"
+
+        [
+          ActionDispatch::ExceptionWrapper.rescue_responses,
+          ActionDispatch::ExceptionWrapper.rescue_templates,
+          ActionDispatch::ExceptionWrapper.wrapper_exceptions,
+          ActionDispatch::ExceptionWrapper.silent_exceptions,
+        ].each do |config|
+          assert_ractor_shareable(config)
+        end
+      end
+
+      test "ActiveRecord configuration is frozen after boot" do
+        app "development"
+
+        assert_ractor_shareable(ActiveRecord.query_transformers)
+      end
     end
 
     private

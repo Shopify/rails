@@ -235,7 +235,10 @@ module ActiveRecord
         primary_foreign_key_pairs = primary_key_column_names.zip(foreign_key_column_names)
 
         primary_foreign_key_pairs.each do |primary_key_column_name, foreign_key_column_name|
-          klass_scope.where!(table[primary_key_column_name].eq(foreign_table[foreign_key_column_name]))
+          primary_key_attribute = predicate_builder.predicate_attribute(table[primary_key_column_name])
+          foreign_key_attribute = predicate_builder.predicate_attribute(foreign_table[foreign_key_column_name])
+
+          klass_scope.where!(primary_key_attribute.eq(foreign_key_attribute))
         end
 
         if klass.finder_needs_type_condition?
@@ -415,7 +418,7 @@ module ActiveRecord
         @active_record = active_record
         @klass         = options[:anonymous_class]
         @plural_name   = active_record.pluralize_table_names ?
-                            name.to_s.pluralize : name.to_s
+                            name.to_s.pluralize.dedup : name.to_s.dedup
       end
 
       def autosave=(autosave)
@@ -537,8 +540,11 @@ module ActiveRecord
         klass
       end
 
-      attr_reader :type, :foreign_type
+      attr_reader :type, :foreign_type, :extensions
       attr_accessor :parent_reflection # Reflection
+
+      FROZEN_EMPTY_ARRAY = [].freeze
+      private_constant :FROZEN_EMPTY_ARRAY
 
       def initialize(name, scope, options, active_record)
         super
@@ -550,6 +556,9 @@ module ActiveRecord
         @foreign_key = nil
         @association_foreign_key = nil
         @association_primary_key = nil
+        @extensions = options[:extend] ? Array(options[:extend]) : FROZEN_EMPTY_ARRAY
+        @extensions = @extensions.dup.freeze unless @extensions.frozen?
+
         if options[:query_constraints]
           raise ConfigurationError, <<~MSG.squish
             Setting `query_constraints:` option on `#{active_record}.#{macro} :#{name}` is not allowed.
@@ -751,10 +760,6 @@ module ActiveRecord
 
       def add_as_through(seed)
         seed + [self]
-      end
-
-      def extensions
-        Array(options[:extend])
       end
 
       def deprecated?
@@ -1165,14 +1170,6 @@ module ActiveRecord
           end
           names.first
         end
-      end
-
-      def source_options
-        source_reflection.options
-      end
-
-      def through_options
-        through_reflection.options
       end
 
       def check_validity!

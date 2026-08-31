@@ -1,7 +1,5 @@
 # frozen_string_literal: true
 
-require "active_support/core_ext/object/shareable"
-
 module ActiveRecord
   class Relation
     class FromClause # :nodoc:
@@ -10,10 +8,6 @@ module ActiveRecord
       def initialize(value, name)
         @value = value
         @name = name
-      end
-
-      def merge(other)
-        self
       end
 
       def empty?
@@ -25,8 +19,11 @@ module ActiveRecord
       end
 
       def self.empty
-        @empty ||= new(nil, nil).make_shareable!
+        EMPTY
       end
+
+      EMPTY = new(nil, nil).freeze
+      private_constant :EMPTY
     end
   end
 end

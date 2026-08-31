@@ -2,7 +2,6 @@
 
 require "active_support"
 require "active_support/i18n_railtie"
-require "active_support/core_ext/kernel/shareable"
 
 module ActiveSupport
   class Railtie < Rails::Railtie # :nodoc:
@@ -56,15 +55,15 @@ module ActiveSupport
         ActiveSupport.event_reporter.clear_context
       end
 
-      app.executor.to_run(&shareable_proc {
+      app.executor.to_run(&ActiveSupport::Ractors.shareable_proc do
         ActiveSupport::ExecutionContext.push
-      })
+      end)
 
-      app.executor.to_complete(&shareable_proc {
+      app.executor.to_complete(&ActiveSupport::Ractors.shareable_proc do
         ActiveSupport::CurrentAttributes.clear_all
         ActiveSupport::ExecutionContext.pop
         ActiveSupport.event_reporter.clear_context
-      })
+      end)
 
       ActiveSupport.on_load(:active_support_test_case) do
         if app.config.active_support.executor_around_test_case
@@ -184,6 +183,10 @@ module ActiveSupport
       config.after_initialize do
         ActiveSupport::Inflector::Inflections.all_instances.each(&:freeze)
       end
+    end
+
+    initializer "active_support.set_log_subscriber_logger", after: :initialize_logger do
+      ActiveSupport::LogSubscriber.logger = Rails.logger
     end
   end
 end

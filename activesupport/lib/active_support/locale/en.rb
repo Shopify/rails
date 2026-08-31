@@ -1,12 +1,11 @@
+# :markup: markdown
 # frozen_string_literal: true
-
-require "active_support/core_ext/kernel/shareable"
 
 {
   en: {
     number: {
       nth: {
-        ordinals: shareable_proc { |_key, options|
+        ordinals: ActiveSupport::Ractors.shareable_lambda do |_key, options|
           number = options[:number]
           case number
           when 1; "st"
@@ -23,12 +22,12 @@ require "active_support/core_ext/kernel/shareable"
             else    "th"
             end
           end
-        },
+        end,
 
-        ordinalized: shareable_proc { |_key, options|
+        ordinalized: ActiveSupport::Ractors.shareable_lambda do |_key, options|
           number = options[:number]
           "#{number}#{ActiveSupport::Inflector.ordinal(number)}"
-        }
+        end
       }
     }
   }

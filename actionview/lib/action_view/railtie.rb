@@ -67,7 +67,7 @@ module ActionView
     end
 
     config.after_initialize do
-      ActionView::Template::Handlers::ERB.escape_ignore_list.freeze
+      ActiveSupport::Ractors.make_shareable(ActionView::Template::Handlers::ERB.escape_ignore_list)
     end
 
     config.after_initialize do |app|
@@ -98,6 +98,13 @@ module ActionView
 
     initializer "action_view.logger" do
       ActiveSupport.on_load(:action_view) { self.logger ||= Rails.logger }
+    end
+
+    initializer "action_view.root" do
+      ActiveSupport.on_load(:action_view) do
+        ActionView::StructuredEventSubscriber.rails_root = "#{Rails.root}/".freeze
+        ActionView::LogSubscriber.rails_root = "#{Rails.root}/".freeze
+      end
     end
 
     initializer "action_view.caching" do |app|

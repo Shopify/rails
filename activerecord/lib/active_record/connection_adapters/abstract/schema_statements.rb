@@ -7,6 +7,8 @@ require "openssl"
 module ActiveRecord
   module ConnectionAdapters # :nodoc:
     module SchemaStatements
+      EMPTY_METADATA = [].freeze # :nodoc:
+
       # Returns a hash of mappings from the abstract data types to the native
       # database types. See TableDefinition#column for details on the recognized
       # abstract data types.
@@ -14,8 +16,11 @@ module ActiveRecord
         {}
       end
 
+      # Returns the options the given table was created with, or a Hash of them
+      # keyed by table name when given an Array of tables.
       def table_options(table_name)
-        nil
+        result = fetch_table_options(Array(table_name).map(&:to_s))
+        table_name.is_a?(Array) ? result : result[table_name.to_s]
       end
 
       # Returns the table comment that's stored in database metadata.
@@ -76,7 +81,8 @@ module ActiveRecord
         views.include?(view_name.to_s)
       end
 
-      # Returns an array of indexes for the given table.
+      # Returns an array of indexes for the given table, or a Hash of them keyed by
+      # table name when given an Array of tables.
       def indexes(table_name)
         raise NotImplementedError, "#indexes is not implemented"
       end
@@ -102,13 +108,14 @@ module ActiveRecord
         indexes(table_name).any? { |i| i.defined_for?(column_name, **options) }
       end
 
-      # Returns an array of +Column+ objects for the table specified by +table_name+.
+      # Returns an array of +Column+ objects for the given table, or a Hash of them
+      # keyed by table name when given an Array of tables.
       def columns(table_name)
-        table_name = table_name.to_s
-        definitions = column_definitions(table_name)
-        definitions.map do |field|
-          new_column_from_field(table_name, field, definitions)
+        result = fetch_column_definitions(Array(table_name).map(&:to_s)).to_h do |table, definitions|
+          [table, definitions.map { |field| new_column_from_field(table, field, definitions) }]
         end
+
+        table_name.is_a?(Array) ? result : result[table_name.to_s]
       end
 
       # Checks to see if a column exists in a given table.
@@ -346,6 +353,19 @@ module ActiveRecord
         yield table_definition if block_given?
 
         table_definition
+      end
+
+      # Returns an AlterTable object containing information about changes that
+      # would be made to +table_name+.
+      #
+      #   alter_table = build_alter_table_definition(:suppliers) do |table|
+      #     table.add_column(:qualification, :string)
+      #   end
+      #
+      def build_alter_table_definition(table_name) # :nodoc:
+        alter_table = create_alter_table(table_name)
+        yield alter_table if block_given?
+        alter_table
       end
 
       # Creates a new join table with the name created using the lexical order of the first two
@@ -689,7 +709,7 @@ module ActiveRecord
       def add_column(table_name, column_name, type, **options)
         return if options[:if_not_exists] == true && column_exists?(table_name, column_name)
 
-        at = create_alter_table(table_name)
+        at = build_alter_table_definition(table_name)
         at.add_column(column_name, type, **options)
         execute_alter_table(at)
       end
@@ -712,7 +732,7 @@ module ActiveRecord
           raise ArgumentError.new("You must specify at least one column name. Example: remove_columns(:people, :first_name)")
         end
 
-        at = create_alter_table(table_name)
+        at = build_alter_table_definition(table_name)
         column_names.each { |column_name| at.remove_column(column_name) }
         execute_alter_table(at)
       end
@@ -741,7 +761,7 @@ module ActiveRecord
       def remove_column(table_name, column_name, type = nil, **options)
         return if options[:if_exists] == true && !column_exists?(table_name, column_name)
 
-        at = create_alter_table(table_name)
+        at = build_alter_table_definition(table_name)
         at.remove_column(column_name)
         execute_alter_table(at)
       end
@@ -1172,7 +1192,8 @@ module ActiveRecord
       end
       alias :remove_belongs_to :remove_reference
 
-      # Returns an array of foreign keys for the given table.
+      # Returns an array of foreign keys for the given table, or a Hash of them keyed
+      # by table name when given an Array of tables.
       # The foreign keys are represented as ForeignKeyDefinition objects.
       def foreign_keys(table_name)
         raise NotImplementedError, "foreign_keys is not implemented"
@@ -1263,7 +1284,7 @@ module ActiveRecord
         options = foreign_key_options(from_table, to_table, options)
         return if options[:if_not_exists] == true && foreign_key_exists?(from_table, to_table, **options.slice(:column, :primary_key))
 
-        at = create_alter_table from_table
+        at = build_alter_table_definition from_table
         at.add_foreign_key to_table, options
 
         execute_alter_table(at)
@@ -1306,7 +1327,7 @@ module ActiveRecord
 
         fk_name_to_delete = foreign_key_for!(from_table, to_table: to_table, **options).name
 
-        at = create_alter_table from_table
+        at = build_alter_table_definition from_table
         at.drop_foreign_key fk_name_to_delete
 
         execute_alter_table(at)
@@ -1364,7 +1385,8 @@ module ActiveRecord
         options
       end
 
-      # Returns an array of check constraints for the given table.
+      # Returns an array of check constraints for the given table, or a Hash of them
+      # keyed by table name when given an Array of tables.
       # The check constraints are represented as CheckConstraintDefinition objects.
       def check_constraints(table_name)
         raise NotImplementedError
@@ -1392,7 +1414,7 @@ module ActiveRecord
         options = check_constraint_options(table_name, expression, options)
         return if if_not_exists && check_constraint_exists?(table_name, **options)
 
-        at = create_alter_table(table_name)
+        at = build_alter_table_definition(table_name)
         at.add_check_constraint(expression, options)
 
         execute_alter_table(at)
@@ -1424,7 +1446,7 @@ module ActiveRecord
 
         chk_name_to_delete = check_constraint_for!(table_name, expression: expression, **options).name
 
-        at = create_alter_table(table_name)
+        at = build_alter_table_definition(table_name)
         at.drop_check_constraint(chk_name_to_delete)
 
         execute_alter_table(at)
@@ -1442,7 +1464,7 @@ module ActiveRecord
       end
 
       def remove_constraint(table_name, constraint_name) # :nodoc:
-        at = create_alter_table(table_name)
+        at = build_alter_table_definition(table_name)
         at.drop_constraint(constraint_name)
 
         execute_alter_table(at)
@@ -1556,7 +1578,7 @@ module ActiveRecord
       #   add_timestamps(:suppliers, null: true)
       #
       def add_timestamps(table_name, **options)
-        at = create_alter_table(table_name)
+        at = build_alter_table_definition(table_name)
         at.add_timestamps(**options)
         execute_alter_table(at)
       end
@@ -1667,17 +1689,17 @@ module ActiveRecord
       end
 
       def bulk_change_table(table_name, operations) # :nodoc:
-        alter_table = create_alter_table(table_name)
+        alter_table = build_alter_table_definition(table_name)
 
-        operations.each do |command, args|
+        operations.each do |command, args, kwargs|
           args.shift # remove table_name
 
           if alter_table.class::COMBINABLE_COMMANDS.include?(command)
-            alter_table.public_send(command, *args)
+            alter_table.public_send(command, *args, **kwargs)
           else
             execute_alter_table(alter_table)
-            alter_table = create_alter_table(table_name)
-            send(command, table_name, *args)
+            alter_table = build_alter_table_definition(table_name)
+            send(command, table_name, *args, **kwargs)
           end
         end
 
@@ -1702,6 +1724,29 @@ module ActiveRecord
       end
 
       private
+        def fetch_table_options(tables)
+          tables.index_with(nil)
+        end
+
+        def fetch_column_definitions(tables)
+          tables.index_with { |table| column_definitions(table) }
+        end
+
+        def quoted_table_names(table_names)
+          table_names.map { |name| quoted_scope(name)[:name] }.join(", ")
+        end
+
+        # One read filters by one schema, so tables naming different schemas are read
+        # a schema at a time.
+        def fetch_by_schema(tables)
+          tables.group_by { |table| quoted_scope(table)[:schema] }
+            .each_with_object({}) { |(schema, group), result| result.merge!(yield(schema, group)) }
+        end
+
+        def rows_for(rows_by_name, table)
+          rows_by_name.fetch(bare_table_name(table), EMPTY_METADATA)
+        end
+
         def generate_index_name(table_name, column)
           name = "index_#{table_name}_on_#{Array(column) * '_and_'}"
           return name if name.bytesize <= max_index_name_size

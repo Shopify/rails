@@ -1,6 +1,5 @@
 # frozen_string_literal: true
 
-require "active_support/concern"
 require "action_view/helpers/content_exfiltration_prevention_helper"
 require "action_view/helpers/tag_helper"
 require "action_view/helpers/url_helper"
@@ -78,6 +77,16 @@ module ActionView
       #   # => true
       #
       #   current_page?(controller: 'product', action: 'index', method: [:get, :post])
+      #   # => true
+      #
+      # The default <tt>method: :get</tt> matches GET and HEAD requests, but not
+      # other safe methods: after an HTTP QUERY request to
+      # <tt>http://www.example.com/search</tt>,
+      #
+      #   current_page?('/search')
+      #   # => false
+      #
+      #   current_page?('/search', method: :query)
       #   # => true
       #
       # We can also pass in the symbol arguments instead of strings.

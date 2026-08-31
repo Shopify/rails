@@ -187,11 +187,13 @@ module ActionDispatch
 
         class UrlHelper
           def self.create(route, options, route_name)
-            if optimize_helper?(route)
+            helper = if optimize_helper?(route)
               OptimizedUrlHelper.new(route, options, route_name)
             else
               new(route, options, route_name)
             end
+
+            ActiveSupport::Ractors.try_make_shareable(helper)
           end
 
           def self.optimize_helper?(route)
@@ -279,7 +281,7 @@ module ActionDispatch
             controller_options = t.url_options
             options = controller_options.merge @options
             hash = handle_positional_args(controller_options,
-                                          inner_options || {},
+                                          inner_options.presence,
                                           args,
                                           options,
                                           @segment_keys)
@@ -302,8 +304,11 @@ module ActionDispatch
               else
                 path_params = path_params.dup
               end
-              inner_options.each_key do |key|
-                path_params.delete(key)
+
+              if inner_options
+                inner_options.each_key do |key|
+                  path_params.delete(key)
+                end
               end
 
               args.each_with_index do |arg, index|
@@ -312,7 +317,8 @@ module ActionDispatch
               end
             end
 
-            result.merge!(inner_options)
+            result.merge!(inner_options) if inner_options
+            result
           end
         end
 
@@ -331,26 +337,17 @@ module ActionDispatch
           #     foo_url(bar, baz, bang, sort_by: 'baz')
           #
           def define_url_helper(mod, name, helper, url_strategy)
-            # Store the helper and strategy as module ivars so the
-            # generated method can access them without closures
-            # (closures prevent methods from being called in non-main Ractors).
-            mod.instance_variable_set(:"@_url_helper_#{name}", helper)
-            mod.instance_variable_set(:"@_url_strategy_#{name}", url_strategy)
-            mod.module_eval <<~RUBY, __FILE__, __LINE__ + 1
-              def #{name}(*args)
-                last = args.last
-                options = \\
-                  case last
-                  when Hash
-                    args.pop
-                  when ActionController::Parameters
-                    args.pop.to_h
-                  end
-                mod = self.class.ancestors.find { |m| m.instance_variable_defined?(:@_url_helper_#{name}) }
-                mod.instance_variable_get(:@_url_helper_#{name}).call(self, :#{name}, args, options,
-                  mod.instance_variable_get(:@_url_strategy_#{name}))
-              end
-            RUBY
+            mod.define_method(name, ActiveSupport::Ractors.try_shareable_proc { |*args|
+              last = args.last
+              options = \
+                case last
+                when Hash
+                  args.pop
+                when ActionController::Parameters
+                  args.pop.to_h
+                end
+              helper.call(self, name, args, options, url_strategy)
+            })
           end
       end
 
@@ -491,29 +488,12 @@ module ActionDispatch
       def finalize!
         return if @finalized
         @append.each { |blk| eval_block(blk) }
+
+        url_helpers(true)
+        url_helpers(false)
         @finalized = true
-      end
 
-      def freeze
-        # Append/prepend blocks capture boot-time locals and are only
-        # needed during route drawing. Clear them so the route set can
-        # be made Ractor-shareable.
-        @append = [].freeze
-        @prepend = [].freeze
-
-        # Make URL helper module ivars shareable (route keys and
-        # url strategies need to be frozen for Ractor access).
-        [@url_helpers_with_paths, @url_helpers_without_paths].compact.each do |helpers_mod|
-          helpers_mod.instance_variables.each do |ivar|
-            # Skip the back-reference to the route set (causes infinite recursion)
-            next if ivar == :@_url_helpers_routes
-            val = helpers_mod.instance_variable_get(ivar) rescue next
-            next if val.equal?(nil) || val.frozen?
-            val.freeze rescue nil
-          end
-        end
-
-        super
+        ActiveSupport::Ractors.try_make_shareable(self)
       end
 
       def clear!
@@ -589,7 +569,7 @@ module ActionDispatch
             end
           end
 
-          @_proxy = proxy_class.new(routes)
+          @_proxy = proxy_class.new(routes).freeze
 
           class << self
             def url_for(options)
@@ -636,45 +616,20 @@ module ActionDispatch
             extend path_helpers
           end
 
-          # Store the route set and supports_path as module instance
-          # variables so methods can access them without closures
-          # (closures prevent methods from being called in non-main Ractors).
-          instance_variable_set(:@_url_helpers_routes, routes)
-          instance_variable_set(:@_url_helpers_supports_path, supports_path)
+          helper_module = self
 
           # plus a singleton class method called _routes ...
           included do
-            class_eval <<~RUBY, __FILE__, __LINE__ + 1
-              def self._routes
-                ancestors.each do |mod|
-                  if mod.instance_variable_defined?(:@_url_helpers_routes)
-                    return mod.instance_variable_get(:@_url_helpers_routes)
-                  end
-                end
-                nil
-              end
-            RUBY
+            redefine_singleton_method(:_routes, &ActiveSupport::Ractors.try_shareable_proc { helper_module._routes })
           end
 
-          # And an instance method _routes.
-          module_eval <<~RUBY, __FILE__, __LINE__ + 1
-            def _routes
-              @_routes || self.class.ancestors.each do |mod|
-                if mod.instance_variable_defined?(:@_url_helpers_routes)
-                  return mod.instance_variable_get(:@_url_helpers_routes)
-                end
-              end
-            end
+          # And an instance method _routes. Note that UrlFor (included in this module) add
+          # extra conveniences for working with @_routes.
+          define_method(:_routes, ActiveSupport::Ractors.try_shareable_proc { @_routes || helper_module._routes })
 
-            private def _generate_paths_by_default
-              self.class.ancestors.each do |mod|
-                if mod.instance_variable_defined?(:@_url_helpers_supports_path)
-                  return mod.instance_variable_get(:@_url_helpers_supports_path)
-                end
-              end
-              false
-            end
-          RUBY
+          define_method(:_generate_paths_by_default, ActiveSupport::Ractors.try_shareable_proc { supports_path })
+
+          private :_generate_paths_by_default
 
           # If the module is included more than once (for example, in a subclass of an
           # ancestor that includes the module), ensure that the `_routes` singleton and
@@ -911,12 +866,7 @@ module ActionDispatch
       def url_for(options, route_name = nil, url_strategy = UNKNOWN, method_name = nil, reserved = RESERVED_OPTIONS)
         options = default_url_options.merge options
 
-        user = password = nil
-
-        if options[:user] && options[:password]
-          user     = options.delete :user
-          password = options.delete :password
-        end
+        has_auth = options[:user] && options[:password]
 
         recall = options.delete(:_recall) { {} }
 
@@ -927,9 +877,7 @@ module ActionDispatch
           script_name = original_script_name + script_name
         end
 
-        path_options = options.dup
-        reserved.each { |ro| path_options.delete ro }
-
+        path_options = has_auth ? options.except(:user, :password, *reserved) : options.except(*reserved)
         route_with_params = generate(route_name, path_options, recall)
         path = route_with_params.path(method_name)
 
@@ -950,8 +898,6 @@ module ActionDispatch
         options[:path]        = path
         options[:script_name] = script_name
         options[:params]      = params
-        options[:user]        = user
-        options[:password]    = password
 
         url_strategy.call options
       end

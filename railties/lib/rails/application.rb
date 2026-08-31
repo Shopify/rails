@@ -125,6 +125,12 @@ module Rails
     def ractorize!
       warn "Ractor support in Rails is experimental and subject to change.", category: :experimental, uplevel: 1
 
+      begin
+        require "rack/ractorize"
+      rescue LoadError
+        raise "rack/ractorize not available, but required for Ractor support."
+      end
+
       eager_load! if !config.eager_load
 
       # Force env_config, revision, and routes to be built before freezing
@@ -132,6 +138,19 @@ module Rails
       revision
       routes
       app
+
+      if defined?(ActionView::PathRegistry)
+        view = ActionView::LookupContext.view_context_class.new(ActionView::LookupContext.new([]), {}, nil)
+        ActionView::PathRegistry.all_file_system_resolvers.each do |resolver|
+          resolver.eager_load_templates(view)
+          resolver.freeze
+        end
+      end
+
+      Ractor.make_shareable(Rails.event)
+      Ractor.make_shareable(Rails.error)
+      Ractor.make_shareable(Rails.backtrace_cleaner)
+      ActionView::DependencyTracker.share_registry if defined?(ActionView)
 
       # Save the connection handler (nilled during AR::Base.make_shareable!)
       saved_handler = ::ActiveRecord::Base.default_connection_handler

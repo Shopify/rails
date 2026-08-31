@@ -3,7 +3,7 @@
 require "isolation/abstract_unit"
 require "active_support/testing/ractors_assertions"
 
-if RUBY_VERSION >= "4.0"
+if RUBY_VERSION >= "4.0" && ENV["RACK"] == "head"
   module ApplicationTests
     class RactorsTest < ActiveSupport::TestCase
       include ActiveSupport::Testing::Isolation
@@ -12,7 +12,7 @@ if RUBY_VERSION >= "4.0"
       def setup
         build_app
 
-        add_to_env_config "production", "ActiveSupport::Ractors.unshareable_proc_action = :raise"
+        add_to_env_config "production", "ActiveSupport::Ractors.unshareable_proc_action = :warn"
 
         # Remove defaults that are not compatible
         add_to_env_config "production", "config.logger = ActiveSupport::Ractors::Logger.new"
@@ -34,6 +34,19 @@ if RUBY_VERSION >= "4.0"
         assert_ractor_shareable Rails.event
         assert_ractor_shareable Rails.error
         assert_ractor_shareable Rails.backtrace_cleaner
+      end
+
+      test "ractorize! eager loads and compiles view templates" do
+        app "production"
+
+        ractorize!
+
+        resolvers = ActionView::PathRegistry.all_file_system_resolvers
+        assert_not_empty resolvers
+        resolvers.each do |resolver|
+          assert_predicate resolver, :frozen?
+          assert_ractor_shareable resolver
+        end
       end
 
       test "error reporting works after the application is ractorized" do

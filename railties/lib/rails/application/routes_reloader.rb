@@ -22,6 +22,11 @@ module Rails
         @file_watcher = file_watcher
       end
 
+      # Returns +true+ if the routes are loaded.
+      def loaded
+        @load_state == :loaded
+      end
+
       def reload!
         @load_lock.synchronize do
           previous_state, @load_state = @load_state, :loading
@@ -36,7 +41,10 @@ module Rails
       end
 
       def execute
-        updater.execute
+        @load_lock.synchronize do
+          updater.execute
+          @load_state ||= :loaded
+        end
       end
 
       def execute_unless_loaded
@@ -114,6 +122,8 @@ module Rails
 
       def revert
         route_sets.each do |routes|
+          next if routes.frozen?
+
           routes.disable_clear_and_finalize = false
         end
       end

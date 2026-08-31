@@ -79,6 +79,11 @@ module ActionView
       end
 
       private
+        # Digest caches are per-Ractor, so the mutex is too.
+        def digest_mutex
+          ActiveSupport::Ractors.store_if_absent(:action_view_digest_mutex) { Mutex.new }
+        end
+
         def find_template(finder, name, prefixes, partial, keys)
           finder.disable_cache do
             finder.find(name, prefixes, partial, keys)
