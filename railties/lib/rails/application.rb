@@ -679,9 +679,18 @@ module Rails
           resolver.eager_load_templates(view)
           resolver.freeze
         end
+        ActionView::PathRegistry.make_shareable!
+      end
+
+      if defined?(ActionController::Base)
+        [ActionController::Base, *ActionController::Base.descendants].each do |controller|
+          Ractor.make_shareable(controller.config)
+          Ractor.make_shareable(controller.__callbacks)
+        end
       end
 
       Ractor.make_shareable(self)
+      Ractor.make_shareable(Rails.env)
       Ractor.make_shareable(Rails.logger)
       Ractor.make_shareable(Rails.event)
       Ractor.make_shareable(Rails.error)

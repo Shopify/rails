@@ -53,5 +53,12 @@ module ActionView # :nodoc:
     def self.all_file_system_resolvers
       @file_system_resolvers.values
     end
+
+    def self.make_shareable! # :nodoc:
+      @file_system_resolver_mutex.synchronize do
+        @file_system_resolvers = Ractor.make_shareable(@file_system_resolvers.dup)
+      end
+      @view_paths_by_class = Ractor.make_shareable(@view_paths_by_class.dup)
+    end
   end
 end
