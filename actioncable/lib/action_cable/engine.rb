@@ -79,7 +79,7 @@ module ActionCable
     initializer "action_cable.set_work_hooks" do |app|
       ActiveSupport.on_load(:action_cable) do
         ActionCable::Server::Worker.set_callback :work, :around, prepend: true do |_, inner|
-          app.executor.wrap(source: "application.action_cable") do
+          Rails.application.executor.wrap(source: "application.action_cable") do
             # If we took a while to get the lock, we may have been halted in the meantime.
             # As we haven't started doing any real work yet, we should pretend that we never
             # made it off the queue.
@@ -96,7 +96,7 @@ module ActionCable
 
       ActiveSupport.on_load(:action_cable_channel) do
         wrap = lambda do |_, inner|
-          app.executor.wrap(source: "application.action_cable", &inner)
+          Rails.application.executor.wrap(source: "application.action_cable", &inner)
         end
         ActionCable::Channel::Base.set_callback :subscribe, :around, prepend: true, &wrap
         ActionCable::Channel::Base.set_callback :unsubscribe, :around, prepend: true, &wrap
