@@ -7,8 +7,6 @@ require "active_support/core_ext/class/attribute"
 require "active_support/core_ext/module/redefine_method"
 require "active_support/core_ext/string/filters"
 require "active_support/core_ext/object/blank"
-require "active_support/core_ext/object/shareable"
-require "active_support/core_ext/kernel/shareable"
 
 module ActiveSupport
   # = Active Support \Callbacks
@@ -386,16 +384,14 @@ module ActiveSupport
           end
 
           def make_lambda
-            method_name = @method_name
-            shareable_proc do |target, value, &block|
-              target.send(method_name, &block)
+            lambda do |target, value, &block|
+              target.send(@method_name, &block)
             end
           end
 
           def inverted_lambda
-            method_name = @method_name
-            shareable_proc do |target, value, &block|
-              !target.send(method_name, &block)
+            lambda do |target, value, &block|
+              !target.send(@method_name, &block)
             end
           end
         end
@@ -410,31 +406,16 @@ module ActiveSupport
             [@override_target || target, block, @method_name, target]
           end
 
-          # Callable that dispatches to override_target.method_name(target).
-          # Defined as a class (not a lambda) so its instances can be made
-          # Ractor-shareable without capturing a non-shareable self.
-          class Invoke
-            def initialize(override_target, method_name, invert: false)
-              @override_target = override_target
-              @method_name = method_name
-              @invert = invert
-            end
-
-            def call(target, value, &block)
-              result = (@override_target || target).send(@method_name, target, &block)
-              @invert ? !result : result
-            end
-
-            def arity; 2; end
-            def lambda?; true; end
-          end
-
           def make_lambda
-            Invoke.new(@override_target, @method_name)
+            lambda do |target, value, &block|
+              (@override_target || target).send(@method_name, target, &block)
+            end
           end
 
           def inverted_lambda
-            Invoke.new(@override_target, @method_name, invert: true)
+            lambda do |target, value, &block|
+              !(@override_target || target).send(@method_name, target, &block)
+            end
           end
         end
 
@@ -447,21 +428,17 @@ module ActiveSupport
             [target, @override_block, :instance_exec]
           end
 
-          class Invoke
-            def initialize(override_block, invert: false)
-              @override_block = override_block
-              @invert = invert
+          def make_lambda
+            lambda do |target, value, &block|
+              target.instance_exec(&@override_block)
             end
-            def call(target, value, &block)
-              result = target.instance_exec(&@override_block)
-              @invert ? !result : result
-            end
-            def arity; 2; end
-            def lambda?; true; end
           end
 
-          def make_lambda = Invoke.new(@override_block)
-          def inverted_lambda = Invoke.new(@override_block, invert: true)
+          def inverted_lambda
+            lambda do |target, value, &block|
+              !target.instance_exec(&@override_block)
+            end
+          end
         end
 
         class InstanceExec1
@@ -473,21 +450,17 @@ module ActiveSupport
             [target, @override_block, :instance_exec, target]
           end
 
-          class Invoke
-            def initialize(override_block, invert: false)
-              @override_block = override_block
-              @invert = invert
+          def make_lambda
+            lambda do |target, value, &block|
+              target.instance_exec(target, &@override_block)
             end
-            def call(target, value, &block)
-              result = target.instance_exec(target, &@override_block)
-              @invert ? !result : result
-            end
-            def arity; 2; end
-            def lambda?; true; end
           end
 
-          def make_lambda = Invoke.new(@override_block)
-          def inverted_lambda = Invoke.new(@override_block, invert: true)
+          def inverted_lambda
+            lambda do |target, value, &block|
+              !target.instance_exec(target, &@override_block)
+            end
+          end
         end
 
         class InstanceExec2
@@ -500,22 +473,19 @@ module ActiveSupport
             [target, @override_block || block, :instance_exec, target, block]
           end
 
-          class Invoke
-            def initialize(override_block, invert: false)
-              @override_block = override_block
-              @invert = invert
-            end
-            def call(target, value, &block)
+          def make_lambda
+            lambda do |target, value, &block|
               raise ArgumentError unless block
-              result = target.instance_exec(target, block, &@override_block)
-              @invert ? !result : result
+              target.instance_exec(target, block, &@override_block)
             end
-            def arity; 2; end
-            def lambda?; true; end
           end
 
-          def make_lambda = Invoke.new(@override_block)
-          def inverted_lambda = Invoke.new(@override_block, invert: true)
+          def inverted_lambda
+            lambda do |target, value, &block|
+              raise ArgumentError unless block
+              !target.instance_exec(target, block, &@override_block)
+            end
+          end
         end
 
         class ProcCall
@@ -527,21 +497,17 @@ module ActiveSupport
             [@override_target || target, block, :call, target, value]
           end
 
-          class Invoke
-            def initialize(override_target, invert: false)
-              @override_target = override_target
-              @invert = invert
+          def make_lambda
+            lambda do |target, value, &block|
+              (@override_target || target).call(target, value, &block)
             end
-            def call(target, value, &block)
-              result = (@override_target || target).call(target, value, &block)
-              @invert ? !result : result
-            end
-            def arity; 2; end
-            def lambda?; true; end
           end
 
-          def make_lambda = Invoke.new(@override_target)
-          def inverted_lambda = Invoke.new(@override_target, invert: true)
+          def inverted_lambda
+            lambda do |target, value, &block|
+              !(@override_target || target).call(target, value, &block)
+            end
+          end
         end
 
         # Filters support:
@@ -649,42 +615,6 @@ module ActiveSupport
           @all_callbacks = nil
           @single_callbacks = {}
           @mutex = Mutex.new
-        end
-
-        def freeze
-          # Eagerly compile callback sequences before freezing so they
-          # are cached and the Mutex is no longer needed.
-          compile(nil)
-          @chain.each { |cb| compile(cb.kind) }
-          @mutex = nil
-          # Deep-freeze all callback objects (including CallTemplate
-          # instances) BEFORE freezing the chain itself. This ensures
-          # that lambdas' implicit self references are shareable when
-          # make_shareable traverses the Proc objects.
-          warned = Module::SHAREABLE_WARNED
-          @chain.each do |cb|
-            cb.instance_variables.each do |ivar|
-              val = cb.instance_variable_get(ivar)
-              next if val.nil? || val.frozen?
-              begin
-                val.make_shareable!
-              rescue Ractor::Error, Ractor::IsolationError, FrozenError => e
-                unless warned.key?(val)
-                  warned[val] = true
-                  Rails.logger.warn("[CallbackChain#freeze] #{@name} #{ivar}: #{e.message[0..80]}") if defined?(Rails.logger) && Rails.logger
-                end
-              end
-            end
-            begin
-              cb.make_shareable!
-            rescue Ractor::Error, Ractor::IsolationError, FrozenError => e
-              unless warned.key?(cb)
-                warned[cb] = true
-                Rails.logger.warn("[CallbackChain#freeze] #{@name} callback: #{e.message[0..80]}") if defined?(Rails.logger) && Rails.logger
-              end
-            end
-          end
-          super
         end
 
         def each(&block); @chain.each(&block); end
