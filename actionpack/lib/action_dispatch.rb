@@ -162,7 +162,7 @@ autoload :Mime, "action_dispatch/http/mime_type"
 
 ActiveSupport.on_load(:action_view) do
   ActionView::Template.mime_types_implementation = Mime
-  ActionView::LookupContext.clear
+  ActionView::LookupContext::DetailsKey.clear
 
   unless ActionView::Base.default_formats
     ActionView::Base.default_formats = previous_symbols = Mime.symbols
