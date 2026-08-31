@@ -3,7 +3,6 @@
 require "pathname"
 require "active_support/core_ext/class"
 require "active_support/core_ext/module/attribute_accessors"
-require "active_support/core_ext/string/access"
 require "action_view/template"
 require "concurrent/map"
 
@@ -34,11 +33,6 @@ module ActionView
         }x
       end
 
-      def freeze
-        @regex ||= build_path_regex
-        super
-      end
-
       def parse(path)
         @regex ||= build_path_regex
         match = @regex.match(path)
@@ -62,13 +56,12 @@ module ActionView
     def clear_cache
     end
 
-    # Normalizes the arguments and passes it on to find_templates.
-    def find_all(name, prefix = nil, partial = false, details = {}, cache = false, locals = [])
-      _find_all(name, prefix, partial, details, cache, locals)
+    def find_all(name, prefix = nil, partial = false, details = {}, key = nil, locals = [])
+      find_templates(name, prefix, partial, details, locals)
     end
 
-    def find(name, prefix = nil, partial = false, details = {}, cache = false, locals = [])
-      _find(name, prefix, partial, details, cache, locals)
+    def find(name, prefix = nil, partial = false, details = {}, key = nil, locals = [])
+      find_all(name, prefix, partial, details, key, locals).first
     end
 
     def built_templates # :nodoc:
@@ -82,14 +75,6 @@ module ActionView
     end
 
   private
-    def _find_all(name, prefix, partial, details, cache, locals)
-      find_templates(name, prefix, partial, details, locals)
-    end
-
-    def _find(name, prefix, partial, details, cache, locals)
-      find_all(name, prefix, partial, details, cache, locals).first
-    end
-
     delegate :caching?, to: :class
 
     # Extension point for custom resolvers: implement this method, or
@@ -117,30 +102,6 @@ module ActionView
       super
     end
 
-    def eager_load_templates(view = nil)
-      template_glob("**/*").each do |file|
-        unbound = build_unbound_template(file)
-        (@unbound_templates[unbound.virtual_path] ||= []) << unbound
-        # When a view context is given, compile each template into its shared
-        # compiled-method container up front (on the main Ractor). Worker
-        # Ractors can't mutate the shared container, so a template must be
-        # compiled before the resolver is frozen and shared.
-        unbound.bind_locals([]).send(:compile!, view) if view
-      end
-    end
-
-    def freeze
-      @path.freeze
-      @path_parser.freeze
-      @unbound_templates = @unbound_templates.each_pair.to_h unless @unbound_templates.is_a?(::Hash)
-      @unbound_templates.each_value do |unbound_templates|
-        unbound_templates.each(&:freeze)
-        unbound_templates.freeze
-      end
-      @unbound_templates.freeze
-      super
-    end
-
     def to_s
       @path.to_s
     end
@@ -164,31 +125,29 @@ module ActionView
       @unbound_templates.values.flatten.flat_map(&:built_templates)
     end
 
+    def find_all(name, prefix = nil, partial = false, details = {}, key = nil, locals = [])
+      requested_details = key || TemplateDetails::Requested.new(**details)
+      unbound_templates = unbound_templates_for(name, prefix, partial, !!key)
+
+      filter_and_sort_by_details(unbound_templates, requested_details).map do |unbound_template|
+        unbound_template.bind_locals(locals)
+      end
+    end
+
+    def find(name, prefix = nil, partial = false, details = {}, key = nil, locals = [])
+      requested_details = key || TemplateDetails::Requested.new(**details)
+      unbound_templates = unbound_templates_for(name, prefix, partial, !!key)
+
+      unbound_template = find_best_by_details(unbound_templates, requested_details)
+      return unless unbound_template
+      unbound_template.bind_locals(locals)
+    end
+
     private
-      def _find_all(name, prefix, partial, details, cache, locals)
-        unbound_templates = unbound_templates_for(name, prefix, partial, cache)
+      def unbound_templates_for(name, prefix, partial, cached)
+        return unbound_templates_from_path(TemplatePath.build(name, prefix, partial)) unless cached
 
-        filter_and_sort_by_details(unbound_templates, details).map do |unbound_template|
-          unbound_template.bind_locals(locals)
-        end
-      end
-
-      def _find(name, prefix, partial, details, cache, locals)
-        unbound_templates = unbound_templates_for(name, prefix, partial, cache)
-
-        find_best_by_details(unbound_templates, details)&.bind_locals(locals)
-      end
-
-      def unbound_templates_for(name, prefix, partial, cache)
-        virtual = TemplatePath.virtual(name, prefix, partial)
-
-        if frozen?
-          @unbound_templates[virtual] || [].freeze
-        elsif cache
-          @unbound_templates.compute_if_absent(virtual) do
-            unbound_templates_from_path(TemplatePath.build(name, prefix, partial))
-          end
-        else
+        @unbound_templates.compute_if_absent(TemplatePath.virtual(name, prefix, partial)) do
           unbound_templates_from_path(TemplatePath.build(name, prefix, partial))
         end
       end
@@ -227,26 +186,35 @@ module ActionView
         end
       end
 
-      def filter_and_sort_by_details(templates, details)
-        ranked = templates.filter_map do |template|
-          rank = details.template_rank(template)
-          [rank, template] if rank
+      def find_best_by_details(templates, requested_details)
+        if templates.size == 1
+          template = templates.first
+          return template.details.matches?(requested_details) ? template : nil
         end
 
-        ranked.sort_by!(&:first) if ranked.size > 1
-        ranked.map!(&:last)
-      end
-
-      def find_best_by_details(templates, details)
         best = best_rank = nil
         templates.each do |template|
-          rank = details.template_rank(template) or next
+          rank = template.details.rank_for(requested_details) or next
           if best_rank.nil? || (rank <=> best_rank) < 0
             best = template
             best_rank = rank
           end
         end
         best
+      end
+
+      def filter_and_sort_by_details(templates, requested_details)
+        filtered_templates = templates.select do |template|
+          template.details.matches?(requested_details)
+        end
+
+        if filtered_templates.count > 1
+          filtered_templates.sort_by! do |template|
+            template.details.sort_key_for(requested_details)
+          end
+        end
+
+        filtered_templates
       end
 
       # Safe glob within @path
