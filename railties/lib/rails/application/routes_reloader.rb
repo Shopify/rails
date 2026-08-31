@@ -99,6 +99,8 @@ module Rails
 
       def clear!
         route_sets.each do |routes|
+          next if routes.frozen?
+
           routes.disable_clear_and_finalize = true
           routes.clear!
         end
@@ -117,7 +119,11 @@ module Rails
       end
 
       def finalize!
-        route_sets.each(&:finalize!)
+        route_sets.each do |routes|
+          next if routes.frozen?
+
+          routes.finalize!
+        end
       end
 
       def revert
