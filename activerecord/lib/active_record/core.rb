@@ -302,7 +302,14 @@ module ActiveRecord
           query_constraints_list
           _to_partial_path
           all_timestamp_attributes_in_model
-          symbol_column_to_string(column_names.first&.to_sym) if column_names.any?
+
+          # Warm the returning-columns memos with the main connection so
+          # workers never reach the on_main fallback, whose block would
+          # capture their unshareable connection proxy.
+          with_connection do |conn|
+            _returning_columns_for_insert(conn)
+            _returning_columns_for_update(conn)
+          end
 
           # Reflections handle their own freeze (see AbstractReflection#freeze)
           reflections.each_value { |r| r.make_shareable! }

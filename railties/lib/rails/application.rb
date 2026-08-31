@@ -139,18 +139,6 @@ module Rails
       routes
       app
 
-      if defined?(ActionView::PathRegistry)
-        view = ActionView::LookupContext.view_context_class.new(ActionView::LookupContext.new([]), {}, nil)
-        ActionView::PathRegistry.all_file_system_resolvers.each do |resolver|
-          resolver.eager_load_templates(view)
-          resolver.freeze
-        end
-      end
-
-      Ractor.make_shareable(Rails.event)
-      Ractor.make_shareable(Rails.error)
-      Ractor.make_shareable(Rails.backtrace_cleaner)
-      ActionView::DependencyTracker.share_registry if defined?(ActionView)
 
       # Save the connection handler (nilled during AR::Base.make_shareable!)
       saved_handler = ::ActiveRecord::Base.default_connection_handler
@@ -354,7 +342,9 @@ module Rails
       # path mutates the (now-frozen) application, so workers would
       # see an empty Journey::Routes set and 404 every request. Drain
       # the lazy load now while the app is still mutable.
-      reload_routes! if respond_to?(:reload_routes!)
+      # Upstream now draws and freezes the routes during production boot;
+      # only drain a still-lazy route set.
+      reload_routes! if respond_to?(:reload_routes!) && !routes.frozen?
 
       # Journey::Routes (the inner routing structure used by
       # ActionDispatch::Routing::RouteSet) memoizes @ast and
@@ -748,8 +738,13 @@ module Rails
         compile_view = container.new(::ActionView::LookupContext.new([]), {}, nil)
         ::ActionView::PathRegistry.all_file_system_resolvers.each do |resolver|
           resolver.eager_load_templates(compile_view)
+          resolver.freeze
         end
       end
+
+      Ractor.make_shareable(Rails.event)
+      Ractor.make_shareable(Rails.error)
+      Ractor.make_shareable(Rails.backtrace_cleaner)
 
       # Now ActionController::Base and all descendants are loaded,
       # so any `included do` blocks that mutate PathRegistry have run.
