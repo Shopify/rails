@@ -54,12 +54,19 @@ module ActionController # :nodoc:
       #       # In addition to the browsers blocked by ApplicationController, also block Opera below 104 and Chrome below 119 for the show action.
       #       allow_browser versions: { opera: 104, chrome: 119 }, only: :show
       #     end
-      def allow_browser(versions:, block: -> { render file: Rails.root.join("public/406-unsupported-browser.html"), layout: false, status: :not_acceptable }, **options)
+      def allow_browser(versions:, block: DEFAULT_BLOCK, **options)
         require "useragent"
 
-        before_action -> { allow_browser(versions: versions, block: block) }, **options
+        allowed_versions = versions
+        blocked = block
+        before_action -> { allow_browser(versions: allowed_versions, block: blocked) }, **options
       end
     end
+
+    DEFAULT_BLOCK = ActiveSupport::Ractors.shareable_lambda do
+      render file: Rails.root.join("public/406-unsupported-browser.html"), layout: false, status: :not_acceptable
+    end
+    private_constant :DEFAULT_BLOCK
 
     private
       def allow_browser(versions:, block:)

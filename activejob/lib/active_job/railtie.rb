@@ -88,8 +88,9 @@ module ActiveJob
 
     initializer "active_job.set_reloader_hook" do |app|
       ActiveSupport.on_load(:active_job) do
+        ActiveJob::Callbacks.instance_variable_set(:@app, app)
         ActiveJob::Callbacks.singleton_class.set_callback(:execute, :around, prepend: true) do |_, inner|
-          app.reloader.wrap do
+          @app.reloader.wrap do
             inner.call
           end
         end

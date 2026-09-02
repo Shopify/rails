@@ -57,22 +57,33 @@ module ActiveRecord
 
         prefix = "#{attribute}_" if prefix == true
 
-        if prefix
-          generate_token = -> do
-            token = self.generate_unique_secure_token(length: length)
+        # Fresh single-assignment locals: method parameters (especially ones
+        # with defaults) count as reassignable, and a reassignable captured
+        # variable keeps the callback/method procs below from being made
+        # Ractor-shareable.
+        token_attribute = attribute
+        token_length = length
+        token_prefix = prefix ? prefix.dup.freeze : nil
 
-            "#{prefix}#{token}"
+        # A shareable lambda drops the definition-time self (the model class),
+        # so it takes the record and reaches the class method through it.
+        generate_token =
+          if token_prefix
+            ActiveSupport::Ractors.shareable_lambda do |record|
+              "#{token_prefix}#{record.class.generate_unique_secure_token(length: token_length)}"
+            end
+          else
+            ActiveSupport::Ractors.shareable_lambda do |record|
+              record.class.generate_unique_secure_token(length: token_length)
+            end
           end
-        else
-          generate_token = -> { self.generate_unique_secure_token(length: length) }
-        end
 
         # Load securerandom only when has_secure_token is used.
         require "active_support/core_ext/securerandom"
-        define_method("regenerate_#{attribute}") { update! attribute => generate_token.call }
+        define_method("regenerate_#{token_attribute}") { update! token_attribute => generate_token.call(self) }
         set_callback on, on == :initialize ? :after : :before do
-          if new_record? && !query_attribute(attribute)
-            send("#{attribute}=", generate_token.call)
+          if new_record? && !query_attribute(token_attribute)
+            send("#{token_attribute}=", generate_token.call(self))
           end
         end
       end
