@@ -571,6 +571,10 @@ module ActiveRecord
               load_schema!
               @schema_hooks_loaded = true
             end
+
+            ActiveSupport::Ractors.try_make_shareable(aggregate_reflections)
+            ActiveSupport::Ractors.try_make_shareable(_reflections)
+            normalized_reflections
           end
         rescue
           reload_schema_from_cache # If the schema loading failed half way through, we must reset the state.
