@@ -74,6 +74,14 @@ if RUBY_VERSION >= "4.0" && ENV["RACK"] == "head"
         assert_equal main_size, on_ractor { GreetingsController._view_paths.size }
       end
 
+      test "the application boots with unshareable_proc_action :raise" do
+        add_to_env_config "production", "ActiveSupport::Ractors.unshareable_proc_action = :raise"
+
+        app "production"
+
+        assert_predicate Rails.application, :initialized?
+      end
+
       test "error reporting works after the application is ractorized" do
         app "production"
 
