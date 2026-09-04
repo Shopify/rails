@@ -112,4 +112,38 @@ class KeyTest < ActiveRecord::TestCase
     assert_predicate Cpk::Book.primary_key_definition, :composite?
     assert_equal ["author_id", "id"], Cpk::Book.primary_key_definition.name
   end
+
+  def test_mapping_preserves_key_correspondence
+    mapping = Key::Mapping.new(
+      reference_key: [:tenant_id, :author_id],
+      target_key: [:account_id, :id]
+    )
+
+    assert_equal [["tenant_id", "account_id"], ["author_id", "id"]], mapping.to_a
+  end
+
+  def test_mapping_combines_ordered_keys
+    constraints = Key::Mapping.new(reference_key: :tenant_id, target_key: :account_id)
+    reference = Key::Mapping.new(reference_key: :author_id, target_key: :id)
+
+    assert_equal(
+      [["tenant_id", "account_id"], ["author_id", "id"]],
+      (constraints + reference).to_a
+    )
+  end
+
+  def test_mapping_reverses_key_correspondence
+    mapping = Key::Mapping.new(
+      reference_key: [:tenant_id, :author_id],
+      target_key: [:account_id, :id]
+    )
+
+    assert_equal [["account_id", "tenant_id"], ["id", "author_id"]], mapping.reverse.to_a
+  end
+
+  def test_mapping_rejects_different_key_sizes
+    assert_raises ArgumentError do
+      Key::Mapping.new(reference_key: [:tenant_id, :author_id], target_key: :id)
+    end
+  end
 end

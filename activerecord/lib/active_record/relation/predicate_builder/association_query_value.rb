@@ -9,7 +9,7 @@ module ActiveRecord
       end
 
       def queries
-        key = ActiveRecord::Key.for(reflection.join_foreign_key)
+        key = reflection.association_join_mapping.target_key
         id_list = ids
         id_list = id_list.pluck(primary_key) if key.composite? && id_list.is_a?(Relation)
 
@@ -34,7 +34,7 @@ module ActiveRecord
         end
 
         def primary_key
-          reflection.join_primary_key
+          reflection.association_join_mapping.reference_key.name
         end
 
         def primary_type

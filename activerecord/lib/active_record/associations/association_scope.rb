@@ -34,11 +34,17 @@ module ActiveRecord
         scope
       end
 
-      def self.get_bind_values(owner, chain)
+      def self.get_bind_values(owner, chain, associated_class = nil)
         binds = []
         last_reflection = chain.last
 
-        binds.push(*last_reflection.join_id_for(owner))
+        link = last_reflection.association_link(last_reflection.association_link_polymorphic? ? associated_class : nil)
+        owner_key = if last_reflection.association_link_reference_on_owner?
+          link.match.reference_key
+        else
+          link.match.target_key
+        end
+        binds.push(*owner_key.map { |key| owner.read_attribute(key) })
         if last_reflection.type
           binds << owner.class.polymorphic_name
         end
@@ -59,14 +65,17 @@ module ActiveRecord
         end
 
         def last_chain_scope(scope, reflection, owner)
-          primary_key = ActiveRecord::Key.for(reflection.join_primary_key)
-          foreign_key = ActiveRecord::Key.for(reflection.join_foreign_key)
-
           table = reflection.aliased_table
-          primary_key_foreign_key_pairs = primary_key.zip(foreign_key)
-          primary_key_foreign_key_pairs.each do |join_key, foreign_key|
-            value = transform_value(owner.read_attribute(foreign_key))
-            scope = apply_scope(scope, reflection, table, join_key, value)
+          link = reflection.association_link(reflection.association_link_polymorphic? ? reflection.klass : nil)
+
+          each_join_pair(reflection, link.constraints) do |destination_key, owner_key|
+            value = transform_value(owner.read_attribute(owner_key))
+            scope = apply_scope(scope, reflection, table, destination_key, value, create_default: false)
+          end
+
+          each_join_pair(reflection, link.reference) do |destination_key, owner_key|
+            value = transform_value(owner.read_attribute(owner_key))
+            scope = apply_scope(scope, reflection, table, destination_key, value)
           end
 
           if reflection.type
@@ -82,17 +91,14 @@ module ActiveRecord
         end
 
         def next_chain_scope(scope, reflection, next_reflection)
-          primary_key = ActiveRecord::Key.for(reflection.join_primary_key)
-          foreign_key = ActiveRecord::Key.for(reflection.join_foreign_key)
-
           table = reflection.aliased_table
           foreign_table = next_reflection.aliased_table
 
           predicate_builder = scope.predicate_builder
-          primary_key_foreign_key_pairs = primary_key.zip(foreign_key)
-          constraints = primary_key_foreign_key_pairs.map do |join_primary_key, foreign_key|
-            join_primary_key_attribute = predicate_builder.predicate_attribute(table[join_primary_key])
-            foreign_key_attribute = predicate_builder.predicate_attribute(foreign_table[foreign_key])
+          link = reflection.association_link(reflection.association_link_polymorphic? ? reflection.klass : nil)
+          constraints = each_join_pair(reflection, link.match).map do |destination_key, owner_key|
+            join_primary_key_attribute = predicate_builder.predicate_attribute(table[destination_key])
+            foreign_key_attribute = predicate_builder.predicate_attribute(foreign_table[owner_key])
 
             join_primary_key_attribute.eq(foreign_key_attribute)
           end.inject(&:and)
@@ -167,14 +173,30 @@ module ActiveRecord
           scope
         end
 
-        def apply_scope(scope, reflection, table, key, value)
-          if scope.table == table
+        def apply_scope(scope, reflection, table, key, value, create_default: true)
+          if scope.table == table && create_default
             scope.where!(key => value)
           else
-            scope.references_values |= [Arel.sql(table.name, retryable: true)]
-            predicate_builder = reflection.klass.predicate_builder.with(TableMetadata.new(reflection.klass, table))
-            scope.where!(predicate_builder[key, value])
+            if scope.table != table
+              scope.references_values |= [Arel.sql(table.name, retryable: true)]
+              predicate_builder = reflection.klass.predicate_builder.with(TableMetadata.new(reflection.klass, table))
+            else
+              predicate_builder = scope.predicate_builder
+            end
+
+            predicate = predicate_builder[key, value]
+            predicate = Arel::Nodes::Grouping.new(predicate) unless create_default
+            scope.where!(predicate)
           end
+        end
+
+        def each_join_pair(reflection, mapping, &block)
+          pairs = if reflection.association_link_reference_on_owner?
+            mapping.map { |owner_key, destination_key| [destination_key, owner_key] }
+          else
+            mapping.to_a
+          end
+          block ? pairs.each(&block) : pairs
         end
 
         def redundant_join?(item, chain, join)

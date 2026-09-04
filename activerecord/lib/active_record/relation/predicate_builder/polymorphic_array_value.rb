@@ -9,12 +9,18 @@ module ActiveRecord
       end
 
       def queries
-        return [ reflection.join_foreign_key => values ] if values.empty?
+        return [ reflection.foreign_key => values ] if values.empty?
 
         type_to_ids_mapping.map do |type, ids|
           query = {}
           query[reflection.join_foreign_type] = type if type
-          query[reflection.join_foreign_key] = ids
+          associated_class = reflection.active_record.polymorphic_class_for(type) if type
+          key = if associated_class
+            reflection.association_join_mapping(associated_class).target_key.name
+          else
+            reflection.foreign_key
+          end
+          query[key] = ids
           query
         end
       end
@@ -30,7 +36,7 @@ module ActiveRecord
         end
 
         def primary_key(value)
-          reflection.join_primary_key(klass(value))
+          reflection.association_join_mapping(klass(value)).reference_key.name
         end
 
         def klass(value)

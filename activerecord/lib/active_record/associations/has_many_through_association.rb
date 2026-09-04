@@ -72,7 +72,7 @@ module ActiveRecord
           scope = through_scope || self.scope
           attributes = scope.where_values_hash(through_association.reflection.klass.table_name)
           except_keys = [
-            *Array(through_association.reflection.foreign_key),
+            *through_association.reflection.association_link(through_association.klass).reference.reference_key,
             through_association.reflection.klass.inheritance_column
           ]
           attributes.except!(*except_keys)
@@ -119,7 +119,9 @@ module ActiveRecord
         end
 
         def target_reflection_has_associated_record?
-          !(through_reflection.belongs_to? && Array(through_reflection.foreign_key).all? { |foreign_key_column| owner.read_attribute(foreign_key_column).blank? })
+          !(through_reflection.belongs_to? && through_reflection.association_link(through_reflection.klass).reference.reference_key.all? do |foreign_key_column|
+            owner.read_attribute(foreign_key_column).blank?
+          end)
         end
 
         def update_through_counter?(method)
@@ -141,7 +143,7 @@ module ActiveRecord
           ensure_not_nested
 
           scope = through_association.scope
-          scope.where! construct_join_attributes(*records)
+          scope.where! construct_join_match_attributes(*records)
           scope = scope.where(through_scope_attributes)
 
           case method
@@ -153,7 +155,8 @@ module ActiveRecord
               count = scope.delete_all
             end
           when :nullify
-            count = scope.update_all(Array(source_reflection.foreign_key).index_with(nil))
+            reference_key = source_link(records.first).reference.reference_key
+            count = scope.update_all(reference_key.index_with(nil))
           else
             count = scope.delete_all
           end

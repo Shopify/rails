@@ -4,7 +4,7 @@ module ActiveRecord::Associations
   module ForeignAssociation # :nodoc:
     def foreign_key_present?
       if reflection.klass.primary_key
-        ActiveRecord::Key.for(reflection.active_record_primary_key).all? do |key|
+        reflection.association_link(owner.class).reference.target_key.all? do |key|
           owner.attribute_present?(key)
         end
       else
@@ -24,15 +24,7 @@ module ActiveRecord::Associations
       def set_owner_attributes(record)
         return if options[:through]
 
-        primary_key_attribute_names = ActiveRecord::Key.for(reflection.join_primary_key)
-        foreign_key_attribute_names = ActiveRecord::Key.for(reflection.join_foreign_key)
-
-        primary_key_foreign_key_pairs = primary_key_attribute_names.zip(foreign_key_attribute_names)
-
-        primary_key_foreign_key_pairs.each do |primary_key, foreign_key|
-          value = owner.read_attribute(foreign_key)
-          record.write_attribute(primary_key, value)
-        end
+        reflection.association_link(record.class).write_reference(record, owner)
 
         if reflection.type
           record.write_attribute(reflection.type, owner.class.polymorphic_name)

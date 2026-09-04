@@ -109,6 +109,12 @@ module ActiveRecord
           @reflection_scope = reflection_scope
           @associate     = associate_by_default || !preload_scope || preload_scope.empty_scope?
           @model         = owners.first && owners.first.class
+          @association_link = reflection.association_link(klass)
+          @association_mapping = if reflection.association_link_reference_on_owner?
+            @association_link.match.reverse
+          else
+            @association_link.match
+          end
           @run = false
         end
 
@@ -159,7 +165,7 @@ module ActiveRecord
 
         # The name of the key on the associated records
         def association_key_name
-          reflection.join_primary_key(klass)
+          association_mapping.reference_key.name
         end
 
         def loader_query
@@ -169,7 +175,10 @@ module ActiveRecord
         def owners_by_key
           @owners_by_key ||= owners.each_with_object({}) do |owner, result|
             key = derive_key(owner, owner_key_name)
-            (result[key] ||= []) << owner if key.is_a?(Array) ? key.all? : key
+            reference = derive_key(owner, owner_reference_key_name)
+            next unless reference.is_a?(Array) ? reference.all? : reference
+
+            (result[key] ||= []) << owner
           end
         end
 
@@ -235,11 +244,19 @@ module ActiveRecord
         end
 
         private
-          attr_reader :owners, :reflection, :preload_scope, :model
+          attr_reader :owners, :reflection, :preload_scope, :model, :association_link, :association_mapping
+
+          def owner_reference_key_name
+            if reflection.association_link_reference_on_owner?
+              association_link.reference.reference_key.name
+            else
+              association_link.reference.target_key.name
+            end
+          end
 
           # The name of the key on the model which declares the association
           def owner_key_name
-            reflection.join_foreign_key
+            association_mapping.target_key.name
           end
 
           def associate_records_to_owner(owner, records)

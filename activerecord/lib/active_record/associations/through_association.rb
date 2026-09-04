@@ -57,13 +57,13 @@ module ActiveRecord
         def construct_join_attributes(*records)
           ensure_mutable
 
-          association_primary_key = source_reflection.association_primary_key(reflection.klass)
+          reference = source_link(records.first).reference
 
-          if Array(association_primary_key) == reflection.klass.composite_query_constraints_list && !options[:source_type]
+          if reference.target_key.to_a == reflection.klass.composite_query_constraints_list && !options[:source_type]
             join_attributes = { source_reflection.name => records }
           else
-            assoc_pk_values = records.map { |record| record.read_attribute(association_primary_key) }
-            join_attributes = { source_reflection.foreign_key => assoc_pk_values }
+            target_values = records.map { |record| reference.target_key.value_of(record) }
+            join_attributes = { reference.reference_key.name => target_values }
           end
 
           if options[:source_type]
@@ -77,18 +77,30 @@ module ActiveRecord
           end
         end
 
+        def construct_join_match_attributes(*records)
+          ensure_mutable
+          match = source_link(records.first).match
+          match.each_with_object({}) do |(reference_column, target_column), attributes|
+            attributes[reference_column] = records.map { |record| record.read_attribute(target_column) }
+          end
+        end
+
+        def source_link(record = nil)
+          source_reflection.association_link(record ? record.class : reflection.klass)
+        end
+
         # Note: this does not capture all cases, for example it would be impractical
         # to try to properly support stale-checking for nested associations.
         def stale_state
           if through_reflection.belongs_to?
-            Array(through_reflection.foreign_key).filter_map do |foreign_key_column|
+            through_reflection.association_link(through_reflection.klass).reference.reference_key.filter_map do |foreign_key_column|
               owner.read_attribute(foreign_key_column)
             end.presence
           end
         end
 
         def foreign_key_present?
-          through_reflection.belongs_to? && Array(through_reflection.foreign_key).all? do |foreign_key_column|
+          through_reflection.belongs_to? && through_reflection.association_link(through_reflection.klass).reference.reference_key.all? do |foreign_key_column|
             !owner.read_attribute(foreign_key_column).nil?
           end
         end

@@ -44,28 +44,30 @@ module ActiveRecord::Associations::Builder # :nodoc:
 
     def self.touch_record(o, change_method, name, touch) # :nodoc:
       association = o.association(name)
-      foreign_key = association.foreign_key
+      reflection = association.reflection
 
-      old_foreign_id = if foreign_key.any? { |fk| o.public_send(change_method, fk) }
-        values = foreign_key.map do |fk|
-          change = o.public_send(change_method, fk)
-          change ? change.first : o.read_attribute(fk)
-        end
-        foreign_key.composite? ? values : values.first
+      if reflection.polymorphic?
+        foreign_type = association.foreign_type
+        change = o.public_send(change_method, foreign_type)
+        class_name = (change && change.first) || o.public_send(foreign_type)
+        klass = o.class.polymorphic_class_for(class_name) if class_name
+      else
+        klass = association.klass
       end
 
-      if old_foreign_id
-        reflection = association.reflection
-        if reflection.polymorphic?
-          foreign_type = association.foreign_type
-          change = o.public_send(change_method, foreign_type)
-          klass = (change && change.first) || o.public_send(foreign_type)
-          klass = o.class.polymorphic_class_for(klass)
-        else
-          klass = association.klass
+      link = reflection.association_link(klass) if klass
+      owner_key = link&.match&.reference_key || association.foreign_key
+
+      old_foreign_id = if owner_key.any? { |key| o.public_send(change_method, key) }
+        values = owner_key.map do |key|
+          change = o.public_send(change_method, key)
+          change ? change.first : o.read_attribute(key)
         end
-        primary_key = reflection.association_primary_key(klass)
-        old_record = klass.find_by(primary_key => [old_foreign_id])
+        owner_key.composite? ? values : values.first
+      end
+
+      if old_foreign_id && klass
+        old_record = klass.find_by(link.match.target_key.where_hash(old_foreign_id))
 
         if old_record
           if touch != true

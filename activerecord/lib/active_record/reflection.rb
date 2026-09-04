@@ -208,12 +208,7 @@ module ActiveRecord
 
         scope_chain_items.inject(klass_scope, &:merge!)
 
-        primary_key_column_names = Array(join_primary_key)
-        foreign_key_column_names = Array(join_foreign_key)
-
-        primary_foreign_key_pairs = primary_key_column_names.zip(foreign_key_column_names)
-
-        primary_foreign_key_pairs.each do |primary_key_column_name, foreign_key_column_name|
+        association_join_mapping(foreign_klass).each do |primary_key_column_name, foreign_key_column_name|
           primary_key_attribute = predicate_builder.predicate_attribute(table[primary_key_column_name])
           foreign_key_attribute = predicate_builder.predicate_attribute(foreign_table[foreign_key_column_name])
 
@@ -555,7 +550,7 @@ module ActiveRecord
       end
 
       def association_scope_cache(klass, owner, &block)
-        key = self
+        key = [self, association_link(klass)]
         if polymorphic?
           key = [key, owner.read_attribute(@foreign_type)]
         end
@@ -569,6 +564,35 @@ module ActiveRecord
       end
 
       def foreign_key(infer_from_inverse_of: true)
+        association_reference_key(infer_from_inverse_of: infer_from_inverse_of)
+      end
+
+      def association_link(associated_class = nil) # :nodoc:
+        if polymorphic?
+          raise ArgumentError, "An associated class is required for a polymorphic association link" unless associated_class
+
+          (@association_links ||= Concurrent::Map.new).compute_if_absent(associated_class) do
+            build_association_link(associated_class)
+          end
+        else
+          @association_link ||= build_association_link(nil)
+        end
+      end
+
+      def association_link_reference_on_owner? # :nodoc:
+        belongs_to?
+      end
+
+      def association_join_mapping(associated_class = nil) # :nodoc:
+        mapping = association_link(associated_class).match
+        association_link_reference_on_owner? ? mapping.reverse : mapping
+      end
+
+      def association_link_polymorphic? # :nodoc:
+        polymorphic?
+      end
+
+      def association_reference_key(infer_from_inverse_of: true) # :nodoc:
         @foreign_key ||= if options[:foreign_key]
           ActiveRecord::Key.for(options[:foreign_key]).name
         elsif options[:query_constraints]
@@ -583,6 +607,7 @@ module ActiveRecord
           ActiveRecord::Key.for(derived_fk).name
         end
       end
+      private :association_reference_key
 
       def association_foreign_key
         @association_foreign_key ||= ActiveRecord::Key.for(options[:association_foreign_key] || class_name.foreign_key).name
@@ -593,6 +618,10 @@ module ActiveRecord
       end
 
       def active_record_primary_key
+        association_target_key
+      end
+
+      def association_target_key # :nodoc:
         @active_record_primary_key ||=
           if options[:primary_key]
             ActiveRecord::Key.for(options[:primary_key]).name
@@ -600,6 +629,7 @@ module ActiveRecord
             derive_primary_key(active_record) { |model| model.query_constraints_list }
           end
       end
+      private :association_target_key
 
       def join_primary_key(klass = nil)
         foreign_key
@@ -745,6 +775,32 @@ module ActiveRecord
       end
 
       private
+        def build_association_link(associated_class)
+          target_key = if belongs_to?
+            association_target_key(associated_class)
+          else
+            association_target_key
+          end
+
+          reference_class = belongs_to? ? active_record : (associated_class || klass)
+          target_class = belongs_to? ? (associated_class || klass) : active_record
+          reference_key = normalize_key_aliases(association_reference_key, reference_class)
+          target_key = normalize_key_aliases(target_key, target_class)
+
+          AssociationLink.new(
+            reference: Key::Mapping.new(
+              reference_key: reference_key,
+              target_key: target_key
+            )
+          )
+        end
+
+        def normalize_key_aliases(key, model)
+          aliases = model.attribute_aliases
+          names = ActiveRecord::Key.for(key).map { |column| aliases[column] || column }
+          key.is_a?(Array) ? names : names.first
+        end
+
         # Attempts to find the inverse association name automatically.
         # If it cannot find a suitable inverse association name, it returns
         # +nil+.
@@ -940,6 +996,10 @@ module ActiveRecord
 
       # klass option is necessary to support loading polymorphic associations
       def association_primary_key(klass = nil)
+        association_target_key(klass)
+      end
+
+      def association_target_key(klass = nil) # :nodoc:
         if options[:primary_key]
           return @association_primary_key ||= ActiveRecord::Key.for(options[:primary_key]).name
         end
@@ -959,12 +1019,13 @@ module ActiveRecord
 
         derive_primary_key(klass) { |model| model.composite_query_constraints_list }
       end
+      private :association_target_key
 
       def join_primary_key(klass = nil)
         polymorphic? ? association_primary_key(klass) : association_primary_key
       end
 
-      def join_foreign_key
+      def join_foreign_key(klass = nil)
         foreign_key
       end
 
@@ -1001,6 +1062,32 @@ module ActiveRecord
         @source_reflection_name = delegate_reflection.options[:source]
 
         ensure_option_not_given_as_class!(:source_type)
+      end
+
+      def association_link(klass = nil) # :nodoc:
+        source_reflection.association_link(klass)
+      end
+
+      def association_join_mapping(klass = nil) # :nodoc:
+        source_reflection.association_join_mapping(klass)
+      end
+
+      def association_scope_cache(klass, owner, &block) # :nodoc:
+        key = [self, association_link(klass)]
+        if polymorphic?
+          key = [key, owner.read_attribute(foreign_type)]
+        end
+        klass.with_connection do |connection|
+          klass.cached_find_by_statement(connection, key, &block)
+        end
+      end
+
+      def association_link_reference_on_owner? # :nodoc:
+        source_reflection.association_link_reference_on_owner?
+      end
+
+      def association_link_polymorphic? # :nodoc:
+        source_reflection.association_link_polymorphic?
       end
 
       def through_reflection?
@@ -1261,7 +1348,9 @@ module ActiveRecord
 
     class PolymorphicReflection < AbstractReflection # :nodoc:
       delegate :klass, :scope, :plural_name, :type, :join_primary_key, :join_foreign_key,
-               :name, :scope_for, to: :@reflection
+               :name, :scope_for, :association_link, :belongs_to?, :polymorphic?,
+               :association_link_reference_on_owner?, :association_link_polymorphic?,
+               :association_join_mapping, to: :@reflection
 
       def initialize(reflection, previous_reflection)
         super()
@@ -1290,7 +1379,9 @@ module ActiveRecord
     end
 
     class RuntimeReflection < AbstractReflection # :nodoc:
-      delegate :scope, :type, :constraints, :join_foreign_key, to: :@reflection
+      delegate :scope, :type, :constraints, :join_foreign_key,
+               :belongs_to?, :polymorphic?, :association_link_reference_on_owner?,
+               :association_link_polymorphic?, to: :@reflection
 
       def initialize(reflection, association)
         super()
@@ -1304,6 +1395,14 @@ module ActiveRecord
 
       def aliased_table
         klass.arel_table
+      end
+
+      def association_link(associated_class = klass)
+        @reflection.association_link(associated_class)
+      end
+
+      def association_join_mapping(associated_class = klass)
+        @reflection.association_join_mapping(associated_class)
       end
 
       def join_primary_key(klass = self.klass)

@@ -302,8 +302,9 @@ module ActiveRecord
           if !reflection
             value = value.id if value.respond_to?(:id)
           elsif reflection.belongs_to? && !reflection.polymorphic?
-            key = reflection.join_foreign_key
-            pkey = reflection.join_primary_key
+            mapping = reflection.association_join_mapping
+            key = mapping.target_key.name
+            pkey = mapping.reference_key.name
 
             if pkey.is_a?(Array)
               if pkey.all? { |attribute| value.respond_to?(attribute) }

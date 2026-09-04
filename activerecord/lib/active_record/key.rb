@@ -171,5 +171,62 @@ module ActiveRecord
         @columns = [].freeze
       end
     end
+
+    # An ordered correspondence between two database keys.
+    class Mapping # :nodoc:
+      include Enumerable
+
+      attr_reader :reference_key, :target_key
+
+      def self.empty
+        @empty ||= new(reference_key: nil, target_key: nil)
+      end
+
+      def initialize(reference_key:, target_key:)
+        @reference_key = key_for(reference_key)
+        @target_key = key_for(target_key)
+        if @reference_key.length != @target_key.length
+          raise ArgumentError, "Key mappings must have the same number of columns"
+        end
+
+        @pairs = @reference_key.zip(@target_key).map!(&:freeze).freeze
+        @hash = [@reference_key, @target_key].hash
+        freeze
+      end
+
+      def each(&block)
+        @pairs.each(&block)
+      end
+
+      def empty?
+        !@reference_key.present? && !@target_key.present?
+      end
+
+      def +(other)
+        return other if empty?
+        return self if other.empty?
+
+        self.class.new(
+          reference_key: [*@reference_key, *other.reference_key],
+          target_key: [*@target_key, *other.target_key]
+        )
+      end
+
+      def reverse
+        self.class.new(reference_key: target_key, target_key: reference_key)
+      end
+
+      def ==(other)
+        other.is_a?(Mapping) && reference_key == other.reference_key && target_key == other.target_key
+      end
+      alias_method :eql?, :==
+
+      attr_reader :hash
+
+      private
+        def key_for(key)
+          key.is_a?(Key) ? key : Key.for(key)
+        end
+    end
   end
 end

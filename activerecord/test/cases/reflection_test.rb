@@ -467,6 +467,20 @@ class ReflectionTest < ActiveRecord::TestCase
     assert_equal "name", Author.reflect_on_association(:essay).active_record_primary_key.to_s
   end
 
+  def test_has_many_association_link_uses_physical_key_direction
+    link = Author.reflect_on_association(:posts).association_link
+
+    assert_equal "author_id", link.reference.reference_key.name
+    assert_equal "id", link.reference.target_key.name
+  end
+
+  def test_belongs_to_association_link_uses_physical_key_direction
+    link = Post.reflect_on_association(:author).association_link
+
+    assert_equal "author_id", link.reference.reference_key.name
+    assert_equal "id", link.reference.target_key.name
+  end
+
   def test_active_record_primary_key_raises_when_missing_primary_key
     reflection = ActiveRecord::Reflection.create(:has_many, :author, nil, {}, Edge)
     assert_raises(ActiveRecord::UnknownPrimaryKey) { reflection.active_record_primary_key }

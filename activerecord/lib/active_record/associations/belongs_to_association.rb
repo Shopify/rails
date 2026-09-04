@@ -4,7 +4,7 @@ module ActiveRecord
   module Associations
     # = Active Record Belongs To Association
     class BelongsToAssociation < SingularAssociation # :nodoc:
-      attr_reader :foreign_key, :foreign_type
+      attr_reader :foreign_type
 
       def initialize(owner, reflection)
         super
@@ -18,6 +18,18 @@ module ActiveRecord
         end
       end
 
+      def foreign_key
+        return @foreign_key if reflection.polymorphic? && owner.read_attribute(foreign_type).blank?
+
+        key = reflection.association_link(klass).reference.reference_key.name
+        aliases = owner.class.attribute_aliases
+        key = key.map { |column| aliases[column] || column } if key.is_a?(Array)
+        key = aliases[key] || key unless key.is_a?(Array)
+        ActiveRecord::Key.for(key)
+      rescue NameError
+        @foreign_key
+      end
+
       def handle_dependency
         return unless load_target
 
@@ -25,21 +37,16 @@ module ActiveRecord
         when :destroy
           raise ActiveRecord::Rollback unless target.destroy
         when :destroy_async
-          primary_key_column = reflection.active_record_primary_key
-          ids = foreign_key.map { |col| owner.public_send(col) }
-
-          association_class = if reflection.polymorphic?
-            owner.public_send(foreign_type)
-          else
-            reflection.klass
-          end
+          association_class = klass
+          match = reflection.association_link(association_class).match
+          ids = match.reference_key.map { |column| owner.public_send(column) }
 
           enqueue_destroy_association(
             owner_model_name: owner.class.to_s,
             owner_id: owner.id,
             association_class: association_class.to_s,
-            association_ids: foreign_key.composite? ? [ids] : ids,
-            association_primary_key_column: primary_key_column,
+            association_ids: match.reference_key.composite? ? [ids] : ids,
+            association_primary_key_column: match.target_key.name,
             ensuring_owner_was_method: options.fetch(:ensuring_owner_was, nil)
           )
         else
@@ -81,11 +88,14 @@ module ActiveRecord
           model_was = klass
         end
 
-        values = foreign_key.map { |fk| owner.attribute_before_last_save(fk) }
-        foreign_key_was = foreign_key.composite? ? (values if values.all?) : values.first
+        return unless model_was
+
+        match = reflection.association_link(model_was).match
+        values = match.reference_key.map { |key| owner.attribute_before_last_save(key) }
+        foreign_key_was = match.reference_key.composite? ? (values if values.all?) : values.first
 
         if foreign_key_was && model_was < ActiveRecord::Base
-          update_counters_via_scope(model_was, foreign_key_was, -1)
+          update_counters_via_scope(model_was, foreign_key_was, -1, match)
         end
       end
 
@@ -121,14 +131,14 @@ module ActiveRecord
             if target && !stale_target?
               target.increment!(reflection.counter_cache_column, by, touch: reflection.options[:touch])
             else
-              update_counters_via_scope(klass, foreign_key.value_of(owner), by)
+              match = reflection.association_link(klass).match
+              update_counters_via_scope(klass, match.reference_key.value_of(owner), by, match)
             end
           end
         end
 
-        def update_counters_via_scope(klass, values, by)
-          primary_key = ActiveRecord::Key.for(primary_key(klass))
-          scope = klass.all_queries_scope.where!(primary_key.where_hash(values))
+        def update_counters_via_scope(klass, values, by, match = reflection.association_link(klass).match)
+          scope = klass.all_queries_scope.where!(match.target_key.where_hash(values))
           scope.update_counters(reflection.counter_cache_column => by, touch: reflection.options[:touch])
         end
 

@@ -276,7 +276,7 @@ module ActiveRecord
             target_scope.merge!(as.scope(self))
           end
 
-          binds = AssociationScope.get_bind_values(owner, reflection.chain)
+          binds = AssociationScope.get_bind_values(owner, reflection.chain, klass)
           klass.with_connection do |c|
             sc.execute(binds, c, async: async) do |record|
               set_inverse_instance(record)
@@ -368,9 +368,15 @@ module ActiveRecord
           foreign_key_for?(record) && inverse_reflection_for(record)
         end
 
-        # Returns true if record contains the foreign_key
+        # Returns true if the record contains the writable destination key.
         def foreign_key_for?(record)
-          ActiveRecord::Key.for(reflection.foreign_key).all? { |key| record.has_attribute?(key) }
+          link = reflection.association_link(record.class)
+          key = if reflection.association_link_reference_on_owner?
+            link.reference.target_key
+          else
+            link.reference.reference_key
+          end
+          key.all? { |column| record.has_attribute?(column) }
         end
 
         # This should be implemented to return the values of the relevant key(s) on the owner,
@@ -410,28 +416,18 @@ module ActiveRecord
         end
 
         def matches_foreign_key?(record)
-          (foreign_key_for?(record) && record_foreign_key_matches_owner?(record)) ||
-            (foreign_key_for?(owner) && owner_foreign_key_matches_record?(record))
-        end
+          mapping = reflection.association_link(record.class).match
+          if reflection.association_link_reference_on_owner?
+            owner_key = mapping.reference_key
+            record_key = mapping.target_key
+          else
+            owner_key = mapping.target_key
+            record_key = mapping.reference_key
+          end
 
-        def record_foreign_key_matches_owner?(record)
-          foreign_key_values(record) == active_record_primary_key_values(owner)
-        end
-
-        def owner_foreign_key_matches_record?(record)
-          foreign_key_values(owner) == association_primary_key_values(record)
-        end
-
-        def foreign_key_values(record)
-          ActiveRecord::Key.for(reflection.foreign_key).map { |key| record.read_attribute(key) }
-        end
-
-        def active_record_primary_key_values(record)
-          ActiveRecord::Key.for(reflection.active_record_primary_key).map { |key| record.read_attribute(key) }
-        end
-
-        def association_primary_key_values(record)
-          ActiveRecord::Key.for(reflection.association_primary_key(record.class)).map { |key| record.read_attribute(key) }
+          owner_key.all? { |key| owner.has_attribute?(key) } &&
+            record_key.all? { |key| record.has_attribute?(key) } &&
+            owner_key.value_of(owner) == record_key.value_of(record)
         end
     end
   end
