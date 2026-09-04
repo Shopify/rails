@@ -325,6 +325,21 @@ class CoreTest < ActiveRecord::TestCase
         assert_nil model.schema_context.find_by_statement_cache[true][:ractor_marker]
       end
 
+      def test_loaded_schema_and_query_constraints_are_accessible_on_a_non_main_ractor
+        model = Class.new(ActiveRecord::Base) do
+          self.table_name = "topics"
+          self.primary_key = [:author_name, :id]
+        end
+        model.load_schema
+
+        constraints = on_ractor do
+          model.load_schema
+          [model.has_query_constraints?, model.query_constraints_list, model.composite_query_constraints_list]
+        end
+
+        assert_equal [false, ["author_name", "id"], ["author_name", "id"]], constraints
+      end
+
       def test_pending_attribute_modifications_are_shareable_and_applied_on_a_non_main_ractor
         model = Class.new(ActiveRecord::Base) do
           def self.name = "ractor_safe_pending_modifications"

@@ -201,13 +201,25 @@ module ActiveRecord
 
     module ClassMethods
       def schema_context # :nodoc:
-        return @schema_context if schema_loaded?
+        context = schema_context_without_loading
+        return context if context.schema_loaded?
         load_schema
-        @schema_context
+        context
+      end
+
+      def schema_context_without_loading # :nodoc:
+        return @schema_context if @schema_context
+
+        @load_schema_monitor.synchronize do
+          @schema_context ||= build_schema_context
+        end
       end
 
       def build_schema_context # :nodoc:
-        ActiveRecord::ModelSchema::SchemaContext.new(self)
+        ActiveRecord::ModelSchema::SchemaContext.new(
+          self,
+          query_constraints_list: query_constraints_definition
+        )
       end
 
       # Guesses the table name (in forced lower-case) based on the name of the class in the
@@ -560,13 +572,15 @@ module ActiveRecord
       # Load the model's schema information either from the schema cache
       # or directly from the database.
       def load_schema
-        return if schema_loaded?
+        return if schema_context_without_loading.schema_loaded?
+        # Attribute initialization reads the context while its schema is loading.
+        return if @load_schema_monitor.mon_owned?
 
         @load_schema_monitor.synchronize do
-          unless schema_loaded? || @schema_context
-            @schema_context = build_schema_context
-            @schema_context.load_schema!
-            ActiveSupport::Ractors.make_shareable(@schema_context)
+          context = schema_context_without_loading
+          unless context.schema_loaded?
+            context.load_schema!
+            ActiveSupport::Ractors.make_shareable(context)
             unless @schema_hooks_loaded
               load_schema!
               @schema_hooks_loaded = true

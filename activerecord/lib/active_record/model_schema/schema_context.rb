@@ -5,7 +5,7 @@
 module ActiveRecord
   module ModelSchema
     # SchemaContext owns all schema-derived state for a model: columns,
-    # attribute types, and column defaults.
+    # attribute types, column defaults, and query constraints.
     class SchemaContext # :nodoc:
       # Attributes owns a model's attribute-derived state: attribute
       # defaults, attribute types, and column defaults.
@@ -39,8 +39,9 @@ module ActiveRecord
       attr_reader :model_class, :columns_hash, :columns, :column_names,
                   :content_columns
 
-      def initialize(model_class)
+      def initialize(model_class, query_constraints_list: nil)
         @model_class = model_class
+        @explicit_query_constraints_list = query_constraints_list&.map { |column| -column.to_s }&.freeze
         @schema_loaded = false
         @attributes_key = :"active_record_schema_attributes_#{object_id}"
       end
@@ -86,6 +87,25 @@ module ActiveRecord
 
       def schema_loaded?
         @schema_loaded
+      end
+
+      def has_query_constraints?
+        !@explicit_query_constraints_list.nil?
+      end
+
+      def query_constraints_list
+        return @explicit_query_constraints_list if @explicit_query_constraints_list
+
+        # Primary keys can change after the context is loaded and frozen.
+        if model_class.base_class? || primary_key != model_class.base_class.primary_key
+          primary_key if primary_key.is_a?(Array)
+        else
+          model_class.base_class.query_constraints_list
+        end
+      end
+
+      def composite_query_constraints_list
+        query_constraints_list || Array(primary_key).freeze
       end
 
       def attribute_set

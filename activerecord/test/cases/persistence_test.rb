@@ -1866,6 +1866,126 @@ class QueryConstraintsTest < ActiveRecord::TestCase
     assert_equal(["author_id", "id"], Cpk::Book.query_constraints_list)
   end
 
+  def test_query_constraint_state_comes_from_the_current_schema_context
+    klass = Class.new(ActiveRecord::Base) do
+      self.table_name = "topics"
+      self.primary_key = :id
+
+      class << self
+        attr_accessor :current_test_schema_context
+
+        def schema_context_without_loading
+          current_test_schema_context || super
+        end
+      end
+    end
+
+    default_context = klass.schema_context
+    constrained_context = ActiveRecord::ModelSchema::SchemaContext.new(
+      klass,
+      query_constraints_list: [:author_name, :id]
+    )
+
+    [default_context, constrained_context].each do |context|
+      klass.current_test_schema_context = context
+      assert_same context, klass.schema_context
+      assert_predicate context, :schema_loaded?
+      assert_equal Topic.column_names, klass.column_names
+    end
+
+    klass.current_test_schema_context = default_context
+    assert_not_predicate klass, :has_query_constraints?
+    assert_nil klass.query_constraints_list
+    assert_equal ["id"], klass.composite_query_constraints_list
+
+    klass.current_test_schema_context = constrained_context
+    assert_predicate klass, :has_query_constraints?
+    assert_equal ["author_name", "id"], klass.query_constraints_list
+    assert_equal ["author_name", "id"], klass.composite_query_constraints_list
+  ensure
+    klass.current_test_schema_context = nil if klass
+  end
+
+  def test_has_query_constraints_does_not_load_an_abstract_class_schema
+    klass = Class.new(ActiveRecord::Base) do
+      self.abstract_class = true
+    end
+
+    assert_not_predicate klass, :has_query_constraints?
+  end
+
+  def test_has_query_constraints_returns_a_boolean
+    assert_equal true, ClothingItem.has_query_constraints?
+    assert_equal false, Topic.has_query_constraints?
+  end
+
+  def test_derived_query_constraints_are_not_memoized_before_the_schema_is_loaded
+    klass = Class.new(ActiveRecord::Base) do
+      def self.name = "PrimaryKeyReplacedAfterRead"
+      self.table_name = "topics"
+    end
+
+    assert_nil klass.query_constraints_list
+    assert_equal ["id"], klass.composite_query_constraints_list
+
+    klass.primary_key = [:title, :author_name]
+
+    assert_equal ["title", "author_name"], klass.query_constraints_list
+    assert_equal ["title", "author_name"], klass.composite_query_constraints_list
+  end
+
+  def test_query_constraints_declared_after_the_schema_is_loaded_replaces_the_derived_list
+    klass = Class.new(ActiveRecord::Base) do
+      def self.name = "QueryConstraintsDeclaredAfterLoad"
+      self.table_name = "topics"
+    end
+
+    klass.load_schema
+    assert_not_predicate klass, :has_query_constraints?
+    assert_nil klass.query_constraints_list
+
+    klass.query_constraints :title, :author_name
+
+    assert_predicate klass, :has_query_constraints?
+    assert_equal ["title", "author_name"], klass.query_constraints_list
+    assert_equal ["title", "author_name"], klass.composite_query_constraints_list
+    assert_equal Topic.column_names, klass.column_names
+  end
+
+  def test_derived_query_constraints_follow_primary_key_changes_after_schema_loading
+    klass = Class.new(ActiveRecord::Base) do
+      self.table_name = "topics"
+      self.primary_key = [:author_name, :id]
+    end
+    klass.load_schema
+
+    assert_equal ["author_name", "id"], klass.query_constraints_list
+    assert_equal ["author_name", "id"], klass.composite_query_constraints_list
+
+    klass.primary_key = :id
+
+    assert_nil klass.query_constraints_list
+    assert_equal ["id"], klass.composite_query_constraints_list
+
+    klass.primary_key = [:title, :id]
+
+    assert_equal ["title", "id"], klass.query_constraints_list
+    assert_equal ["title", "id"], klass.composite_query_constraints_list
+  end
+
+  def test_explicit_query_constraints_survive_primary_key_changes
+    klass = Class.new(ActiveRecord::Base) do
+      self.table_name = "topics"
+      query_constraints :author_name, :id
+    end
+    klass.load_schema
+    klass.primary_key = [:title, :id]
+
+    assert_predicate klass, :has_query_constraints?
+    assert_equal ["author_name", "id"], klass.query_constraints_list
+    assert_equal ["author_name", "id"], klass.composite_query_constraints_list
+  end
+
   def test_child_keeps_parents_query_constraints
     clothing_item = clothing_items(:green_t_shirt)
     assert_uses_query_constraints_on_reload(clothing_item, ["clothing_type", "color"])
