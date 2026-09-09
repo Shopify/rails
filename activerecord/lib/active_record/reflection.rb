@@ -564,14 +564,19 @@ module ActiveRecord
       def freeze
         return self if frozen?
 
-        klass
+        # Polymorphic associations resolve their class at runtime from the
+        # `*_type` column, so `klass` (and anything derived from it) can't be
+        # computed up front -- skip those attributes for them.
+        unless polymorphic?
+          klass
+          join_primary_key
+          inverse_of
+          inverse_which_updates_counter_cache
+        end
         join_foreign_key
-        join_primary_key
         active_record_primary_key
         association_foreign_key
         counter_cache_column
-        inverse_of
-        inverse_which_updates_counter_cache
         foreign_key
         check_validity!
         @scope = ActiveSupport::Ractors.try_shareable_proc(@scope) if @scope

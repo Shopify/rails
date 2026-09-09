@@ -273,8 +273,7 @@ class ReflectionTest < ActiveRecord::TestCase
   if RUBY_VERSION >= "4.0"
     def test_association_reflections_can_be_read_from_a_ractor_in_ractor_mode
       ActiveSupport::Ractors.with(unshareable_proc_action: :raise) do
-        Categorization.reset_column_information
-        Categorization.load_schema
+        Categorization.make_reflections_shareable!
 
         assert Ractor.shareable?(Categorization._reflections)
 
@@ -303,8 +302,7 @@ class ReflectionTest < ActiveRecord::TestCase
 
     def test_aggregate_reflections_can_be_read_from_a_ractor_in_ractor_mode
       ActiveSupport::Ractors.with(unshareable_proc_action: :raise) do
-        Customer.reset_column_information
-        Customer.load_schema
+        Customer.make_reflections_shareable!
 
         assert Ractor.shareable?(Customer.aggregate_reflections)
 
@@ -328,7 +326,7 @@ class ReflectionTest < ActiveRecord::TestCase
       end
 
       ActiveSupport::Ractors.with(unshareable_proc_action: :raise) do
-        model.load_schema
+        model.make_reflections_shareable!
 
         assert Ractor.shareable?(model.reflect_on_association(:parent).scope)
       end
