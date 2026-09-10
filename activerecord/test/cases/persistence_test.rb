@@ -1866,6 +1866,27 @@ class QueryConstraintsTest < ActiveRecord::TestCase
     assert_equal(["author_id", "id"], Cpk::Book.query_constraints_list)
   end
 
+  def test_schema_context_stores_query_constraint_lists
+    klass = Class.new(ActiveRecord::Base) do
+      self.table_name = "topics"
+      query_constraints :title, :id
+    end
+
+    context = klass.schema_context
+
+    assert_equal ["title", "id"], context.query_constraints_list
+    assert_equal ["title", "id"], context.composite_query_constraints_list
+    assert_same context.query_constraints_list, klass.query_constraints_list
+    assert_same context.composite_query_constraints_list, klass.composite_query_constraints_list
+  end
+
+  def test_schema_context_derives_query_constraints_from_a_composite_primary_key
+    context = Cpk::Order.schema_context
+
+    assert_equal ["shop_id", "id"], context.query_constraints_list
+    assert_same context.query_constraints_list, context.composite_query_constraints_list
+  end
+
   def test_child_keeps_parents_query_constraints
     clothing_item = clothing_items(:green_t_shirt)
     assert_uses_query_constraints_on_reload(clothing_item, ["clothing_type", "color"])

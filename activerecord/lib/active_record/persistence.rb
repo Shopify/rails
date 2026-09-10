@@ -172,8 +172,8 @@ module ActiveRecord
       def query_constraints(*columns_list)
         raise ArgumentError, "You must specify at least one column to be used in querying" if columns_list.empty?
 
-        @query_constraints_list = columns_list.map { |column| -column.to_s }.freeze
-        @has_query_constraints = @query_constraints_list
+        @query_constraints_definition = columns_list.map { |column| -column.to_s }.freeze
+        @has_query_constraints = @query_constraints_definition
       end
 
       def has_query_constraints? # :nodoc:
@@ -181,20 +181,18 @@ module ActiveRecord
       end
 
       def query_constraints_list # :nodoc:
-        return @query_constraints_list if @query_constraints_list
+        schema_context.query_constraints_list
+      end
 
-        if base_class? || primary_key != base_class.primary_key
-          primary_key if primary_key.is_a?(Array)
-        else
-          base_class.query_constraints_list
-        end
+      def query_constraints_definition # :nodoc:
+        @query_constraints_definition
       end
 
       # Returns an array of column names to be used in queries. The source of column
       # names is derived from +query_constraints_list+ or +primary_key+. This method
       # is for internal use when the primary key is to be treated as an array.
       def composite_query_constraints_list # :nodoc:
-        @composite_query_constraints_list ||= query_constraints_list || Array(primary_key)
+        schema_context.composite_query_constraints_list
       end
 
       def _insert_record(connection, values, returning) # :nodoc:
@@ -253,7 +251,7 @@ module ActiveRecord
         def inherited(subclass)
           super
           subclass.class_eval do
-            @query_constraints_list = nil
+            @query_constraints_definition = nil
             @has_query_constraints = false
           end
         end

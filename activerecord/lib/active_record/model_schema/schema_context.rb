@@ -5,7 +5,7 @@
 module ActiveRecord
   module ModelSchema
     # SchemaContext owns all schema-derived state for a model: columns,
-    # attribute types, and column defaults.
+    # attribute types, column defaults, and query constraints.
     class SchemaContext # :nodoc:
       # Attributes owns a model's attribute-derived state: attribute
       # defaults, attribute types, and column defaults.
@@ -37,7 +37,8 @@ module ActiveRecord
       end
 
       attr_reader :model_class, :columns_hash, :columns, :column_names,
-                  :content_columns
+                  :content_columns, :query_constraints_list,
+                  :composite_query_constraints_list
 
       def initialize(model_class)
         @model_class = model_class
@@ -118,6 +119,10 @@ module ActiveRecord
         @columns = @columns_hash.values.freeze
         @column_names = @columns.map(&:name).freeze
 
+        primary_key = self.primary_key
+        @query_constraints_list = derive_query_constraints_list(primary_key)
+        @composite_query_constraints_list = (@query_constraints_list || Array(primary_key)).freeze
+
         @content_columns = @columns.reject do |c|
           Array(primary_key).include?(c.name) ||
           c.name == model_class.inheritance_column ||
@@ -129,6 +134,19 @@ module ActiveRecord
 
         @schema_loaded = true
       end
+
+      private
+        def derive_query_constraints_list(primary_key)
+          if query_constraints = model_class.query_constraints_definition
+            query_constraints
+          elsif model_class.base_class? || primary_key != model_class.base_class.primary_key
+            primary_key if primary_key.is_a?(Array)
+          else
+            base_class = model_class.base_class
+            base_primary_key = base_class.primary_key
+            base_class.query_constraints_definition || (base_primary_key if base_primary_key.is_a?(Array))
+          end
+        end
     end
   end
 end
