@@ -67,6 +67,10 @@ module ActiveRecord
           find_cmd_and_exec(ActiveRecord.database_cli[:sqlite], *args)
         end
 
+        def ractor_connection_proxy_class # :nodoc:
+          RactorConnectionProxy::SQLite3Proxy
+        end
+
         def native_database_types # :nodoc:
           NATIVE_DATABASE_TYPES
         end
@@ -102,6 +106,10 @@ module ActiveRecord
       include SQLite3::Quoting
       include SQLite3::SchemaStatements
       include SQLite3::DatabaseStatements
+
+      def ractor_connection_capabilities # :nodoc:
+        super.merge(supports_insert_on_conflict?: supports_insert_on_conflict?)
+      end
 
       ##
       # :singleton-method:

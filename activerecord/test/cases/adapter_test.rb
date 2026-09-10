@@ -48,13 +48,13 @@ module ActiveRecord
     def test_valid_column
       @connection.native_database_types.each_key do |type|
         assert @connection.valid_type?(type)
-        assert @connection.class.valid_type?(type)
+        assert main_ractor_connection(@connection).class.valid_type?(type)
       end
     end
 
     def test_invalid_column
       assert_not @connection.valid_type?(:foobar)
-      assert_not @connection.class.valid_type?(:foobar)
+      assert_not main_ractor_connection(@connection).class.valid_type?(:foobar)
     end
 
     def test_tables
@@ -419,7 +419,7 @@ module ActiveRecord
     test "inspect does not show secrets" do
       output = @connection.inspect
 
-      assert_match(/ActiveRecord::ConnectionAdapters::\w+:0x[\da-f]+ env_name="\w+" role=:writing>/, output)
+      assert_match(/ActiveRecord::ConnectionAdapters::[\w:]+:0x[\da-f]+ env_name="\w+" role=:writing>/, output)
     end
 
     private
@@ -1028,7 +1028,7 @@ module ActiveRecord
       end
 
       test "disconnect and recover on #configure_connection failure" do
-        connection = ActiveRecord::Base.connection_pool.send(:new_connection)
+        connection = without_ractor_proxy { ActiveRecord::Base.connection_pool }.send(:new_connection)
 
         failures = [ActiveRecord::ConnectionFailed.new("Oops"), ActiveRecord::ConnectionFailed.new("Oops 2")]
         connection.singleton_class.define_method(:configure_connection) do
@@ -1049,7 +1049,7 @@ module ActiveRecord
       end
 
       test "disconnect and recover on #configure_connection timeout" do
-        connection = ActiveRecord::Base.connection_pool.send(:new_connection)
+        connection = without_ractor_proxy { ActiveRecord::Base.connection_pool }.send(:new_connection)
 
         slow = [5]
         connection.singleton_class.define_method(:configure_connection) do
