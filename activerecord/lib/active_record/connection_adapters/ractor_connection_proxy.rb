@@ -284,14 +284,14 @@ module ActiveRecord
         # Generic dispatch of one adapter method to the token-pinned
         # connection. Arguments and results always cross as shareable copies,
         # keeping a self-proxy run faithful to the worker boundary.
-        def call_connection(connection_token, method_name, args, kwargs, connection_pool: nil)
+        def call_connection(connection_token, method_name, args, kwargs, block = nil, connection_pool: nil)
           shareable_args = shareable_args_copy(args)
           shareable_kwargs = shareable_kwargs_copy(kwargs)
           dispatched_method = method_name.to_sym
 
           main_operation(connection_pool: connection_pool) do
             connection = fetch_connection(connection_token)
-            shareable_copy(connection.__send__(dispatched_method, *shareable_args, **shareable_kwargs))
+            shareable_copy(connection.__send__(dispatched_method, *shareable_args, **shareable_kwargs, &block))
           end
         end
 

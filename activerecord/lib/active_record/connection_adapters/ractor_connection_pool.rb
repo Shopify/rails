@@ -9,23 +9,6 @@ module ActiveRecord
     class RactorConnectionPool # :nodoc:
       Lease = Struct.new(:connection, :sticky)
 
-      # Dispatches schema cache lookups to the schema cache of this pool's
-      # main-Ractor counterpart. The full BoundSchemaReflection interface is
-      # defined up front so lookups never pay `method_missing` dispatch.
-      class SchemaCacheProxy
-        def initialize(pool)
-          @pool = pool
-        end
-
-        BoundSchemaReflection.public_instance_methods(false).each do |method_name|
-          class_eval(<<~RUBY, __FILE__, __LINE__ + 1)
-            def #{method_name}(*args, **kwargs)
-              @pool.dispatch_to_main_schema_cache(:#{method_name}, args, kwargs)
-            end
-          RUBY
-        end
-      end
-
       attr_reader :db_config, :role, :shard, :key
 
       def self.spec_for(pool) # :nodoc:
@@ -92,8 +75,22 @@ module ActiveRecord
         main_pool_value(:schema_reflection)
       end
 
+      class Pool
+        def initialize(pool)
+          @pool = pool
+        end
+
+        def with_connection(&block)
+          @pool.with_connection do |ractor_connection|
+            RactorConnectionProxy.call_connection(
+              ractor_connection.connection_token, :yield_self, [], {}, block, connection_pool: @pool
+            )
+          end
+        end
+      end
+
       def schema_cache
-        state.schema_cache ||= SchemaCacheProxy.new(self)
+        state.schema_cache ||= BoundSchemaReflection.new(schema_reflection, Pool.new(self))
       end
 
       def dispatch_to_main_schema_cache(method_name, args, kwargs) # :nodoc:
