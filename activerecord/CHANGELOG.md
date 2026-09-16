@@ -1,3 +1,9 @@
+*   Fix `where` clauses with empty value lists for composite tuples and associations.
+
+    These clauses now match no rows without a database query, instead of generating invalid SQL.
+
+    *Mathius Johnson*
+
 *   Read PostgreSQL indexes and constraints from the table an unqualified name resolves to.
 
     `indexes`, `foreign_keys`, `check_constraints`, `unique_constraints` and
