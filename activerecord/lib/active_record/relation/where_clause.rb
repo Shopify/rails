@@ -98,6 +98,7 @@ module ActiveRecord
 
       def contradiction?
         predicates.any? do |x|
+          x = x.expr while x.is_a?(Arel::Nodes::Grouping)
           case x
           when Arel::Nodes::In
             Array === x.right && x.right.empty?

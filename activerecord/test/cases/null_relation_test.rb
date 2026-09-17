@@ -19,6 +19,16 @@ class NullRelationTest < ActiveRecord::TestCase
     end
   end
 
+  def test_grouped_empty_predicate_avoids_read_queries
+    predicate = Arel::Nodes::Grouping.new(Comment.arel_table[:id].in([]))
+
+    assert_no_queries do
+      assert_empty Comment.where(predicate).to_a
+      assert_empty Comment.where(predicate).pluck(:id)
+      assert_not Comment.where(predicate).exists?
+    end
+  end
+
   def test_none_chainable
     assert_queries_count(0) do
       assert_equal [], Developer.none.where(name: "David")

@@ -1,34 +1,47 @@
 # frozen_string_literal: true
 
 module ActiveRecord
-  # Statement cache is used to cache a single statement in order to avoid creating the AST again.
-  # Initializing the cache is done by passing the statement in the create block:
+  # Caches a query's compiled form and bind layout to avoid rebuilding its
+  # Arel AST on each execution.
   #
-  #   cache = StatementCache.create(ClothingItem.lease_connection) do |params|
+  # Create a statement cache from a relation:
+  #
+  #   cache = StatementCache.create(Book.lease_connection) do
   #     Book.where(name: "my book").where("author_id > 3")
   #   end
   #
-  # The cached statement is executed by using the
-  # {connection.execute}[rdoc-ref:ConnectionAdapters::DatabaseStatements#execute] method:
+  # +execute+ binds the supplied values and runs the cached query:
   #
-  #   cache.execute([], ClothingItem.lease_connection)
+  #   cache.execute([], Book.lease_connection)
   #
-  # The relation returned by the block is cached, and for each
-  # {execute}[rdoc-ref:ConnectionAdapters::DatabaseStatements#execute]
-  # call the cached relation gets duped. Database is queried when +to_a+ is called on the relation.
+  # For values that vary between executions, use +bind+ in the create block:
   #
-  # If you want to cache the statement without the values you can use the +bind+ method of the
-  # block parameter.
-  #
-  #   cache = StatementCache.create(ClothingItem.lease_connection) do |params|
+  #   cache = StatementCache.create(Book.lease_connection) do |params|
   #     Book.where(name: params.bind)
   #   end
   #
-  # And pass the bind values as the first argument of +execute+ call.
+  # Supply the bind values as the first argument to +execute+:
   #
-  #   cache.execute(["my book"], ClothingItem.lease_connection)
+  #   cache.execute(["my book"], Book.lease_connection)
+  #
+  # Positional inputs follow the order of calls to +bind+, independently of
+  # their order or number of appearances in the SQL. Inputs can also have keys:
+  #
+  #   cache = StatementCache.create(Book.lease_connection) do |params|
+  #     Book.where(name: params.bind(:title))
+  #   end
+  #   cache.execute({ title: "my book" }, Book.lease_connection)
+  #
+  # Keys are resolved with #[] on the execution input; a Method or Proc can
+  # supply values without constructing a Hash.
   class StatementCache # :nodoc:
-    class Substitute; end # :nodoc:
+    class Substitute # :nodoc:
+      attr_reader :key
+
+      def initialize(key = nil)
+        @key = key
+      end
+    end
 
     class Query # :nodoc:
       attr_reader :retryable
@@ -111,7 +124,14 @@ module ActiveRecord
     end
 
     class Params # :nodoc:
-      def bind; Substitute.new; end
+      def initialize
+        @index = 0
+      end
+
+      def bind(key = @index)
+        @index += 1
+        Substitute.new(key)
+      end
     end
 
     class BindMap # :nodoc:
@@ -121,14 +141,14 @@ module ActiveRecord
 
         bound_attributes.each_with_index do |attr, i|
           if ActiveModel::Attribute === attr && Substitute === attr.value
-            @indexes << i
+            @indexes << [i, attr.value.key]
           end
         end
       end
 
       def bind(values)
         bas = @bound_attributes.dup
-        @indexes.each_with_index { |offset, i| bas[offset] = bas[offset].with_cast_value(values[i]) }
+        @indexes.each { |offset, key| bas[offset] = bas[offset].with_cast_value(values[key]) }
         bas
       end
     end

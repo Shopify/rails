@@ -6,6 +6,17 @@ module ActiveRecord
     class HasOneThroughAssociation < HasOneAssociation # :nodoc:
       include ThroughAssociation
 
+      def reference_changed_for_autosave?(record)
+        inverse_type_changed = if reflection.inverse_of&.polymorphic?
+          record.read_attribute(reflection.inverse_of.foreign_type) != reflection.active_record.polymorphic_name
+        end
+        inverse_type_changed || reference_key_changed_for_save?(record)
+      end
+
+      # There is no direct reference between the owner and this target.
+      def synchronize_reference(_record)
+      end
+
       private
         def replace(record, save = true)
           create_through_record(record, save)

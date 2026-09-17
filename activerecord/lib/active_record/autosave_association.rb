@@ -487,20 +487,9 @@ module ActiveRecord
         if autosave && record.marked_for_destruction?
           record.destroy
         elsif autosave != false
-          primary_key = ActiveRecord::Key.for(reflection.active_record_primary_key)
-          primary_key_value = primary_key.map { |key| read_attribute(key) }
-          return unless (autosave && record.changed_for_autosave?) || _record_changed?(reflection, record, primary_key_value)
+          return unless (autosave && record.changed_for_autosave?) || record.new_record? || association.reference_changed_for_autosave?(record)
 
-          unless reflection.through_reflection
-            foreign_key = ActiveRecord::Key.for(reflection.foreign_key)
-            primary_key_foreign_key_pairs = primary_key.zip(foreign_key)
-
-            primary_key_foreign_key_pairs.each do |primary_key, foreign_key|
-              association_id = read_attribute(primary_key)
-              record.write_attribute(foreign_key, association_id) unless record.read_attribute(foreign_key) == association_id
-            end
-            association.set_inverse_instance(record)
-          end
+          association.synchronize_reference(record)
 
           inverse_association = reflection.inverse_of && record.association(reflection.inverse_of.name)
           return if inverse_association && record.autosaving_belongs_to_for?(inverse_association)
@@ -509,30 +498,6 @@ module ActiveRecord
           raise ActiveRecord::Rollback if !saved && autosave
           saved
         end
-      end
-
-      # If the record is new or it has changed, returns true.
-      def _record_changed?(reflection, record, key)
-        record.new_record? ||
-          (association_foreign_key_changed?(reflection, record, key) ||
-          inverse_polymorphic_association_changed?(reflection, record)) ||
-          ActiveRecord::Key.for(reflection.foreign_key).any? { |fk| record.will_save_change_to_attribute?(record.class.attribute_aliases[fk] || fk) }
-      end
-
-      def association_foreign_key_changed?(reflection, record, key)
-        return false if reflection.through_reflection?
-
-        foreign_key = ActiveRecord::Key.for(reflection.foreign_key)
-        return false unless foreign_key.all? { |key| record.has_attribute?(key) }
-
-        foreign_key.map { |key| record.read_attribute(key) } != Array(key)
-      end
-
-      def inverse_polymorphic_association_changed?(reflection, record)
-        return false unless reflection.inverse_of&.polymorphic?
-
-        class_name = record.read_attribute(reflection.inverse_of.foreign_type)
-        reflection.active_record.polymorphic_name != class_name
       end
 
       def autosave_belongs_to_association(reflection) # :nodoc:
@@ -566,14 +531,7 @@ module ActiveRecord
             end
 
             if association.updated?
-              primary_key = ActiveRecord::Key.for(reflection.association_primary_key(record.class))
-              foreign_key = ActiveRecord::Key.for(reflection.foreign_key)
-
-              primary_key_foreign_key_pairs = primary_key.zip(foreign_key)
-              primary_key_foreign_key_pairs.each do |primary_key, foreign_key|
-                association_id = record.read_attribute(primary_key)
-                write_attribute(foreign_key, association_id) unless read_attribute(foreign_key) == association_id
-              end
+              association.association_route(record).write(self, record, force: false)
               association.loaded!
             end
 

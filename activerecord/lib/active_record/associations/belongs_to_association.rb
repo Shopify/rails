@@ -18,6 +18,10 @@ module ActiveRecord
         end
       end
 
+      def association_route(record = nil)
+        reflection.association_route(origin_class: owner.class, destination_class: record ? record.class : klass)
+      end
+
       def handle_dependency
         return unless load_target
 
@@ -25,21 +29,26 @@ module ActiveRecord
         when :destroy
           raise ActiveRecord::Rollback unless target.destroy
         when :destroy_async
-          primary_key_column = reflection.active_record_primary_key
-          ids = foreign_key.map { |col| owner.public_send(col) }
-
+          route = association_route(target)
+          destination_key = route.destination_key
+          id = destroy_association_async_id(route, destination_key)
+          # Tuple syntax distinguishes an Array-valued key from the job's ID list.
+          if !destination_key.composite? && id.is_a?(Array)
+            destination_key = ActiveRecord::Key.for(destination_key.columns)
+            id = [id]
+          end
           association_class = if reflection.polymorphic?
             owner.public_send(foreign_type)
           else
-            reflection.klass
+            klass
           end
 
           enqueue_destroy_association(
             owner_model_name: owner.class.to_s,
             owner_id: owner.id,
             association_class: association_class.to_s,
-            association_ids: foreign_key.composite? ? [ids] : ids,
-            association_primary_key_column: primary_key_column,
+            association_ids: [id],
+            association_primary_key_column: destination_key.name,
             ensuring_owner_was_method: options.fetch(:ensuring_owner_was, nil)
           )
         else
@@ -80,12 +89,14 @@ module ActiveRecord
         else
           model_was = klass
         end
-
-        values = foreign_key.map { |fk| owner.attribute_before_last_save(fk) }
-        foreign_key_was = foreign_key.composite? ? (values if values.all?) : values.first
+        foreign_key_was = foreign_key.map_value { |key| owner.attribute_before_last_save(key) }
+        foreign_key_was = nil if foreign_key.composite? && !foreign_key_was.all?
 
         if foreign_key_was && model_was < ActiveRecord::Base
-          update_counters_via_scope(model_was, foreign_key_was, -1)
+          route = reflection.association_route(origin_class: owner.class, destination_class: model_was)
+          aliases = owner.class.attribute_aliases
+          origin_key_was = route.origin_key.map_value { |key| owner.attribute_before_last_save(aliases[key] || key) }
+          update_counters_via_scope(model_was, origin_key_was, -1, route)
         end
       end
 
@@ -102,6 +113,27 @@ module ActiveRecord
       end
 
       private
+        # Prefer the target's persisted values, falling back to the owner for
+        # values unavailable after a partial select.
+        def destroy_association_async_id(route, destination_key)
+          aliases = target.class.attribute_aliases
+          origin_columns = route.origin_key.columns
+          destination_key.map_value.with_index do |destination_column, index|
+            origin_value = owner.read_attribute(origin_columns[index])
+            if target.has_attribute?(destination_column)
+              destination_value = target.attribute_in_database(aliases[destination_column] || destination_column)
+              # An unselected primary key can still be present as nil.
+              if !destination_value.nil? || !route.reference_destination_key.include?(destination_column)
+                destination_value
+              else
+                origin_value
+              end
+            else
+              origin_value
+            end
+          end
+        end
+
         def replace(record)
           if record
             raise_on_type_mismatch!(record)
@@ -121,14 +153,14 @@ module ActiveRecord
             if target && !stale_target?
               target.increment!(reflection.counter_cache_column, by, touch: reflection.options[:touch])
             else
-              update_counters_via_scope(klass, foreign_key.value_of(owner), by)
+              route = association_route
+              update_counters_via_scope(klass, route.origin_key.value_of(owner), by, route)
             end
           end
         end
 
-        def update_counters_via_scope(klass, values, by)
-          primary_key = ActiveRecord::Key.for(primary_key(klass))
-          scope = klass.all_queries_scope.where!(primary_key.where_hash(values))
+        def update_counters_via_scope(klass, values, by, route)
+          scope = klass.all_queries_scope.where!(route.destination_key.where_hash(values))
           scope.update_counters(reflection.counter_cache_column => by, touch: reflection.options[:touch])
         end
 
@@ -141,25 +173,31 @@ module ActiveRecord
         end
 
         def replace_keys(record, force: false)
-          target_key_values = record ? ActiveRecord::Key.for(primary_key(record.class)).map { |col| record.read_attribute(col) } : []
-          owner_key_values = foreign_key.map { |fk| owner.read_attribute(fk) }
-
-          return if !force && owner_key_values == target_key_values
-
-          owner_pk = ActiveRecord::Key.for(owner.class.primary_key)
-
-          # Preserve shared primary key columns only if another foreign key
-          # column can be cleared to disassociate the record.
-          preserve_owner_pk = record.nil? && foreign_key.any? { |key| !owner_pk.include?(key) }
-
-          foreign_key.each_with_index do |key, index|
-            next if preserve_owner_pk && owner_pk.include?(key)
-            owner.write_attribute(key, target_key_values[index])
+          if record.nil? && foreign_key_partially_overlaps_primary_key?
+            clear_reference_with_shared_primary_key(force: force)
+          else
+            route = reflection.association_route(origin_class: owner.class, destination_class: record&.class)
+            route.write(owner, record, force: force)
           end
         end
 
-        def primary_key(klass)
-          reflection.association_primary_key(klass)
+        def foreign_key_partially_overlaps_primary_key?
+          primary_key = owner.class.primary_key_definition
+          shared_count = foreign_key.count { |key| primary_key.include?(key) }
+          shared_count > 0 && shared_count < foreign_key.size
+        end
+
+        def clear_reference_with_shared_primary_key(force:)
+          primary_key = owner.class.primary_key_definition
+
+          foreign_key.each do |key|
+            next if primary_key.include?(key)
+            owner.write_attribute(key, nil)
+          end
+
+          if foreign_type && (force || !owner.read_attribute(foreign_type).nil?)
+            owner.write_attribute(foreign_type, nil)
+          end
         end
 
         def foreign_key_present?
@@ -172,10 +210,10 @@ module ActiveRecord
         end
 
         def stale_state
-          values = foreign_key.map do |fk|
+          value = foreign_key.map_value do |fk|
             owner.read_attribute(fk) { |n| owner.send(:missing_attribute, n, caller) }
           end
-          foreign_key.composite? ? (values if values.any?) : values.first
+          foreign_key.composite? ? (value if value.any?) : value
         end
     end
   end

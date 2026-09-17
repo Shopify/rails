@@ -4,6 +4,13 @@ module ActiveRecord
   module Associations
     class Preloader
       class ThroughAssociation < Association # :nodoc:
+        EMPTY_FIXED_VALUES = {}.freeze
+        private_constant :EMPTY_FIXED_VALUES
+
+        # Available records are matched by the component loaders, not the outer owner.
+        def associate_records_from_unscoped(*)
+        end
+
         def preloaded_records
           @preloaded_records ||= source_preloaders.flat_map(&:preloaded_records)
         end
@@ -62,6 +69,10 @@ module ActiveRecord
         end
 
         private
+          def destination_fixed_values
+            EMPTY_FIXED_VALUES
+          end
+
           def data_available?
             owners.all? { |owner| loaded?(owner) } ||
               through_preloaders.all?(&:run?) && source_preloaders.all?(&:run?)

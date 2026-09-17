@@ -1,3 +1,21 @@
+*   Respect explicit polymorphic type conditions when an inverse association's
+    type column is declared with an attribute alias.
+
+    *Matthew Draper*
+
+*   Fix reusing available records when preloading `has_one :through` associations.
+
+    Matching now uses each component association's keys rather than applying the
+    source association's keys to the outer owner, which could select an unrelated
+    record.
+
+    *Matthew Draper*
+
+*   Fix `find_by` with an associated record whose composite key includes an
+    array-valued column.
+
+    *Matthew Draper*
+
 *   Read PostgreSQL indexes and constraints from the table an unqualified name resolves to.
 
     `indexes`, `foreign_keys`, `check_constraints`, `unique_constraints` and

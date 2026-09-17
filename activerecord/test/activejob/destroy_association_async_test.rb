@@ -31,6 +31,21 @@ require "models/cpk/chapter_destroy_async"
 class DestroyAssociationAsyncTest < ActiveRecord::TestCase
   include ActiveJob::TestHelper
 
+  class ArrayKeyTarget < ActiveRecord::Base
+    self.table_name = "posts"
+    serialize :body, coder: YAML, type: Array
+  end
+
+  class ArrayKeyOwner < ActiveRecord::Base
+    self.table_name = "comments"
+    serialize :body, coder: YAML, type: Array
+    belongs_to :array_key_target,
+      class_name: "DestroyAssociationAsyncTest::ArrayKeyTarget",
+      foreign_key: :body,
+      primary_key: :body,
+      dependent: :destroy_async
+  end
+
   test "destroying a record destroys the has_many :through records using a job" do
     tag = Tag.create!(name: "Der be treasure")
     tag2 = Tag.create!(name: "Der be rum")
@@ -162,6 +177,52 @@ class DestroyAssociationAsyncTest < ActiveRecord::TestCase
 
     assert_difference -> { BookDestroyAsync.count }, -1 do
       perform_enqueued_jobs only: ActiveRecord::DestroyAssociationAsyncJob
+    end
+  ensure
+    EssayDestroyAsync.delete_all
+    BookDestroyAsync.delete_all
+  end
+
+  test "belongs to encodes an Array-valued key as a tuple" do
+    key = ["array", "identity"]
+    target = ArrayKeyTarget.create!(title: "Target", body: key)
+    other = ArrayKeyTarget.create!(title: "Other", body: ["other", "identity"])
+    owner = ArrayKeyOwner.create!(post_id: target.id, array_key_target: target)
+
+    arguments = ->(args) do
+      args.first[:association_primary_key_column] == ["body"] &&
+        args.first[:association_ids] == [[key]]
+    end
+    assert_enqueued_with(job: ActiveRecord::DestroyAssociationAsyncJob, args: arguments) do
+      owner.destroy
+    end
+
+    assert_difference -> { ArrayKeyTarget.count }, -1 do
+      perform_enqueued_jobs only: ActiveRecord::DestroyAssociationAsyncJob
+    end
+    assert_equal ["other", "identity"], other.reload.body
+  ensure
+    ArrayKeyOwner.delete_all
+    ArrayKeyTarget.delete_all
+  end
+
+  test "the job accepts legacy single-column argument shapes" do
+    owner = EssayDestroyAsync.create!(name: "Owner")
+    owner.delete
+
+    [false, true].product([false, true]).each do |column_array, value_tuple|
+      target = BookDestroyAsync.create!(name: "Legacy payload")
+      ActiveRecord::DestroyAssociationAsyncJob.perform_later(
+        owner_model_name: EssayDestroyAsync.name,
+        owner_id: owner.id,
+        association_class: BookDestroyAsync.name,
+        association_primary_key_column: column_array ? ["id"] : "id",
+        association_ids: value_tuple ? [[target.id]] : [target.id]
+      )
+
+      assert_difference -> { BookDestroyAsync.count }, -1 do
+        perform_enqueued_jobs only: ActiveRecord::DestroyAssociationAsyncJob
+      end
     end
   ensure
     EssayDestroyAsync.delete_all
