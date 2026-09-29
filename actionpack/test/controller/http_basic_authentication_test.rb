@@ -1,8 +1,11 @@
 # frozen_string_literal: true
 
 require "abstract_unit"
+require "active_support/testing/ractors_assertions"
 
 class HttpBasicAuthenticationTest < ActionController::TestCase
+  include ActiveSupport::Testing::RactorsAssertions
+
   class DummyController < ActionController::Base
     before_action :authenticate, only: :index
     before_action :authenticate_with_request, only: :display
@@ -203,6 +206,24 @@ class HttpBasicAuthenticationTest < ActionController::TestCase
 
     assert_response :unauthorized
     assert_equal "application/json", @response.media_type
+  end
+
+  test "authenticate with class method registers a shareable callback without freezing the given credentials" do
+    old_action = ActiveSupport::Ractors.unshareable_proc_action
+    ActiveSupport::Ractors.unshareable_proc_action = :raise
+    name, password, realm, message = +"David", +"Goliath", +"SuperSecret", +"Authentication Failed\n"
+
+    controller = Class.new(ActionController::Base) do
+      http_basic_authenticate_with(name:, password:, realm:, message:)
+    end
+
+    assert_ractor_shareable controller._process_action_callbacks.to_a.last.filter
+    assert_not_predicate name, :frozen?
+    assert_not_predicate password, :frozen?
+    assert_not_predicate realm, :frozen?
+    assert_not_predicate message, :frozen?
+  ensure
+    ActiveSupport::Ractors.unshareable_proc_action = old_action
   end
 
   private
