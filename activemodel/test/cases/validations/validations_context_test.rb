@@ -67,4 +67,48 @@ class ValidationsContextTest < ActiveModel::TestCase
     assert_includes topic.errors[:base], ERROR_MESSAGE
     assert_includes topic.errors[:base], ANOTHER_ERROR_MESSAGE
   end
+
+  test "validating on a context registers a shareable condition without freezing the given contexts" do
+    old_action = ActiveSupport::Ractors.unshareable_proc_action
+    ActiveSupport::Ractors.unshareable_proc_action = :raise
+    contexts = [+"context2", +"context1"]
+
+    model = Class.new do
+      include ActiveModel::Validations
+
+      validate :add_error, on: contexts
+
+      def add_error
+        errors.add(:base, ERROR_MESSAGE)
+      end
+    end
+
+    assert_not_predicate contexts.first, :frozen?
+    assert model.new.invalid?("context1")
+    assert_predicate model.new, :valid?
+  ensure
+    ActiveSupport::Ractors.unshareable_proc_action = old_action
+  end
+
+  test "validating except on a context registers a shareable condition without freezing the given contexts" do
+    old_action = ActiveSupport::Ractors.unshareable_proc_action
+    ActiveSupport::Ractors.unshareable_proc_action = :raise
+    contexts = [+"context1"]
+
+    model = Class.new do
+      include ActiveModel::Validations
+
+      validate :add_error, except_on: contexts
+
+      def add_error
+        errors.add(:base, ERROR_MESSAGE)
+      end
+    end
+
+    assert_not_predicate contexts.first, :frozen?
+    assert model.new.valid?("context1")
+    assert_predicate model.new, :invalid?
+  ensure
+    ActiveSupport::Ractors.unshareable_proc_action = old_action
+  end
 end

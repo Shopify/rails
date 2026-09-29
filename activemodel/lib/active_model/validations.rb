@@ -189,10 +189,11 @@ module ActiveModel
         end
 
         if options.key?(:except_on)
+          except_on = ActiveSupport::Ractors.make_shareable(Array(options[:except_on]), copy: true)
           options = options.dup
-          options[:except_on] = Array(options[:except_on])
+          options[:except_on] = except_on
           options[:unless] = [
-            ->(o) { options[:except_on].intersect?(Array(o.validation_context)) },
+            ->(o) { except_on.intersect?(Array(o.validation_context)) },
             *options[:unless]
           ]
         end
@@ -310,13 +311,13 @@ module ActiveModel
         @@predicates_for_validation_contexts = {}
 
         def predicate_for_validation_context(context)
-          context = context.is_a?(Array) ? context.sort : Array(context)
+          contexts = ActiveSupport::Ractors.make_shareable(context.is_a?(Array) ? context.sort : Array(context), copy: true)
 
-          @@predicates_for_validation_contexts[context] ||= -> (model) do
+          @@predicates_for_validation_contexts[contexts] ||= -> (model) do
             if model.validation_context.is_a?(Array)
-              model.validation_context.any? { |model_context| context.include?(model_context) }
+              model.validation_context.any? { |model_context| contexts.include?(model_context) }
             else
-              context.include?(model.validation_context)
+              contexts.include?(model.validation_context)
             end
           end
         end
