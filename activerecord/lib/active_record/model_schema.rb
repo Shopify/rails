@@ -201,9 +201,11 @@ module ActiveRecord
 
     module ClassMethods
       def schema_context # :nodoc:
-        return @schema_context if schema_loaded?
-        load_schema
-        @schema_context
+        return @schema_context if @schema_context
+
+        @load_schema_monitor.synchronize do
+          @schema_context ||= build_schema_context
+        end
       end
 
       def build_schema_context # :nodoc:
@@ -571,18 +573,22 @@ module ActiveRecord
         return if schema_loaded?
 
         @load_schema_monitor.synchronize do
-          unless schema_loaded? || @schema_context
-            @schema_context = build_schema_context
-            @schema_context.load_schema!
-            ActiveSupport::Ractors.make_shareable(@schema_context)
-            unless @schema_hooks_loaded
-              load_schema!
-              @schema_hooks_loaded = true
+          unless schema_loaded? || @schema_loading
+            begin
+              @schema_loading = true
+              schema_context.load_schema!
+              ActiveSupport::Ractors.make_shareable(@schema_context)
+              unless @schema_hooks_loaded
+                load_schema!
+                @schema_hooks_loaded = true
+              end
+            rescue
+              reload_schema_from_cache # If the schema loading failed half way through, we must reset the state.
+              raise
+            ensure
+              @schema_loading = false
             end
           end
-        rescue
-          reload_schema_from_cache # If the schema loading failed half way through, we must reset the state.
-          raise
         end
       end
 

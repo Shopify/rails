@@ -12,8 +12,7 @@ module ActiveRecord
       class Attributes # :nodoc:
         attr_reader :context, :defaults
 
-        def initialize(context)
-          attribute_set = context.attribute_set
+        def initialize(context, attribute_set)
           context.model_class.apply_pending_attribute_modifications(attribute_set)
 
           @defaults = attribute_set
@@ -27,7 +26,7 @@ module ActiveRecord
         end
 
         def builder
-          primary_key_defaults = defaults.except(*(context.model_class.column_names - Array(context.model_class.primary_key)))
+          primary_key_defaults = defaults.except(*(context.column_names - Array(context.primary_key)))
           ActiveModel::AttributeSet::Builder.new(types, primary_key_defaults)
         end
 
@@ -36,13 +35,7 @@ module ActiveRecord
         end
       end
 
-      attr_reader :model_class, :columns_hash, :columns, :column_names,
-                  :content_columns, :query_constraints_list,
-                  :composite_query_constraints_list
-
-      attr_reader :timestamp_attributes_for_create_in_model,
-        :timestamp_attributes_for_update_in_model,
-        :all_timestamp_attributes_in_model
+      attr_reader :model_class
 
       def initialize(model_class)
         @model_class = model_class
@@ -51,7 +44,53 @@ module ActiveRecord
       end
 
       def attributes
-        ActiveSupport::Ractors[@attributes_key] ||= Attributes.new(self)
+        load_schema
+        initialize_attributes
+      end
+
+      def columns_hash
+        load_schema
+        @columns_hash
+      end
+
+      def columns
+        load_schema
+        @columns
+      end
+
+      def column_names
+        load_schema
+        @column_names
+      end
+
+      def content_columns
+        load_schema
+        @content_columns
+      end
+
+      def query_constraints_list
+        load_schema
+        @query_constraints_list
+      end
+
+      def composite_query_constraints_list
+        load_schema
+        @composite_query_constraints_list
+      end
+
+      def timestamp_attributes_for_create_in_model
+        load_schema
+        @timestamp_attributes_for_create_in_model
+      end
+
+      def timestamp_attributes_for_update_in_model
+        load_schema
+        @timestamp_attributes_for_update_in_model
+      end
+
+      def all_timestamp_attributes_in_model
+        load_schema
+        @all_timestamp_attributes_in_model
       end
 
       def table_name
@@ -81,6 +120,7 @@ module ActiveRecord
       end
 
       def cached_find_by_statement(connection, key, &block) # :nodoc:
+        load_schema
         cache = find_by_statement_cache[connection.prepared_statements]
         cache.compute_if_absent(key) { StatementCache.create(connection, &block) }
       end
@@ -98,10 +138,8 @@ module ActiveRecord
       end
 
       def attribute_set
-        attributes_hash = model_class.columns_hash.transform_values do |column|
-          ActiveModel::Attribute.from_database(column.name, column.default, model_class.type_for_column(column))
-        end
-        ActiveModel::AttributeSet.new(attributes_hash)
+        load_schema
+        build_attribute_set
       end
 
       def freeze
@@ -142,12 +180,27 @@ module ActiveRecord
         @all_timestamp_attributes_in_model = (@timestamp_attributes_for_create_in_model + @timestamp_attributes_for_update_in_model).freeze
 
         model_class.make_pending_attribute_modifications_shareable
-        attributes
+        initialize_attributes
 
         @schema_loaded = true
       end
 
       private
+        def load_schema
+          model_class.load_schema unless schema_loaded?
+        end
+
+        def initialize_attributes
+          ActiveSupport::Ractors[@attributes_key] ||= Attributes.new(self, build_attribute_set)
+        end
+
+        def build_attribute_set
+          attributes_hash = @columns_hash.transform_values do |column|
+            ActiveModel::Attribute.from_database(column.name, column.default, model_class.type_for_column(column))
+          end
+          ActiveModel::AttributeSet.new(attributes_hash)
+        end
+
         def derive_query_constraints_list(primary_key)
           if model_class.base_class? || primary_key != model_class.base_class.primary_key
             primary_key if primary_key.is_a?(Array)

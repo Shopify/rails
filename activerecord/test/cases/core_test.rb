@@ -301,6 +301,7 @@ class CoreTest < ActiveRecord::TestCase
           def self.name = "ractor_safe_schema_context"
           self.table_name = "topics"
         end
+        model.load_schema
         context = model.schema_context
 
         assert_ractor_shareable context
