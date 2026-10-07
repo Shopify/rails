@@ -50,7 +50,10 @@ module ActiveRecord
       end
 
       def attributes
-        ActiveSupport::Ractors[@attributes_key] ||= Attributes.new(self)
+        # Attribute prototypes memoize casts and callable defaults, and
+        # define_attribute mutates their type/default maps. They are not
+        # immutable schema metadata and must remain local to their Ractor.
+        ActiveSupport::Ractors.store_if_absent(@attributes_key) { Attributes.new(self) }
       end
 
       def table_name
