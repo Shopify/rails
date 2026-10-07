@@ -1,6 +1,5 @@
 # frozen_string_literal: true
 
-require "concurrent/map"
 require "active_support/core_ext/module/attribute_accessors"
 require "active_support/core_ext/object/deep_dup"
 require "action_view/template/resolver"
@@ -53,13 +52,49 @@ module ActionView
     register_detail(:variants) { [] }
     register_detail(:handlers) { Template::Handlers.extensions }
 
+    class DigestCache # :nodoc:
+      def initialize
+        @entries = ActiveSupport::Ractors::TVar.new(ActiveSupport::Ractors::KeyLockHash.new)
+        freeze
+      end
+
+      def [](key)
+        @entries.value[key]
+      end
+
+      def []=(key, value)
+        @entries.value[key] = value
+      end
+
+      def fetch(key, &block)
+        @entries.value.fetch(key, &block)
+      end
+
+      def clear
+        entries = ActiveSupport::Ractors::KeyLockHash.new
+        ActiveSupport::Ractors.atomically { @entries.value = entries }
+        self
+      end
+    end
+
     class DetailsKey # :nodoc:
       alias :eql? :equal?
 
       @details_keys = ActiveSupport::Ractors::TVar.new({}.freeze)
+      @digest_caches = ActiveSupport::Ractors::TVar.new({}.freeze)
 
       def self.digest_cache(details)
-        digest_cache_store.compute_if_absent(details_cache_key(details)) { Concurrent::Map.new }
+        key = details_cache_key(details)
+        @digest_caches.value.fetch(key) do
+          cache = DigestCache.new
+          ActiveSupport::Ractors.atomically do
+            caches = @digest_caches.value
+            caches.fetch(key) do
+              @digest_caches.value = caches.merge(key => cache)
+              cache
+            end
+          end
+        end
       end
 
       def self.details_cache_key(details)
@@ -87,23 +122,23 @@ module ActionView
           resolver.clear_cache
         end
         ActionView::LookupContext.reset_view_context_class
-        ActiveSupport::Ractors.atomically { @details_keys.value = {}.freeze }
-        digest_cache_store.clear
+        caches = ActiveSupport::Ractors.atomically do
+          previous = @digest_caches.value
+          @details_keys.value = {}.freeze
+          @digest_caches.value = {}.freeze
+          previous
+        end
+        caches.each_value(&:clear)
       end
 
       def self.digest_caches
-        digest_cache_store.values
+        @digest_caches.value.values
       end
 
       def self.details_keys
         @details_keys.value
       end
       private_class_method :details_keys
-
-      def self.digest_cache_store
-        ActiveSupport::Ractors.store_if_absent(:action_view_digest_caches) { Concurrent::Map.new }
-      end
-      private_class_method :digest_cache_store
     end
 
     def self.reset_view_context_class

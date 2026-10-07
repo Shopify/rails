@@ -246,6 +246,24 @@ if RUBY_VERSION >= "4.0"
       end
       assert_not_same first, replacement
     end
+
+    test "digest caches survive request ractors and clear existing handles globally" do
+      cache = on_ractor do
+        worker_cache = ActionView::LookupContext::DetailsKey.digest_cache(
+          locale: [:en], formats: nil, variants: [], handlers: [:erb])
+        worker_cache["posts/show"] = "retained digest"
+        worker_cache
+      end
+      digest = on_ractor do
+        ActionView::LookupContext::DetailsKey.digest_cache(
+          locale: [:en], formats: nil, variants: [], handlers: [:erb])["posts/show"]
+      end
+      assert_equal "retained digest", digest
+      assert_includes ActionView::LookupContext::DetailsKey.digest_caches, cache
+
+      ActionView::LookupContext::DetailsKey.clear
+      assert_nil on_ractor(cache) { |cache| cache["posts/show"] }
+    end
   end
 end
 
