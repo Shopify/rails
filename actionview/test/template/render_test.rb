@@ -1116,7 +1116,7 @@ class CachedCollectionViewRenderTest < ActiveSupport::TestCase
 
     class ModelType
       def to_partial_path
-        "model_types/model_type"
+        @partial_path ||= +"model_types/model_type"
       end
     end
 
@@ -1147,6 +1147,27 @@ class CachedCollectionViewRenderTest < ActiveSupport::TestCase
       rendered_in_ractor = on_ractor { ObjectRenderingRactorTest.render_object_partial }
 
       assert_equal rendered_on_main, rendered_in_ractor
+    end
+
+    test "prefixed names survive request ractors without freezing input paths" do
+      Mime.eager_load!
+      results = 2.times.map do
+        on_ractor do
+          prefix = +"admin/posts"
+          details = { locale: [:en], formats: [:html], variants: [], handlers: [:erb] }
+          lookup = ActionView::LookupContext.new([], details, [prefix])
+          renderer = ActionView::ObjectRenderer.new(lookup, {})
+          view = ActionView::Base.with_context(lookup)
+          model = ModelType.new
+          prefixed = renderer.send(:partial_path, model, view)
+          model.to_partial_path << "-changed"
+          prefix << "-changed"
+          [prefixed, model.to_partial_path, prefix]
+        end
+      end
+
+      assert_same results.first.first, results.last.first
+      assert_equal ["admin/model_types/model_type", "model_types/model_type-changed", "admin/posts-changed"], results.first
     end
   end
 

@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require "concurrent/map"
+require "active_support/ractors"
 
 module ActionView
   # This class defines the interface for a renderer. Each class that
@@ -30,6 +30,9 @@ module ActionView
     end
 
     module ObjectRendering # :nodoc:
+      PREFIXED_PARTIAL_NAMES = ActiveSupport::Ractors::KeyLockHash.new
+      private_constant :PREFIXED_PARTIAL_NAMES
+
       def initialize(lookup_context, options)
         super
         @context_prefix = lookup_context.prefixes.first
@@ -79,15 +82,19 @@ module ActionView
           end
 
           if view.prefix_partial_path_with_controller_namespace
-            prefixed_partial_names[@context_prefix][path] ||= merge_prefix_into_object_path(@context_prefix, path.dup)
+            cache = prefixed_partial_names
+            cache[path] || cache.update(path) do |cached|
+              cached || merge_prefix_into_object_path(@context_prefix, path.dup)
+            end
           else
             path
           end
         end
 
         def prefixed_partial_names
-          ActiveSupport::Ractors.store_if_absent(:action_view_prefixed_partial_names) do
-            Concurrent::Map.new { |h, k| h.compute_if_absent(k) { Concurrent::Map.new } }
+          PREFIXED_PARTIAL_NAMES[@context_prefix] || begin
+            cache = ActiveSupport::Ractors::KeyLockHash.new
+            PREFIXED_PARTIAL_NAMES.update(@context_prefix) { |cached| cached || cache }
           end
         end
 
