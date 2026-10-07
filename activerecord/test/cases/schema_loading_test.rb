@@ -17,6 +17,22 @@ module SchemaLoadCounter
 end
 
 class SchemaLoadingTest < ActiveRecord::TestCase
+  def test_schema_context_loads_schema_when_columns_are_requested
+    klass = define_model
+    context = nil
+
+    assert_no_queries(include_schema: true) do
+      context = klass.schema_context
+      assert_same context, klass.schema_context
+      assert_not_predicate context, :schema_loaded?
+    end
+
+    assert_includes context.column_names, "id"
+    assert_same context, klass.schema_context
+    assert_predicate context, :schema_loaded?
+    assert_equal 1, klass.load_schema_calls
+  end
+
   def test_basic_model_is_loaded_once
     klass = define_model
     klass.new
