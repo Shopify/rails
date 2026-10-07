@@ -3,7 +3,6 @@
 
 require "active_support/inspect_backport"
 require "active_support/ractors"
-require "concurrent/map"
 require "openssl"
 
 module ActiveSupport
@@ -63,25 +62,13 @@ module ActiveSupport
   class CachingKeyGenerator
     def initialize(key_generator)
       @key_generator = key_generator
-      @cache_keys = Concurrent::Map.new
-      @ractor_key = nil
-    end
-
-    def freeze
-      @ractor_key = "_caching_key_generator_#{object_id}".to_sym
-      ActiveSupport::Ractors[@ractor_key] = @cache_keys
-      @cache_keys = nil
-      super
+      @cache_keys = ActiveSupport::Ractors::KeyLockHash.new
     end
 
     # Returns a derived key suitable for use.
     def generate_key(*args)
-      cache_keys[args.join("|")] ||= @key_generator.generate_key(*args)
+      key = args.join("|")
+      @cache_keys[key] || @cache_keys.update(key) { |cached| cached || @key_generator.generate_key(*args) }
     end
-
-    private
-      def cache_keys
-        @cache_keys || (ActiveSupport::Ractors[@ractor_key] ||= Concurrent::Map.new)
-      end
   end
 end

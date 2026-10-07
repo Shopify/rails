@@ -110,7 +110,7 @@ else
     include ActiveSupport::Testing::Isolation
     include ActiveSupport::Testing::RactorsAssertions
 
-    test "CachingKeyGenerator can work across ractors" do
+    test "CachingKeyGenerator retains keys after the producing ractor exits" do
       # OpenSSL::Digest are not Ractor-safe, but the fix is already merged upstream. This test can be updated
       # to use our implementation once a version of Ruby ships with ruby/openssl@502bc6c
       key_generator = Class.new(ActiveSupport::KeyGenerator) do
@@ -125,7 +125,12 @@ else
         caching_generator.generate_key("some_salt", 32)
       end
 
-      assert_equal key, caching_generator.generate_key("some_salt", 32)
+      reused_key = on_ractor(caching_generator) do |caching_generator|
+        caching_generator.generate_key("some_salt", 32)
+      end
+
+      assert_same key, reused_key
+      assert_same key, caching_generator.generate_key("some_salt", 32)
     end
   end
 end
