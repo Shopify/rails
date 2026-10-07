@@ -1,13 +1,15 @@
 # :markup: markdown
 # frozen_string_literal: true
 
+require "active_support/ractors"
+
 module ActiveSupport
   module Testing
     module RactorsAssertions # :nodoc: all
       private
         if RUBY_VERSION >= "4.0"
           def on_ractor(*args, &block)
-            block = Ractor.shareable_proc(&block)
+            block = ActiveSupport::Ractors.shareable_proc(&block)
 
             port = Ractor::Port.new
 
@@ -19,15 +21,15 @@ module ActiveSupport
           end
 
           def assert_ractor_make_shareable(obj)
-            assert_nothing_raised { Ractor.make_shareable(obj) }
+            assert_nothing_raised { ActiveSupport::Ractors.make_shareable(obj) }
           end
 
           def assert_ractor_shareable(obj)
-            assert Ractor.shareable?(obj), "Expected #{obj.inspect} to be shareable, but it is not."
+            assert ActiveSupport::Ractors.shareable?(obj), "Expected #{obj.inspect} to be shareable, but it is not."
           end
 
           def assert_not_ractor_shareable(obj)
-            assert_not Ractor.shareable?(obj), "Expected #{obj.inspect} to not be shareable, but it is."
+            assert_not ActiveSupport::Ractors.shareable?(obj), "Expected #{obj.inspect} to not be shareable, but it is."
           end
         else
           def on_ractor(*args)

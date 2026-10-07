@@ -168,7 +168,7 @@ if RUBY_VERSION >= "4.0" && ENV["RACK"] == "head"
 
         ractorize!
 
-        assert Ractor.shareable?(Post._reflections)
+        assert ActiveSupport::Ractors.shareable?(Post._reflections)
         assert_equal "Comment", on_ractor { Post.reflect_on_association(:comment).klass.name }
       end
 

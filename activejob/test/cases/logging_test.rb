@@ -518,7 +518,7 @@ class LoggingRactorTest < ActiveSupport::TestCase
   include ActiveSupport::Testing::RactorsAssertions
 
   def test_logger_is_readable_from_a_non_main_ractor
-    ActiveJob::Base.logger = Ractor.make_shareable(ActiveSupport::Logger.new(nil))
+    ActiveJob::Base.logger = ActiveSupport::Ractors.make_shareable(ActiveSupport::Logger.new(nil))
 
     assert on_ractor { ActiveJob::Base.logger.equal?(HelloJob.new.logger) }
   end

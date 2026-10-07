@@ -238,7 +238,7 @@ module ActiveSupport
       def notifier
         return @notifier if ActiveSupport::Ractors.main?
 
-        Ractor[:__notifier] ||= begin
+        ActiveSupport::Ractors[:__notifier] ||= begin
           fanout = Fanout.new
           set_subscriptions(fanout)
 

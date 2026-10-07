@@ -150,7 +150,7 @@ class RactorLoggerTest < ActiveSupport::TestCase
       path = log_path("shareable_writer.log")
       writer = ActiveSupport::Ractors::Logger::Writer.spawn(path)
 
-      assert Ractor.shareable?(writer)
+      assert ActiveSupport::Ractors.shareable?(writer)
 
       writer.async("hello\n")
       writer.flush
@@ -164,9 +164,9 @@ class RactorLoggerTest < ActiveSupport::TestCase
       path = log_path("shareable.log")
       logger = ActiveSupport::TaggedLogging.ractor_logger(path)
 
-      Ractor.make_shareable(logger)
+      ActiveSupport::Ractors.make_shareable(logger)
 
-      assert Ractor.shareable?(logger)
+      assert ActiveSupport::Ractors.shareable?(logger)
       logger.tagged("shareable") { logger.info("hello") }
       logger.flush
 
@@ -178,7 +178,7 @@ class RactorLoggerTest < ActiveSupport::TestCase
     test "a shareable logger logs from a non-main Ractor" do
       path = log_path("from_ractor.log")
       logger = ActiveSupport::TaggedLogging.ractor_logger(path)
-      Ractor.make_shareable(logger)
+      ActiveSupport::Ractors.make_shareable(logger)
 
       Ractor.new(logger) do |lg|
         lg.tagged("request-id") { lg.info("from ractor") }

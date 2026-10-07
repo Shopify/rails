@@ -740,7 +740,7 @@ module ActiveSupport
       test "a shareable event reporter notifies its subscribers from other Ractors" do
         reporter = ActiveSupport::EventReporter.new
         reporter.subscribe(Class.new { def emit(event); end }.new)
-        Ractor.make_shareable(reporter)
+        ActiveSupport::Ractors.make_shareable(reporter)
 
         subscriber_count = on_ractor(reporter) do |reporter|
           reporter.notify("ractor_event")

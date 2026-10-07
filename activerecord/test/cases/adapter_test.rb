@@ -436,7 +436,7 @@ module ActiveRecord
     private
       def assert_ractor_shareable(obj)
         # rubocop:disable Minitest/AssertWithExpectedArgument
-        assert(Ractor.shareable?(obj), -> { "Expected #{obj} to be shareable, but it wasn't" })
+        assert(ActiveSupport::Ractors.shareable?(obj), -> { "Expected #{obj} to be shareable, but it wasn't" })
         # rubocop:enable Minitest/AssertWithExpectedArgument
       end
   end

@@ -20,7 +20,7 @@ module ActiveSupport
         def spawn(logdev = nil, shift_age = 0, shift_size = 1048576, binmode: false, shift_period_suffix: "%Y%m%d")
           device = build_logdev(logdev, shift_age, shift_size, binmode, shift_period_suffix)
           start_consumer(@port, device)
-          ::Ractor.make_shareable(self)
+          ActiveSupport::Ractors.make_shareable(self)
         end
 
         def async(message)

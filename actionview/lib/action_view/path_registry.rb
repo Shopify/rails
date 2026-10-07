@@ -61,8 +61,8 @@ module ActionView # :nodoc:
         resolver.freeze
       end
 
-      @file_system_resolver_mutex.synchronize { Ractor.make_shareable(@file_system_resolvers) }
-      Ractor.make_shareable(@view_paths_by_class)
+      @file_system_resolver_mutex.synchronize { ActiveSupport::Ractors.make_shareable(@file_system_resolvers) }
+      ActiveSupport::Ractors.make_shareable(@view_paths_by_class)
     end
   end
 end

@@ -275,7 +275,7 @@ class ReflectionTest < ActiveRecord::TestCase
       ActiveSupport::Ractors.with(unshareable_proc_action: :raise) do
         Categorization.make_reflections_shareable!
 
-        assert Ractor.shareable?(Categorization._reflections)
+        assert ActiveSupport::Ractors.shareable?(Categorization._reflections)
 
         result = Ractor.new do
           belongs_to = Categorization.reflect_on_association(:category)
@@ -304,7 +304,7 @@ class ReflectionTest < ActiveRecord::TestCase
       ActiveSupport::Ractors.with(unshareable_proc_action: :raise) do
         Customer.make_reflections_shareable!
 
-        assert Ractor.shareable?(Customer.aggregate_reflections)
+        assert ActiveSupport::Ractors.shareable?(Customer.aggregate_reflections)
 
         mapping, klass_name = Ractor.new do
           reflection = Customer.reflect_on_aggregation(:balance)
@@ -328,7 +328,7 @@ class ReflectionTest < ActiveRecord::TestCase
       ActiveSupport::Ractors.with(unshareable_proc_action: :raise) do
         model.make_reflections_shareable!
 
-        assert Ractor.shareable?(model.reflect_on_association(:parent).scope)
+        assert ActiveSupport::Ractors.shareable?(model.reflect_on_association(:parent).scope)
       end
     end
   end

@@ -1,6 +1,8 @@
 # :markup: markdown
 # frozen_string_literal: true
 
+require "active_support/ractors"
+
 module ActiveSupport
   module ClassAttribute # :nodoc:
     class << self
@@ -8,12 +10,7 @@ module ActiveSupport
         ivar_name = :"@#{reader_method}"
         owner.instance_variable_set(ivar_name, value)
 
-        owner_proc =
-          if defined?(Ractor.shareable_proc)
-            Ractor.shareable_proc { owner }
-          else
-            -> { owner }
-          end
+        owner_proc = ActiveSupport::Ractors.shareable_proc { owner }
 
         # If redefining on a singleton class, and including instance_reader, we
         # need to update it to use self.singleton_class instead of self.class

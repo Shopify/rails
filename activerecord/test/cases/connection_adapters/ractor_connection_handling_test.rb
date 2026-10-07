@@ -524,8 +524,8 @@ module ActiveRecord
           end
 
           setup do
-            Ractor.make_shareable(ActiveRecord.query_transformers)
-            Ractor.make_shareable(ActiveRecord.schema_ignored_tables)
+            ActiveSupport::Ractors.make_shareable(ActiveRecord.query_transformers)
+            ActiveSupport::Ractors.make_shareable(ActiveRecord.schema_ignored_tables)
             install_shareable_notifications_snapshot
           end
 
@@ -611,8 +611,8 @@ module ActiveRecord
           end
 
           def test_query_emits_one_worker_side_notification_with_transformers_applied_once
-            transformer = Ractor.shareable_lambda(self: nil) { |sql, _adapter| sql + " /* transformed */" }
-            ActiveRecord.query_transformers = Ractor.make_shareable([transformer])
+            transformer = ActiveSupport::Ractors.shareable_lambda(self: nil) { |sql, _adapter| sql + " /* transformed */" }
+            ActiveRecord.query_transformers = ActiveSupport::Ractors.make_shareable([transformer])
 
             sqls = on_ractor do
               events = []
@@ -746,9 +746,7 @@ module ActiveRecord
 
           private
             def install_shareable_notifications_snapshot
-              ActiveSupport::Notifications.notifier_subscriptions = Ractor.make_shareable(
-                { string_subscribers: {}, other_subscribers: [] }, copy: true
-              )
+              ActiveSupport::Notifications.notifier_subscriptions = ActiveSupport::Ractors.make_shareable({ string_subscribers: {}, other_subscribers: [] }, copy: true)
             end
 
             def driver_error_namespace

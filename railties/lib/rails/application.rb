@@ -678,8 +678,8 @@ module Rails
 
       if defined?(AbstractController::Base)
         [AbstractController::Base, *AbstractController::Base.descendants].each do |controller|
-          Ractor.make_shareable(controller.config)
-          Ractor.make_shareable(controller._wrapper_options) if controller.include?(ActionController::ParamsWrapper)
+          ActiveSupport::Ractors.make_shareable(controller.config)
+          ActiveSupport::Ractors.make_shareable(controller._wrapper_options) if controller.include?(ActionController::ParamsWrapper)
         end
       end
 
@@ -689,16 +689,16 @@ module Rails
 
       if defined?(ActiveJob::Base)
         [ActiveJob::Base, *ActiveJob::Base.descendants].each do |job|
-          Ractor.make_shareable(job.queue_adapter)
+          ActiveSupport::Ractors.make_shareable(job.queue_adapter)
         end
       end
 
-      Ractor.make_shareable(self)
-      Ractor.make_shareable(Rails.env)
-      Ractor.make_shareable(Rails.logger)
-      Ractor.make_shareable(Rails.event)
-      Ractor.make_shareable(Rails.error)
-      Ractor.make_shareable(Rails.backtrace_cleaner)
+      ActiveSupport::Ractors.make_shareable(self)
+      ActiveSupport::Ractors.make_shareable(Rails.env)
+      ActiveSupport::Ractors.make_shareable(Rails.logger)
+      ActiveSupport::Ractors.make_shareable(Rails.event)
+      ActiveSupport::Ractors.make_shareable(Rails.error)
+      ActiveSupport::Ractors.make_shareable(Rails.backtrace_cleaner)
       ActionView::DependencyTracker.share_registry if defined?(ActionView)
 
       begin
