@@ -2,6 +2,7 @@
 
 require "concurrent/map"
 require "active_support/core_ext/module/attribute_accessors"
+require "active_support/core_ext/object/deep_dup"
 require "action_view/template/resolver"
 
 module ActionView
@@ -55,6 +56,8 @@ module ActionView
     class DetailsKey # :nodoc:
       alias :eql? :equal?
 
+      @details_keys = ActiveSupport::Ractors::TVar.new({}.freeze)
+
       def self.digest_cache(details)
         digest_cache_store.compute_if_absent(details_cache_key(details)) { Concurrent::Map.new }
       end
@@ -67,7 +70,15 @@ module ActionView
               details[:formats] = normalized
             end
           end
-          details_keys[details] ||= TemplateDetails::Requested.new(**details)
+          details = details.deep_dup
+          requested = TemplateDetails::Requested.new(**details)
+          ActiveSupport::Ractors.atomically do
+            keys = @details_keys.value
+            keys.fetch(details) do
+              @details_keys.value = keys.merge(details => requested)
+              requested
+            end
+          end
         end
       end
 
@@ -76,7 +87,7 @@ module ActionView
           resolver.clear_cache
         end
         ActionView::LookupContext.reset_view_context_class
-        details_keys.clear
+        ActiveSupport::Ractors.atomically { @details_keys.value = {}.freeze }
         digest_cache_store.clear
       end
 
@@ -85,7 +96,7 @@ module ActionView
       end
 
       def self.details_keys
-        ActiveSupport::Ractors.store_if_absent(:action_view_details_keys) { Concurrent::Map.new }
+        @details_keys.value
       end
       private_class_method :details_keys
 
