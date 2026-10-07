@@ -62,12 +62,15 @@ module ActionView
         @entries.value[key]
       end
 
-      def []=(key, value)
-        @entries.value[key] = value
-      end
-
-      def fetch(key, &block)
-        @entries.value.fetch(key, &block)
+      def compute_if_absent(key)
+        entries = @entries.value
+        entries[key] || begin
+          # Build outside the lock: dependency lookup may populate other
+          # shared caches. Publish into the generation we started with so
+          # an in-flight computation cannot undo a concurrent clear.
+          value = yield
+          entries.update(key) { |cached| cached || value }
+        end
       end
 
       def clear

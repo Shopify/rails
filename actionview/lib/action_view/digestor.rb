@@ -19,17 +19,13 @@ module ActionView
           cache_key = "#{name}.#{format}.#{dependencies_suffix}"
         end
 
-        # this is a correctly done double-checked locking idiom
-        # (Concurrent::Map's lookups have volatile semantics)
-        finder.digest_cache[cache_key] || digest_mutex.synchronize do
-          finder.digest_cache.fetch(cache_key) do # re-check under lock
-            path = TemplatePath.parse(name)
-            root = tree(path.to_s, finder, path.partial?)
-            dependencies.each do |injected_dep|
-              root.children << Injected.new(injected_dep, nil, nil)
-            end if dependencies
-            finder.digest_cache[cache_key] = root.digest(finder)
-          end
+        finder.digest_cache.compute_if_absent(cache_key) do
+          path = TemplatePath.parse(name)
+          root = tree(path.to_s, finder, path.partial?)
+          dependencies.each do |injected_dep|
+            root.children << Injected.new(injected_dep, nil, nil)
+          end if dependencies
+          root.digest(finder)
         end
       end
 
@@ -66,11 +62,6 @@ module ActionView
       end
 
       private
-        # Digest caches are per-Ractor, so the mutex is too.
-        def digest_mutex
-          ActiveSupport::Ractors.store_if_absent(:action_view_digest_mutex) { Mutex.new }
-        end
-
         def find_template(finder, name, prefixes, partial, keys)
           finder.disable_cache do
             finder.find(name, prefixes, partial, keys)
@@ -93,19 +84,21 @@ module ActionView
         @children     = children
       end
 
-      def digest(finder, stack = [])
-        ActiveSupport::Digest.hexdigest("#{template.source}-#{dependency_digest(finder, stack)}")
+      def digest(finder, stack = [], cache = {})
+        ActiveSupport::Digest.hexdigest("#{template.source}-#{dependency_digest(finder, stack, cache)}")
       end
 
-      def dependency_digest(finder, stack)
+      def dependency_digest(finder, stack, cache)
         children.map do |node|
           if stack.include?(node)
             false
           else
-            finder.digest_cache[node.name] ||= begin
-                                                 stack.push node
-                                                 node.digest(finder, stack).tap { stack.pop }
-                                               end
+            # A cycle's intermediate digest depends on this traversal's
+            # stack. Only completed root digests belong in the shared cache.
+            cache[node] ||= begin
+              stack.push node
+              node.digest(finder, stack, cache).tap { stack.pop }
+            end
           end
         end.join("-")
       end
@@ -122,11 +115,11 @@ module ActionView
     class Partial < Node; end
 
     class Missing < Node
-      def digest(finder, _ = []) "" end
+      def digest(*) "" end
     end
 
     class Injected < Node
-      def digest(finder, _ = []) name end
+      def digest(*) name end
     end
 
     class NullLogger

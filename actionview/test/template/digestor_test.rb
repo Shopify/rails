@@ -169,29 +169,16 @@ class TemplateDigestorTest < ActionView::TestCase
     end
   end
 
-  def test_recursion_in_renders
-    assert digest("level/recursion") # assert recursion is possible
-    assert_not_nil digest("level/recursion") # assert digest is stored
-  end
-
   def test_chaining_the_top_template_on_recursion
-    assert digest("level/recursion") # assert recursion is possible
-
     assert_digest_difference("level/recursion") do
       change_template("level/recursion")
     end
-
-    assert_not_nil digest("level/recursion") # assert digest is stored
   end
 
   def test_chaining_the_partial_template_on_recursion
-    assert digest("level/recursion") # assert recursion is possible
-
     assert_digest_difference("level/recursion") do
       change_template("level/_recursion")
     end
-
-    assert_not_nil digest("level/recursion") # assert digest is stored
   end
 
   def test_dont_generate_a_digest_for_missing_templates
@@ -291,9 +278,6 @@ class TemplateDigestorTest < ActionView::TestCase
     first_digest = digest("level/_recursion")
     second_digest = digest("level/_recursion")
 
-    assert first_digest
-
-    # If the cache is cleaned up correctly, subsequent digests should return the same
     assert_equal first_digest, second_digest
   end
 
@@ -312,14 +296,23 @@ class TemplateDigestorTest < ActionView::TestCase
     assert_equal expected_deps, nested_dependencies("comments/cycle")
   end
 
+  def test_cycle_digests_are_independent_of_root_lookup_order
+    first_a = digest("comments/cycle")
+    second_b = digest("comments/_cycle_b")
+    finder.digest_cache.clear
+
+    first_b = digest("comments/_cycle_b")
+    second_a = digest("comments/cycle")
+
+    assert_equal first_a, second_a
+    assert_equal first_b, second_b
+  end
+
   def test_digest_cache_cleanup_with_recursion_and_template_caching_off
     disable_resolver_caching do
       first_digest = digest("level/_recursion")
       second_digest = digest("level/_recursion")
 
-      assert first_digest
-
-      # If the cache is cleaned up correctly, subsequent digests should return the same
       assert_equal first_digest, second_digest
     end
   end

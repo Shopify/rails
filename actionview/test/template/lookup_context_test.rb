@@ -198,6 +198,29 @@ class LookupContextTest < ActiveSupport::TestCase
     @lookup_context.prefixes = ["foo"]
     assert_equal ["foo"], @lookup_context.prefixes
   end
+
+  test "clearing a digest cache prevents in-flight work from repopulating it" do
+    cache = ActionView::LookupContext::DigestCache.new
+    entered = Queue.new
+    release = Queue.new
+    worker = Thread.new do
+      cache.compute_if_absent("template") do
+        entered << true
+        release.pop
+        "stale digest"
+      end
+    end
+    entered.pop
+    cache.clear
+    cache.compute_if_absent("template") { "fresh digest" }
+    release << true
+    worker.value
+
+    assert_equal "fresh digest", cache["template"]
+  ensure
+    release << true if release
+    worker&.join
+  end
 end
 
 if RUBY_VERSION >= "4.0"
@@ -251,7 +274,7 @@ if RUBY_VERSION >= "4.0"
       cache = on_ractor do
         worker_cache = ActionView::LookupContext::DetailsKey.digest_cache(
           locale: [:en], formats: nil, variants: [], handlers: [:erb])
-        worker_cache["posts/show"] = "retained digest"
+        worker_cache.compute_if_absent("posts/show") { "retained digest" }
         worker_cache
       end
       digest = on_ractor do
