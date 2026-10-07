@@ -3,6 +3,7 @@
 # :markup: markdown
 
 require "cases/helper"
+require "active_support/core_ext/object/with"
 require "active_support/testing/ractors_assertions"
 require "models/course"
 require "models/topic"
@@ -715,6 +716,41 @@ module ActiveRecord
 
             assert_equal expected, on_ractor { Topic.count }
             assert_equal expected, on_ractor { WorkerRactorOnlyModel.count }
+          end
+
+          def test_find_by_statement_survives_the_producing_ractor_and_is_invalidated
+            model = Class.new(ActiveRecord::Base)
+            model.table_name = widgets_table
+            model.encrypted_attributes = Set.new.freeze
+            model.create!(name: "retained statement")
+            model.where(name: "retained statement").load
+            ActiveSupport::Ractors.make_shareable(model.deterministic_encrypted_attributes)
+            ActiveSupport::Ractors.with(unshareable_proc_action: :raise) do
+              model.make_pending_attribute_modifications_shareable
+            end
+
+            first = on_ractor(model) do |model|
+              model.with_connection do |connection|
+                model.cached_find_by_statement(connection, ["name"]) { |params| model.where(name: params.bind) }
+              end
+            end
+            second, names = on_ractor(model) do |model|
+              model.with_connection do |connection|
+                statement = model.cached_find_by_statement(connection, ["name"]) { raise "cache miss" }
+                [statement, statement.execute(["retained statement"], connection).map(&:name)]
+              end
+            end
+
+            assert_same first, second
+            assert_equal ["retained statement"], names
+
+            model.initialize_find_by_cache
+            replacement = on_ractor(model) do |model|
+              model.with_connection do |connection|
+                model.cached_find_by_statement(connection, ["name"]) { |params| model.where(name: params.bind) }
+              end
+            end
+            assert_not_same first, replacement
           end
 
           def test_compiles_arel_locally_matching_the_main_side_compile

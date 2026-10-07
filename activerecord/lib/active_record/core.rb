@@ -282,7 +282,18 @@ module ActiveRecord
       end
 
       def find_by_statement_cache # :nodoc:
-        @find_by_statement_cache.value
+        generation = @find_by_statement_cache.value
+        return generation if ActiveSupport::Ractors.unshareable_proc_action || !ActiveSupport::Ractors.main?
+
+        # Ordinary applications may use types that mutate while serializing.
+        # Keep their statements threaded, not frozen. Tracking the shared
+        # generation also invalidates this cache when another Ractor resets it.
+        state = @threaded_find_by_statement_cache
+        unless state && state.first.equal?(generation)
+          state = @threaded_find_by_statement_cache =
+            [generation, { true => Concurrent::Map.new, false => Concurrent::Map.new }]
+        end
+        state.last
       end
 
       def find(*ids) # :nodoc:
@@ -433,7 +444,18 @@ module ActiveRecord
       end
 
       def cached_find_by_statement(connection, key, &block) # :nodoc:
-        schema_context.cached_find_by_statement(connection, key, &block)
+        cache = find_by_statement_cache[connection.prepared_statements]
+        if cache.instance_of?(Concurrent::Map)
+          return cache.compute_if_absent(key) { StatementCache.create(connection, &block) }
+        end
+
+        cache[key] || begin
+          # Query construction can load schema and populate other caches. Do it
+          # before taking the publication lock, and never retain the connection.
+          statement = ActiveSupport::Ractors.make_shareable(StatementCache.create(connection, &block), copy: true)
+          key = ActiveSupport::Ractors.make_shareable(key, copy: true)
+          cache.update(key) { |cached| cached || statement }
+        end
       end
 
       private

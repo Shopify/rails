@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "cases/helper"
+require "active_support/core_ext/object/with"
 require "models/book"
 require "models/liquid"
 require "models/molecule"
@@ -112,6 +113,22 @@ module ActiveRecord
 
       assert_equal [first.id], cache.execute(["first shared book"], @connection).map(&:id)
       assert_equal [second.id], cache.execute(["second shared book"], @connection).map(&:id)
+    end
+
+    def test_threaded_find_by_cache_preserves_mutable_custom_types
+      ActiveSupport::Ractors.with(unshareable_proc_action: nil) do
+        type = Class.new(ActiveRecord::Type::String) do
+          def serialize(value)
+            @last_serialized_value = super
+          end
+        end.new
+        model = Class.new(Book)
+        model.attribute :name, type
+        book = model.create!(name: "mutable type")
+
+        assert_equal book, model.find_by(name: "mutable type")
+        assert_nil model.find_by(name: "missing")
+      end
     end
 
     def test_unprepared_statements_dont_share_a_cache_with_prepared_statements

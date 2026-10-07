@@ -75,23 +75,6 @@ module ActiveRecord
         end.freeze
       end
 
-      def cached_find_by_statement(connection, key, &block) # :nodoc:
-        cache = find_by_statement_cache[connection.prepared_statements]
-        cache[key] || begin
-          statement = ActiveSupport::Ractors.make_shareable(StatementCache.create(connection, &block), copy: true)
-          key = ActiveSupport::Ractors.make_shareable(key, copy: true)
-          cache.update(key) { |cached| cached || statement }
-        end
-      end
-
-      def initialize_find_by_cache # :nodoc:
-        model_class.initialize_find_by_cache
-      end
-
-      def find_by_statement_cache # :nodoc:
-        model_class.find_by_statement_cache
-      end
-
       def schema_loaded?
         @schema_loaded
       end

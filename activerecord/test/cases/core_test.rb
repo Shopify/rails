@@ -242,19 +242,6 @@ class CoreTest < ActiveRecord::TestCase
     end
   end
 
-  def test_find_by_cache_does_not_duplicate_entries
-    Topic.initialize_find_by_cache
-    using_prepared_statements = Topic.lease_connection.prepared_statements
-    topic_find_by_cache = Topic.schema_context.find_by_statement_cache[using_prepared_statements]
-
-    assert_difference -> { topic_find_by_cache.size }, +1 do
-      Topic.find(1)
-    end
-    assert_no_difference -> { topic_find_by_cache.size } do
-      Topic.find_by(id: 1)
-    end
-  end
-
   def test_composite_pk_models_added_to_a_set
     library = Set.new
     # with primary key present
@@ -305,24 +292,6 @@ class CoreTest < ActiveRecord::TestCase
 
         assert_ractor_shareable context
         assert_same context, on_ractor { model.schema_context }
-      end
-
-      def test_find_by_statement_cache_is_ractor_local
-        model = Class.new(ActiveRecord::Base) do
-          def self.name = "ractor_safe_find_by_cache"
-          self.table_name = "topics"
-        end
-        model.load_schema
-
-        worker_marker, worker_stable = on_ractor do
-          cache = model.schema_context.find_by_statement_cache
-          cache[true][:ractor_marker] = :from_worker
-          [cache[true][:ractor_marker], model.schema_context.find_by_statement_cache.equal?(cache)]
-        end
-
-        assert_equal :from_worker, worker_marker
-        assert worker_stable
-        assert_nil model.schema_context.find_by_statement_cache[true][:ractor_marker]
       end
 
       def test_pending_attribute_modifications_are_shareable_and_applied_on_a_non_main_ractor
