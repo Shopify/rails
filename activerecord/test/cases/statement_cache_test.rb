@@ -100,6 +100,20 @@ module ActiveRecord
       assert_not_equal first_books, additional_books
     end
 
+    def test_shared_statement_cache_keeps_fixed_and_variable_binds_executable
+      first = Book.create!(name: "first shared book", author_id: 4)
+      second = Book.create!(name: "second shared book", author_id: 4)
+      Book.create!(name: "first shared book", author_id: 5)
+
+      cache = StatementCache.create(@connection) do |params|
+        Book.where(name: params.bind, author_id: 4)
+      end
+      ActiveSupport::Ractors.make_shareable(cache)
+
+      assert_equal [first.id], cache.execute(["first shared book"], @connection).map(&:id)
+      assert_equal [second.id], cache.execute(["second shared book"], @connection).map(&:id)
+    end
+
     def test_unprepared_statements_dont_share_a_cache_with_prepared_statements
       Book.create(name: "my book")
       Book.create(name: "my other book")

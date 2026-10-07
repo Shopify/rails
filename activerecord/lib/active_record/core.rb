@@ -272,11 +272,17 @@ module ActiveRecord
 
     module ClassMethods
       def initialize_find_by_cache # :nodoc:
-        ActiveSupport::Ractors[find_by_statement_cache_key] = { true => Concurrent::Map.new, false => Concurrent::Map.new }
+        cache = { true => ActiveSupport::Ractors::KeyLockHash.new, false => ActiveSupport::Ractors::KeyLockHash.new }.freeze
+        if @find_by_statement_cache
+          ActiveSupport::Ractors.atomically { @find_by_statement_cache.value = cache }
+        else
+          @find_by_statement_cache = ActiveSupport::Ractors::TVar.new(cache)
+        end
+        cache
       end
 
-      def find_by_statement_cache_key # :nodoc:
-        @find_by_statement_cache_key ||= "active_record_find_by_statement_cache_#{object_id}".to_sym
+      def find_by_statement_cache # :nodoc:
+        @find_by_statement_cache.value
       end
 
       def find(*ids) # :nodoc:

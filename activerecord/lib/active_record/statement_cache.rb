@@ -129,6 +129,9 @@ module ActiveRecord
       def bind(values)
         bas = @bound_attributes.dup
         @indexes.each_with_index { |offset, i| bas[offset] = bas[offset].with_cast_value(values[i]) }
+        # Shared statements are immutable, but fixed binds still memoize their
+        # serialized value during execution. Give those binds to this caller.
+        bas.map! { |attribute| attribute.frozen? ? attribute.dup : attribute }
         bas
       end
     end
