@@ -238,7 +238,9 @@ module ActiveSupport
       def notifier
         return @notifier if ActiveSupport::Ractors.main?
 
-        ActiveSupport::Ractors[:__notifier] ||= begin
+        # Subscriptions added while handling a request must not leak into
+        # another Ractor. Only the main Ractor's subscription snapshot is shared.
+        ActiveSupport::Ractors.store_if_absent(:__notifier) do
           fanout = Fanout.new
           set_subscriptions(fanout)
 

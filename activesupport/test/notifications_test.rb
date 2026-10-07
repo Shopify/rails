@@ -613,6 +613,25 @@ module Notifications
     end
 
     if RUBY_VERSION >= "4.0"
+      test "request subscriptions do not outlive their ractor" do
+        ActiveSupport::Notifications.subscribe("shared.event") { |event| event.payload[:shared] = true }
+
+        first = on_ractor do
+          ActiveSupport::Notifications.subscribe("shared.event") { |event| event.payload[:local] = true }
+          payload = {}
+          ActiveSupport::Notifications.instrument("shared.event", payload)
+          payload
+        end
+        second = on_ractor do
+          payload = {}
+          ActiveSupport::Notifications.instrument("shared.event", payload)
+          payload
+        end
+
+        assert_equal({ shared: true, local: true }, first)
+        assert_equal({ shared: true }, second)
+      end
+
       test "creating a subscription that's not ractor shareable raises an error" do
         outer = []
 
