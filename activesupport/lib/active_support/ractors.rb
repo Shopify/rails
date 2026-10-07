@@ -3,6 +3,20 @@
 
 require "active_support/dependencies/autoload"
 
+if defined?(Ractor) && RUBY_VERSION >= "4.0"
+  begin
+    require "ractor/tvar"
+    require "ractor/keylockhash"
+  rescue LoadError => error
+    raise unless ["ractor/tvar", "ractor/keylockhash"].include?(error.path)
+  end
+end
+
+unless defined?(Ractor::TVar) && defined?(Ractor::KeyLockHash)
+  require "concurrent/map"
+  require "monitor"
+end
+
 module ActiveSupport
   # Shims for `Ractor` shareability methods so framework code can call them
   # unconditionally regardless of the Ruby version.
@@ -175,6 +189,49 @@ module ActiveSupport
 
         def shareable_lambda(self: nil, &block)
           block
+        end
+      end
+    end
+
+    if defined?(::Ractor::TVar) && defined?(::Ractor::KeyLockHash)
+      TVar = ::Ractor::TVar
+      KeyLockHash = ::Ractor::KeyLockHash
+
+      def self.atomically(&block)
+        ::Ractor.atomically(&block)
+      end
+    else
+      @transaction_lock = Monitor.new
+
+      def self.atomically(&block)
+        @transaction_lock.synchronize(&block)
+      end
+
+      # Without the optional Ruby 4.0 extension, retain thread-safe state.
+      # All variables use the same transaction lock.
+      class TVar # :nodoc:
+        def initialize(value = nil)
+          @value = value
+        end
+
+        def value
+          Ractors.atomically { @value }
+        end
+
+        def value=(value)
+          Ractors.atomically { @value = value }
+        end
+      end
+
+      class KeyLockHash < Concurrent::Map # :nodoc:
+        def update(key, &block)
+          compute(key, &block)
+        end
+
+        def to_h
+          hash = {}
+          each_pair { |key, value| hash[key] = value }
+          hash
         end
       end
     end

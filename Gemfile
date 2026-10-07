@@ -76,6 +76,7 @@ gem "libxml-ruby", platforms: :ruby
 gem "connection_pool", require: false
 gem "rexml", require: false
 gem "msgpack", ">= 1.7.0", require: false
+gem "ractor-sharing", ">= 0.3.0", require: false if RUBY_VERSION >= "4.0"
 
 # for railties
 gem "bootsnap", ">= 1.4.4", require: false
