@@ -4,8 +4,8 @@
 
 module ActiveRecord
   module ModelSchema
-    # SchemaContext owns all schema-derived state for a model: columns,
-    # attribute types, column defaults, and query constraints.
+    # SchemaContext owns all schema-derived state for a model:
+    # primary key, columns, attribute types, column defaults, and query constraints.
     class SchemaContext # :nodoc:
       # Attributes owns a model's attribute-derived state: attribute
       # defaults, attribute types, and column defaults.
@@ -39,6 +39,8 @@ module ActiveRecord
 
       def initialize(model_class)
         @model_class = model_class
+        @primary_key_default = model_class._primary_key_definition
+        @primary_key_declared = model_class.primary_key_declared?
         @schema_loaded = false
         @attributes_key = :"active_record_schema_attributes_#{object_id}"
       end
@@ -98,7 +100,37 @@ module ActiveRecord
       end
 
       def primary_key
-        model_class.primary_key
+        primary_key_definition.name
+      end
+
+      def primary_key_definition
+        return @primary_key_definition if @primary_key_definition
+
+        @primary_key_definition = if !model_class.base_class? && !@primary_key_declared
+          model_class.base_class.schema_context.primary_key_definition
+        elsif @primary_key_default
+          @primary_key_default
+        else
+          ActiveRecord::Key.for(get_primary_key(model_class.base_class.name))
+        end
+        model_class.include AttributeMethods::CompositePrimaryKey if @primary_key_definition.composite?
+        @primary_key_definition
+      end
+
+      def table_exists?
+        model_class.schema_cache.data_source_exists?(table_name)
+      end
+
+      def get_primary_key(base_name)
+        if base_name && model_class.primary_key_prefix_type == :table_name
+          base_name.foreign_key(false)
+        elsif base_name && model_class.primary_key_prefix_type == :table_name_with_underscore
+          base_name.foreign_key
+        elsif ActiveRecord::Base != model_class && table_exists?
+          model_class.schema_cache.primary_keys(table_name)
+        else
+          "id"
+        end
       end
 
       def has_query_constraints?
@@ -202,7 +234,7 @@ module ActiveRecord
         end
 
         def derive_query_constraints_list(primary_key)
-          if model_class.base_class? || primary_key != model_class.base_class.primary_key
+          if model_class.base_class? || primary_key != model_class.base_class.schema_context.primary_key
             primary_key if primary_key.is_a?(Array)
           else
             model_class.base_class.query_constraints_definition || (primary_key if primary_key.is_a?(Array))

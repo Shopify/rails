@@ -17,6 +17,29 @@ module SchemaLoadCounter
 end
 
 class SchemaLoadingTest < ActiveRecord::TestCase
+  def test_schema_context_owns_primary_key_without_loading_columns
+    klass = define_model { |model| model.table_name = "topics" }
+    original_context = klass.schema_context
+
+    assert_equal "id", klass.primary_key
+    assert_not_predicate original_context, :schema_loaded?
+
+    klass.table_name = "subscribers"
+    selected_context = klass.schema_context
+
+    assert_nil klass.primary_key
+    assert_not_predicate selected_context, :schema_loaded?
+    assert_equal "id", original_context.primary_key
+
+    klass.primary_key = "nick"
+    assert_equal "nick", klass.primary_key
+    assert_nil selected_context.primary_key
+
+    klass.define_singleton_method(:schema_context) { original_context }
+    assert_equal "id", klass.primary_key
+    assert_not_predicate original_context, :schema_loaded?
+  end
+
   def test_schema_context_loads_schema_when_columns_are_requested
     klass = define_model
     context = nil
