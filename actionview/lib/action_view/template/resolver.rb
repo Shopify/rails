@@ -110,6 +110,9 @@ module ActionView
       super
     end
 
+    # Pass the rendering view before freezing the resolver. Shared bindings
+    # compile into that view's compiled-method container, including bindings
+    # for locals first requested after boot.
     def eager_load_templates(view = nil)
       template_glob("**/*").each do |file|
         unbound = build_unbound_template(file)

@@ -214,6 +214,7 @@ module ActionView
 
     attr_reader :identifier, :handler
     attr_reader :variable, :format, :variant, :virtual_path
+    attr_reader :compiled_method_container # :nodoc:
 
     NONE = Object.new.freeze
 
@@ -311,7 +312,7 @@ module ActionView
     end
 
     def type
-      @type ||= Types[format]
+      frozen? ? @type : (@type ||= Types[format])
     end
 
     def short_identifier
@@ -409,12 +410,16 @@ module ActionView
     end
 
     def freeze # :nodoc:
+      return self if frozen?
+
       unless @compiled
         raise ArgumentError, "Cannot freeze #{short_identifier.inspect}: the template must be compiled first. " \
           "Frozen templates cannot compile, so an uncompiled one could never render."
       end
       strict_locals!
       method_name.freeze
+      short_identifier.freeze
+      type
       @source.freeze
       @identifier.freeze
       @virtual_path&.freeze
@@ -460,11 +465,15 @@ module ActionView
       # Compile a template. This method ensures a template is compiled
       # just once and removes the source after it is compiled.
       def compile!(view)
+        compile_to(view.compiled_method_container)
+      end
+
+      def compile_to(mod)
         if @compiled
-          if @compiled_method_container && view.compiled_method_container != @compiled_method_container
+          if @compiled_method_container && mod != @compiled_method_container
             raise ArgumentError, "Template #{short_identifier.inspect} was compiled to render with " \
               "#{@compiled_method_container.inspect} but is being rendered with a view whose compiled " \
-              "method container is #{view.compiled_method_container.inspect}. A template compiles into " \
+              "method container is #{mod.inspect}. A template compiles into " \
               "a single container; render it with the view class it was compiled with."
           end
           return
@@ -478,8 +487,6 @@ module ActionView
           # by the threads waiting. So re-check the @compiled flag to avoid
           # re-compilation
           return if @compiled
-
-          mod = view.compiled_method_container
 
           instrument("!compile_template") do
             compile(mod)

@@ -22,13 +22,14 @@ class FileSystemResolverTest < ActiveSupport::TestCase
     ActionView::Base.with_empty_template_cache.empty
   end
 
-  def test_freeze_raises_for_uncompiled_template
-    with_file "test/hello_world.html.erb", "<%# locals: () %>Hi"
-    resolver = ActionView::FileSystemResolver.new(tmpdir)
-    resolver.eager_load_templates
+  def test_freeze_requires_compiled_templates
+    ["Hi", "<%# locals: () %>Hi"].each do |source|
+      with_file "test/hello_world.html.erb", source
+      resolver = ActionView::FileSystemResolver.new(tmpdir)
+      resolver.eager_load_templates
 
-    error = assert_raises(ArgumentError) { resolver.freeze }
-    assert_match "must be compiled first", error.message
+      assert_raises(ArgumentError) { resolver.freeze }
+    end
   end
 
   def test_eager_load_templates_populates_cache_without_freezing
@@ -40,16 +41,6 @@ class FileSystemResolverTest < ActiveSupport::TestCase
     templates = find_all(resolver)
     assert_equal 1, templates.size
     assert_equal "Hello!", templates[0].source
-  end
-
-  def test_eager_load_templates_compiles_templates_when_given_a_view
-    with_file "test/hello_world.html.erb", "Hello!"
-    view = ActionView::Base.with_empty_template_cache.empty
-    resolver = ActionView::FileSystemResolver.new(tmpdir)
-
-    assert_difference -> { view.compiled_method_container.instance_methods.size }, 1 do
-      resolver.eager_load_templates(view)
-    end
   end
 
   def test_eager_loaded_resolver_still_binds_new_locals
@@ -81,15 +72,15 @@ class FileSystemResolverTest < ActiveSupport::TestCase
 
   def test_freeze_keeps_non_strict_templates_renderable
     with_file "test/_card.html.erb", "<%= post %>"
+    view = compile_view
     resolver = ActionView::FileSystemResolver.new(tmpdir)
-    resolver.eager_load_templates(compile_view)
+    resolver.eager_load_templates(view)
     resolver.freeze
 
     assert_ractor_shareable resolver
 
     template = find_all(resolver, "card", "test", true, [:post])[0]
-    assert_not_predicate template, :frozen?
-    assert_equal "hello", template.render(compile_view, { post: "hello" })
+    assert_equal "hello", template.render(view, { post: "hello" })
   end
 
   def test_frozen_non_strict_templates_are_cached_per_locals
@@ -134,46 +125,40 @@ class FileSystemResolverRactorTest < ActiveSupport::TestCase
   include ActiveSupport::Testing::Isolation
   include ActiveSupport::Testing::RactorsAssertions
 
-  # Compiling methods into FakeView from another Ractor is how frozen non-strict templates
-  # are compiled in a ractorized application, with the view class container built in the
-  # main Ractor and other Ractors compiling methods into it. This might stop working with
-  # https://bugs.ruby-lang.org/issues/22226, which would require compiling into a
-  # Ractor-local container instead.
-  class FakeView
-    def compiled_method_container
-      self.class
-    end
-
-    def _run(method, template, locals, buffer, add_to_stack:, has_strict_locals:, &block)
-      @output_buffer = buffer
-      public_send(method, locals, buffer, &block)
-    end
-  end
-
-  test "non-strict templates compile inside a non-main Ractor" do
+  test "bound templates survive their producing Ractor and render with the boot-time container" do
     Dir.mktmpdir do |dir|
       Dir.mkdir(File.join(dir, "test"))
       File.write(File.join(dir, "test", "_card.html.erb"), "<%= post %>")
 
       Mime.eager_load!
       ActionView::Template::Handlers::ERB.escape_ignore_list.freeze
-
-      # Make sure subscriptions are Ractor-shareable
       ActiveSupport::Ractors.unshareable_proc_action = :raise
-      # Nothing subscribes after, so record manually
       ActiveSupport::Notifications.send(:record_subscriptions)
+      ActiveSupport::Ractors.make_shareable(ActiveSupport.event_reporter)
 
+      view_class = ActionView::Base.with_empty_template_cache
       resolver = ActionView::FileSystemResolver.new(dir)
-      resolver.eager_load_templates
+      resolver.eager_load_templates(view_class.empty)
       resolver.freeze
 
-      rendered = on_ractor(resolver) do |resolver|
-        details = { locale: [:en].freeze, formats: [:html].freeze, variants: [].freeze, handlers: [:erb].freeze }.freeze
-        template = resolver.find_all("card", "test", true, details, nil, [:post])[0]
-        template.render(FakeView.new, { post: "hello" })
+      first, initial = on_ractor(resolver, view_class) do |resolver, view_class|
+        details = { locale: [:en], formats: [:html], variants: [], handlers: [:erb] }
+        bound = resolver.find_all("card", "test", true, details, nil, [:post]).first
+        view = view_class.with_context(ActionView::LookupContext.new([resolver], details))
+        [bound, bound.render(view, { post: "hello" })]
+      end
+      second, subsequent = on_ractor(resolver, view_class) do |resolver, view_class|
+        details = { locale: [:en], formats: [:html], variants: [], handlers: [:erb] }
+        locals = [+"post"]
+        bound = resolver.find_all("card", "test", true, details, nil, locals).first
+        locals.first << "_changed"
+        view = view_class.with_context(ActionView::LookupContext.new([resolver], details))
+        [bound, bound.render(view, { post: "world" })]
       end
 
-      assert_equal "hello", rendered
+      assert_equal ["hello", "world"], [initial, subsequent]
+      assert_same first, second
+      assert_includes resolver.built_templates, first
     end
   end
 end

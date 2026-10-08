@@ -1,9 +1,16 @@
 # frozen_string_literal: true
 
 require "concurrent/map"
+require "monitor"
+require "active_support/ractors"
 
 module ActionView
   class UnboundTemplate
+    # Only accessed on the main Ractor. Compilation hooks may enter other
+    # caches, so they must not run under a shared-map lock.
+    COMPILE_LOCK = Monitor.new
+    private_constant :COMPILE_LOCK
+
     attr_reader :virtual_path, :details
     delegate :locale, :format, :variant, :handler, to: :@details
 
@@ -22,13 +29,7 @@ module ActionView
       if @strict_locals_template
         @strict_locals_template
       elsif frozen?
-        templates = ractor_local_templates
-        unless template = templates[locals]
-          normalized_locals = normalize_locals(locals)
-          template = templates.compute_if_absent(normalized_locals) { build_template(normalized_locals) }
-          templates[locals.dup] = template
-        end
-        template
+        @templates[locals] || bind_shared_template(locals)
       else
         @templates[locals] || build_bound_template(locals)
       end
@@ -37,33 +38,59 @@ module ActionView
     def built_templates # :nodoc:
       if @strict_locals_template
         [@strict_locals_template]
-      elsif @templates
-        @templates.values
+      elsif frozen?
+        @templates.to_h.values
       else
-        templates = ractor_local_store[self]
-        templates ? templates.values : []
+        @templates.values
       end
     end
 
     def freeze # :nodoc:
-      bind_locals([])
+      return self if frozen?
+
+      template = bind_locals([])
+      @compiled_method_container = template.compiled_method_container
+      template.freeze
+
+      if @strict_locals_template
+        ActiveSupport::Ractors.make_shareable(@strict_locals_template)
+        @templates = nil
+      else
+        templates = ActiveSupport::Ractors::KeyLockHash.new
+        @templates.each_pair do |locals, bound|
+          normalized_locals = normalize_locals(locals)
+          next if templates[normalized_locals]
+
+          bound.send(:compile_to, @compiled_method_container)
+          templates[normalized_locals] = ActiveSupport::Ractors.make_shareable(bound.freeze)
+        end
+        @templates = templates
+      end
       @source.freeze
       @identifier.freeze
       @virtual_path.freeze
       @details.freeze
-      @strict_locals_template.freeze
-      @templates = nil
       @write_lock = nil
       super
     end
 
     private
-      def ractor_local_templates
-        ractor_local_store.compute_if_absent(self) { Concurrent::Map.new }
-      end
+      def bind_shared_template(locals)
+        normalized_locals = normalize_locals(locals)
+        template = @templates[normalized_locals] || ActiveSupport::Ractors.on_main(self) do
+          COMPILE_LOCK.synchronize do
+            @templates[normalized_locals] || begin
+              bound = build_template(normalized_locals)
+              bound.send(:compile_to, @compiled_method_container)
+              @templates[normalized_locals] = ActiveSupport::Ractors.make_shareable(bound.freeze)
+            end
+          end
+        end
 
-      def ractor_local_store
-        ActiveSupport::Ractors.store_if_absent(:action_view_bound_templates) { Concurrent::Map.new }
+        # Preserve the fast path for non-normalized locals without retaining
+        # or freezing the caller's array or strings.
+        key = locals.map { |local| local.is_a?(String) ? local.dup : local }.freeze
+        @templates[ActiveSupport::Ractors.make_shareable(key)] = template
       end
 
       def build_bound_template(locals)

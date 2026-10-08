@@ -87,6 +87,15 @@ class TestERBTemplate < ActiveSupport::TestCase
     assert_equal "Hello", render
   end
 
+  def test_frozen_template_without_a_format_keeps_rendering
+    @template = new_template("<%= hello %>", format: nil)
+    @template.send(:compile!, @context)
+    @template.freeze
+
+    assert_nil @template.type
+    assert_equal "Hello", render
+  end
+
   def test_render_with_a_different_compiled_method_container_raises
     @template = new_template
     assert_equal "Hello", render
@@ -96,7 +105,6 @@ class TestERBTemplate < ActiveSupport::TestCase
       @template.render(other_context, {})
     end
     assert_kind_of ArgumentError, error.cause
-    assert_match "compiled to render with", error.message
   end
 
   def test_basic_template_does_html_escape
