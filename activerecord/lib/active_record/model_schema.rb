@@ -200,6 +200,8 @@ module ActiveRecord
     end
 
     module ClassMethods
+      UNDEFINED_TABLE_NAME = Object.new.freeze
+
       def schema_context # :nodoc:
         return @schema_context if @schema_context
 
@@ -272,8 +274,11 @@ module ActiveRecord
       #     self.table_name = "mice"
       #   end
       def table_name
-        reset_table_name unless defined?(@table_name)
-        @table_name
+        schema_context.model_table_name
+      end
+
+      def table_name_definition # :nodoc:
+        defined?(@table_name_definition) ? @table_name_definition : UNDEFINED_TABLE_NAME
       end
 
       # Sets the table name explicitly. Example:
@@ -283,17 +288,7 @@ module ActiveRecord
       #   end
       def table_name=(value)
         value = (value && value.to_s).freeze
-
-        renaming = defined?(@table_name)
-        if renaming
-          return if value == @table_name
-          reset_column_information if connected?
-        end
-
-        @table_name        = value
-        @arel_table        = Arel::Table.new(klass: self)
-        @predicate_builder = PredicateBuilder.new(TableMetadata.new(self, @arel_table)) if renaming
-        @sequence_name     = nil unless @explicit_sequence_name
+        update_table_name_definition(value, value)
       end
 
       # Returns a quoted version of the table name.
@@ -304,15 +299,9 @@ module ActiveRecord
       # Computes the table name, (re)sets it internally, and returns it.
       def reset_table_name # :nodoc:
         ActiveSupport::Ractors.on_main(self) do
-          self.table_name = if self == Base
-            nil
-          elsif abstract_class?
-            superclass.table_name
-          elsif superclass.abstract_class?
-            superclass.table_name || compute_table_name
-          else
-            compute_table_name
-          end
+          value = schema_context.inferred_table_name
+          update_table_name_definition(UNDEFINED_TABLE_NAME, value)
+          value
         end
       end
 
@@ -460,7 +449,7 @@ module ActiveRecord
 
       # Indicates whether the table associated with this class exists
       def table_exists?
-        schema_cache.data_source_exists?(table_name)
+        schema_context.table_exists?
       end
 
       def attributes_builder # :nodoc:
@@ -629,6 +618,23 @@ module ActiveRecord
         end
 
       private
+        def update_table_name_definition(definition, value)
+          context = schema_context
+          renaming = table_name_definition != UNDEFINED_TABLE_NAME || context.model_table_name_resolved?
+          previous_table_name = context.model_table_name if renaming
+
+          @table_name_definition = definition
+          return if renaming && value == previous_table_name
+
+          if renaming && connected?
+            reset_column_information
+          else
+            reload_schema_from_cache
+          end
+
+          @sequence_name = nil unless @explicit_sequence_name
+        end
+
         def inherited(child_class)
           super
           child_class.initialize_load_schema_monitor
@@ -641,29 +647,6 @@ module ActiveRecord
 
         def load_schema!
           # The current schema context handles the default schema load.
-        end
-
-        # Guesses the table name, but does not decorate it with prefix and suffix information.
-        def undecorated_table_name(model_name)
-          table_name = model_name.to_s.demodulize.underscore
-          pluralize_table_names ? table_name.pluralize : table_name
-        end
-
-        # Computes and returns a table name according to default conventions.
-        def compute_table_name
-          if base_class?
-            # Nested classes are prefixed with singular parent table name.
-            if module_parent < Base && !module_parent.abstract_class?
-              contained = module_parent.table_name
-              contained = contained.singularize if module_parent.pluralize_table_names
-              contained += "_"
-            end
-
-            "#{full_table_name_prefix}#{contained}#{undecorated_table_name(model_name)}#{full_table_name_suffix}".freeze
-          else
-            # STI subclasses always use their superclass's table.
-            base_class.table_name
-          end
         end
 
         def type_for_column(column)

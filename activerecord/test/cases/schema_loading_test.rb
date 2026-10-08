@@ -17,6 +17,51 @@ module SchemaLoadCounter
 end
 
 class SchemaLoadingTest < ActiveRecord::TestCase
+  def test_schema_context_owns_table_name_without_loading_columns
+    klass = define_model { |model| model.table_name = "topics" }
+    original_context = klass.schema_context
+
+    assert_equal "topics", klass.table_name
+    assert_not_predicate original_context, :schema_loaded?
+
+    klass.table_name = "subscribers"
+    selected_context = klass.schema_context
+
+    assert_not_same original_context, selected_context
+    assert_equal "subscribers", klass.table_name
+    assert_not_predicate selected_context, :schema_loaded?
+    assert_equal "topics", original_context.table_name
+
+    klass.define_singleton_method(:schema_context) { original_context }
+    assert_equal "topics", klass.table_name
+    assert_not_predicate original_context, :schema_loaded?
+  end
+
+  def test_schema_context_owns_primary_key_without_loading_columns
+    klass = define_model { |model| model.table_name = "topics" }
+    original_context = klass.schema_context
+
+    assert_equal "id", klass.primary_key
+    assert_not_predicate original_context, :schema_loaded?
+    assert_nil klass._primary_key_definition
+
+    klass.table_name = "subscribers"
+    selected_context = klass.schema_context
+
+    assert_nil klass.primary_key
+    assert_not_predicate selected_context, :schema_loaded?
+    assert_equal "id", original_context.primary_key
+    assert_nil klass._primary_key_definition
+
+    klass.primary_key = "nick"
+    assert_equal "nick", klass.primary_key
+    assert_nil selected_context.primary_key
+
+    klass.define_singleton_method(:schema_context) { original_context }
+    assert_equal "id", klass.primary_key
+    assert_not_predicate original_context, :schema_loaded?
+  end
+
   def test_schema_context_loads_schema_when_columns_are_requested
     klass = define_model
     context = nil
@@ -30,6 +75,29 @@ class SchemaLoadingTest < ActiveRecord::TestCase
     assert_includes context.column_names, "id"
     assert_same context, klass.schema_context
     assert_predicate context, :schema_loaded?
+    assert_equal 1, klass.load_schema_calls
+  end
+
+  def test_reset_table_name_preserves_schema_and_sequence_when_name_is_unchanged
+    klass = define_model do |model|
+      model.define_singleton_method(:name) { "Topic" }
+      model.table_name = "topics"
+    end
+    columns = klass.columns
+    context = klass.schema_context
+
+    klass.with_connection do |connection|
+      connection.stub(:default_sequence_name, "topics_id_seq") do
+        assert_equal "topics_id_seq", klass.sequence_name
+      end
+    end
+
+    assert_no_queries(include_schema: true) do
+      assert_equal "topics", klass.reset_table_name
+      assert_same context, klass.schema_context
+      assert_same columns, klass.columns
+      assert_equal "topics_id_seq", klass.sequence_name
+    end
     assert_equal 1, klass.load_schema_calls
   end
 

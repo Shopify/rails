@@ -81,7 +81,7 @@ module ActiveRecord
           # Overwriting will negate any effect of the +primary_key_prefix_type+
           # setting, though.
           def primary_key
-            primary_key_definition.name
+            schema_context.model_primary_key
           end
 
           def composite_primary_key? # :nodoc:
@@ -89,8 +89,11 @@ module ActiveRecord
           end
 
           def primary_key_definition # :nodoc:
-            reset_primary_key unless _primary_key_definition
-            _primary_key_definition
+            schema_context.primary_key_definition
+          end
+
+          def primary_key_declared? # :nodoc:
+            @primary_key_declared || false
           end
 
           # Returns a quoted version of the primary key name.
@@ -100,24 +103,15 @@ module ActiveRecord
 
           def reset_primary_key # :nodoc:
             ActiveSupport::Ractors.on_main(self) do
-              if base_class?
-                self.primary_key = get_primary_key(base_class.name)
-              else
-                self.primary_key = base_class.primary_key
-              end
+              self._primary_key_definition = nil
+              @primary_key_declared = false
+              reload_schema_from_cache
+              primary_key
             end
           end
 
           def get_primary_key(base_name) # :nodoc:
-            if base_name && primary_key_prefix_type == :table_name
-              base_name.foreign_key(false)
-            elsif base_name && primary_key_prefix_type == :table_name_with_underscore
-              base_name.foreign_key
-            elsif ActiveRecord::Base != self && table_exists?
-              schema_cache.primary_keys(table_name)
-            else
-              "id"
-            end
+            schema_context.get_primary_key(base_name)
           end
 
           # Sets the name of the primary key column.
@@ -126,14 +120,12 @@ module ActiveRecord
           #     self.primary_key = 'sysid'
           #   end
           def primary_key=(value)
-            self._primary_key_definition = ActiveRecord::Key.for(value)
+            definition = ActiveRecord::Key.for(value)
+            include CompositePrimaryKey if definition.composite?
 
-            include CompositePrimaryKey if primary_key_definition.composite?
-
-            # Only invalidate loaded contexts; initial schema loading can resolve the primary key.
-            ([self] + descendants).each do |model|
-              model.reload_schema_from_cache(false) if model.schema_loaded?
-            end
+            self._primary_key_definition = definition
+            @primary_key_declared = true
+            reload_schema_from_cache
           end
 
           private
