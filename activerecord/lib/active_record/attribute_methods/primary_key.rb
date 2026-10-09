@@ -89,7 +89,13 @@ module ActiveRecord
           end
 
           def primary_key_definition # :nodoc:
-            schema_context.primary_key_definition
+            definition = schema_context.primary_key_definition
+            key = primary_key
+            return definition if key == definition.name
+
+            definition = ActiveRecord::Key.for(key)
+            include CompositePrimaryKey if definition.composite?
+            definition
           end
 
           def primary_key_declared? # :nodoc:

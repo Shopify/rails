@@ -357,6 +357,20 @@ class PrimaryKeysTest < ActiveRecord::TestCase
     assert_equal "id", child.schema_context.primary_key
   end
 
+  def test_find_on_subclass_relation_honors_primary_key_reader_override
+    parent = Class.new(ActiveRecord::Base) do
+      self.table_name = "movies"
+
+      def self.primary_key
+        "name"
+      end
+    end
+    child = Class.new(parent)
+    movie = movies(:first)
+
+    assert_equal movie.name, child.all.find(movie.name).id
+  end
+
   def test_primary_key_assignment_reloads_descendant_schema
     klass = Class.new(ActiveRecord::Base) do
       self.table_name = "topics"
