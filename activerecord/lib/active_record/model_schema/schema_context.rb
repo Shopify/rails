@@ -106,15 +106,19 @@ module ActiveRecord
       def primary_key_definition
         return @primary_key_definition if @primary_key_definition
 
-        @primary_key_definition = if !model_class.base_class? && !@primary_key_declared
-          model_class.base_class.schema_context.primary_key_definition
-        elsif @primary_key_default
-          @primary_key_default
-        else
-          ActiveRecord::Key.for(get_primary_key(model_class.base_class.name))
+        model_class.synchronize_schema_load do
+          return @primary_key_definition if @primary_key_definition
+
+          @primary_key_definition = if !model_class.base_class? && !@primary_key_declared
+            model_class.base_class.schema_context.primary_key_definition
+          elsif @primary_key_default
+            @primary_key_default
+          else
+            ActiveRecord::Key.for(get_primary_key(model_class.base_class.name))
+          end
+          model_class.include AttributeMethods::CompositePrimaryKey if @primary_key_definition.composite?
+          @primary_key_definition
         end
-        model_class.include AttributeMethods::CompositePrimaryKey if @primary_key_definition.composite?
-        @primary_key_definition
       end
 
       def table_exists?

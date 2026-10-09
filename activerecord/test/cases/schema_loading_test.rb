@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "cases/helper"
+require "concurrent/atomic/count_down_latch"
 
 module SchemaLoadCounter
   extend ActiveSupport::Concern
@@ -54,6 +55,44 @@ class SchemaLoadingTest < ActiveRecord::TestCase
     assert_same context, klass.schema_context
     assert_predicate context, :schema_loaded?
     assert_equal 1, klass.load_schema_calls
+  end
+
+  def test_independent_primary_key_resolution_can_run_concurrently_with_schema_loading
+    klass = define_model { |model| model.table_name = "topics" }
+    cache = klass.schema_cache
+    cache.add("topics")
+    metadata_started = Concurrent::CountDownLatch.new(1)
+    resume_key_read = Concurrent::CountDownLatch.new(1)
+    primary_keys = lambda do |table_name|
+      if Thread.current.name == "primary_key_reader"
+        metadata_started.count_down
+        resume_key_read.wait
+      end
+      "id"
+    end
+
+    cache.stub(:primary_keys, primary_keys) do
+      reader = Thread.new do
+        Thread.current.name = "primary_key_reader"
+        klass.primary_key
+      end
+      reader.report_on_exception = false
+      assert metadata_started.wait(5), "The primary key read did not reach metadata resolution"
+
+      # A column read triggers the full schema load.
+      loader = Thread.new { klass.column_names }
+      loader.report_on_exception = false
+      # Allow the schema load to finish first, or to wait for independent primary key resolution.
+      loader.join(1)
+      resume_key_read.count_down
+
+      assert_equal "id", reader.value
+      assert_includes loader.value, "id"
+    ensure
+      resume_key_read.count_down
+      reader&.kill
+      loader&.kill
+    end
   end
 
   def test_basic_model_is_loaded_once

@@ -212,6 +212,10 @@ module ActiveRecord
         ActiveRecord::ModelSchema::SchemaContext.new(self)
       end
 
+      def synchronize_schema_load(&block) # :nodoc:
+        @load_schema_monitor.synchronize(&block)
+      end
+
       # Guesses the table name (in forced lower-case) based on the name of the class in the
       # inheritance hierarchy descending directly from ActiveRecord::Base. So if the hierarchy
       # looks like: Reply < Message < ActiveRecord::Base, then Message is used
