@@ -1,3 +1,8 @@
+*   Allow `active_support/descendants_tracker` to be required directly after
+    `ActiveSupport::WeakSet` was extracted into its own file.
+
+    *Nikita Vasilevsky*
+
 *   Freeze events emitted by `ActiveSupport::EventReporter`.
 
     Subscribers can no longer change the event seen by later subscribers.

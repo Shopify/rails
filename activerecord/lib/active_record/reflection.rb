@@ -585,14 +585,20 @@ module ActiveRecord
         @join_table ||= -(options[:join_table]&.to_s || derive_join_table)
       end
 
-      def association_route(origin_class: active_record, destination_class: nil)
+      def association_route(origin_class: active_record, destination_class: nil, polymorphic_type: nil)
         destination_class ||= klass unless polymorphic?
 
         # Schema contexts are replaced on reload, so key by both endpoints to
-        # avoid reusing routes with outdated keys.
-        by_destination = association_route_cache.fetch_or_store(origin_class.schema_context) { AssociationRoute::Cache.new }
-        by_destination.fetch_or_store(destination_class&.schema_context) do
-          resolve_association_route(origin_class, destination_class)
+        # avoid reusing routes with outdated keys. Polymorphic reads also retain
+        # the stored type without invoking the destination class's write hook.
+        by_origin = association_route_cache.fetch_or_store(origin_class.schema_context) { AssociationRoute::Cache.new }
+        by_destination = by_origin.fetch_or_store(destination_class&.schema_context) { AssociationRoute::Cache.new }
+        by_destination.fetch_or_store(polymorphic_type) do
+          if polymorphic_type
+            resolve_association_route(origin_class, destination_class, polymorphic_type: polymorphic_type)
+          else
+            resolve_association_route(origin_class, destination_class)
+          end
         end
       end
 
@@ -1087,12 +1093,12 @@ module ActiveRecord
       end
 
       private
-        def resolve_association_route(origin_class, destination_class)
+        def resolve_association_route(origin_class, destination_class, polymorphic_type: nil)
           if polymorphic?
             unless destination_class
               return AssociationRoute.new(link: AssociationLink.new(reference_key: Key.for(foreign_key), fixed_values: { foreign_type => nil }))
             end
-            fixed_values = { foreign_type => -destination_class.polymorphic_name }
+            fixed_values = { foreign_type => -(polymorphic_type || destination_class.polymorphic_name) }
           else
             fixed_values = {}
           end

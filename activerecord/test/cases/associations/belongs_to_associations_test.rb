@@ -916,6 +916,16 @@ class BelongsToAssociationsTest < ActiveRecord::TestCase
     assert_nil sponsor.sponsorable_type
   end
 
+  def test_polymorphic_assignment_treats_false_as_nil
+    sponsor = Sponsor.new(sponsorable_id: 42, sponsorable_type: Member.polymorphic_name)
+
+    sponsor.sponsorable = false
+
+    assert_equal false, sponsor.sponsorable
+    assert_nil sponsor.sponsorable_id
+    assert_nil sponsor.sponsorable_type
+  end
+
   def test_with_polymorphic_and_condition
     sponsor = Sponsor.create
     member = Member.create name: "Bert"
@@ -1799,6 +1809,21 @@ class BelongsToAssociationsTest < ActiveRecord::TestCase
 
     assert_equal groucho, sponsor.sponsorable
     assert_equal groucho, sponsor.thing
+  end
+
+  class ReadOnlyPolymorphicName < ActiveRecord::Base
+    self.table_name = "members"
+
+    def self.polymorphic_name
+      raise "polymorphic_name must not be called when reading an association"
+    end
+  end
+
+  def test_polymorphic_read_uses_the_stored_type_without_serializing_the_class_name
+    record = ReadOnlyPolymorphicName.create!(name: "Stored type target")
+    sponsor = Sponsor.create!(sponsorable_id: record.id, sponsorable_type: ReadOnlyPolymorphicName.name)
+
+    assert_equal record, sponsor.sponsorable
   end
 
   class WheelPolymorphicName < ActiveRecord::Base
