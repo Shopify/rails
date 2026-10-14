@@ -188,12 +188,11 @@ module ActiveRecord
         end
 
         def replace_keys(record, force: false)
-          target = record || nil
-          if target.nil? && foreign_key_partially_overlaps_primary_key?
+          if record.nil? && foreign_key_partially_overlaps_primary_key?
             clear_reference_with_shared_primary_key(force: force)
           else
-            route = reflection.association_route(origin_class: owner.class, destination_class: target&.class)
-            route.write(owner, target, force: force)
+            route = reflection.association_route(origin_class: owner.class, destination_class: record&.class)
+            route.write(owner, record, force: force)
           end
         end
 

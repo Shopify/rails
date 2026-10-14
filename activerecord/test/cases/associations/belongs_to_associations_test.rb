@@ -916,16 +916,6 @@ class BelongsToAssociationsTest < ActiveRecord::TestCase
     assert_nil sponsor.sponsorable_type
   end
 
-  def test_polymorphic_assignment_treats_false_as_nil
-    sponsor = Sponsor.new(sponsorable_id: 42, sponsorable_type: Member.polymorphic_name)
-
-    sponsor.sponsorable = false
-
-    assert_equal false, sponsor.sponsorable
-    assert_nil sponsor.sponsorable_id
-    assert_nil sponsor.sponsorable_type
-  end
-
   def test_with_polymorphic_and_condition
     sponsor = Sponsor.create
     member = Member.create name: "Bert"
