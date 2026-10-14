@@ -833,6 +833,15 @@ class PreloaderTest < ActiveRecord::TestCase
            :members, :member_details, :organizations, :cpk_authors, :cpk_orders, :cpk_books, :cpk_order_agreements,
            :dogs, :other_dogs
 
+  class SelfReferencingCompany < ActiveRecord::Base
+    self.table_name = "companies"
+    self.inheritance_column = nil
+
+    belongs_to :parent, class_name: name, foreign_key: :firm_id, optional: true
+    belongs_to :mentor, class_name: name, foreign_key: :client_of, optional: true
+    has_one :parents_mentor, through: :parent, source: :mentor
+  end
+
   def test_preload_with_scope
     post = posts(:welcome)
 
@@ -871,6 +880,47 @@ class PreloaderTest < ActiveRecord::TestCase
 
     assert_predicate post.association(:author_with_address), :loaded?
     assert_nil post.author_with_address
+  end
+
+  def test_preload_matches_a_false_key
+    book_class = Class.new(ActiveRecord::Base) do
+      self.table_name = "books"
+
+      def self.name; "BooleanStatusBook"; end
+
+      has_many :comments_by_status, class_name: "Comment", foreign_key: :author_type, primary_key: :boolean_status
+      has_many :books_by_status, -> { where(name: "Same status") }, anonymous_class: self, foreign_key: :boolean_status, primary_key: :boolean_status
+    end
+    book = book_class.create!(boolean_status: false)
+    comment = Comment.create!(post_id: -1, body: "Boolean key", author_type: "false")
+    same_status = book_class.create!(name: "Same status", boolean_status: false)
+
+    ActiveRecord::Associations::Preloader.new(records: [book], associations: [:comments_by_status, :books_by_status]).call
+
+    assert_equal [comment], book.comments_by_status
+    assert_equal [same_status], book.books_by_status
+  end
+
+  def test_preload_matches_composite_keys_of_different_types
+    comment_class = Class.new(ActiveRecord::Base) do
+      self.table_name = "comments"
+      self.inheritance_column = nil
+
+      def self.name; "TextKeyComment"; end
+
+      belongs_to :post, foreign_key: [:author_id, :body], primary_key: [:author_id, :id]
+    end
+    post = Post.create!(author_id: 9_000_901, title: "Composite key", body: "Composite key")
+    comment = comment_class.create!(post_id: -1, author_id: post.author_id, body: post.id.to_s)
+
+    ActiveRecord::Associations::Preloader.new(records: [comment], associations: :post).call
+    assert_equal post, comment.post
+
+    comment = comment_class.find(comment.id)
+    assert_no_queries do
+      ActiveRecord::Associations::Preloader.new(records: [comment], associations: :post, available_records: [post]).call
+    end
+    assert_equal post, comment.post
   end
 
   def test_preload_does_not_concatenate_duplicate_records
@@ -1382,6 +1432,24 @@ class PreloaderTest < ActiveRecord::TestCase
 
     assert_predicate author.association(:essay_category), :loaded?
     assert categories.map(&:__id__).include?(author.essay_category.__id__)
+  end
+
+  def test_preload_with_available_records_does_not_match_through_keys_against_the_owner
+    mentor = SelfReferencingCompany.create!(name: "Parent's mentor")
+    unrelated = SelfReferencingCompany.create!(name: "Owner's mentor")
+    parent = SelfReferencingCompany.create!(name: "Parent", mentor: mentor)
+    owner = SelfReferencingCompany.create!(name: "Owner", parent: parent, mentor: unrelated)
+
+    assert_no_queries do
+      ActiveRecord::Associations::Preloader.new(
+        records: [owner],
+        associations: :parents_mentor,
+        available_records: [parent, mentor, unrelated]
+      ).call
+    end
+
+    assert_predicate owner.association(:parents_mentor), :loaded?
+    assert_same mentor, owner.parents_mentor
   end
 
   def test_preload_with_only_some_records_available_with_through_associations

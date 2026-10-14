@@ -56,23 +56,24 @@ module ActiveRecord
         # some other type, because this opens up a whole can of worms, and in basically any
         # situation it is more natural for the user to just create or modify their join records
         # directly as required.
-        def construct_join_attributes(*records)
+        def construct_join_attributes(*records, query: false)
           ensure_mutable
 
-          association_primary_key = source_reflection.association_primary_key(reflection.klass)
+          route = reflection.source_association_route
+          origin_key, destination_key = query ? [route.origin_key, route.destination_key] : [route.reference_origin_key, route.reference_destination_key]
 
-          if Array(association_primary_key) == reflection.klass.composite_query_constraints_list && !options[:source_type]
+          if destination_key.to_a == reflection.klass.composite_query_constraints_list && !options[:source_type]
             join_attributes = { source_reflection.name => records }
           else
-            assoc_pk_values = records.map { |record| record.read_attribute(association_primary_key) }
-            join_attributes = { source_reflection.foreign_key => assoc_pk_values }
+            target_values = records.map { |record| destination_key.value_of(record) }
+            join_attributes = { origin_key.name => target_values }
           end
 
           if options[:source_type]
             join_attributes[source_reflection.foreign_type] = [ options[:source_type] ]
           end
 
-          if records.count == 1
+          if records.count == 1 && !(query && destination_key.composite?)
             join_attributes.transform_values!(&:first)
           else
             join_attributes
@@ -87,6 +88,10 @@ module ActiveRecord
               owner.read_attribute(foreign_key_column)
             end.presence
           end
+        end
+
+        def matches_foreign_key?(_record)
+          false
         end
 
         def foreign_key_present?
@@ -121,9 +126,8 @@ module ActiveRecord
             target = through_association.target
 
             if inverse && target && !target.is_a?(Array)
-              Array(target.id).zip(Array(inverse.foreign_key)).map do |primary_key_value, foreign_key_column|
-                attributes[foreign_key_column] = primary_key_value
-              end
+              route = source_reflection.association_route(origin_class: target.class)
+              attributes.merge!(route.destination_attributes(target))
             end
           end
 

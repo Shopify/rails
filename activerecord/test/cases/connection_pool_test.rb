@@ -50,6 +50,58 @@ module ActiveRecord
         @pools&.each(&:disconnect!)
       end
 
+      def test_lease_lookup_does_not_create_an_entry
+        registry = ConnectionPool::LeaseRegistry.new
+        assert_kind_of ActiveSupport::WeakKeyMap, registry
+        context = ActiveSupport::IsolatedExecutionState.context
+
+        assert_nil registry[context]
+        assert_not registry.key?(context)
+        lease = registry.lease(context)
+        assert_same lease, registry[context]
+        assert_same lease, registry.lease(context)
+      end
+
+      def test_foreign_owner_cleanup_does_not_create_a_lease
+        ready, release = Queue.new, Queue.new
+        worker = Thread.new do
+          ready << [pool.checkout, ActiveSupport::IsolatedExecutionState.context]
+          release.pop
+        end
+        connection, owner = ready.pop
+        registry = pool.instance_variable_get(:@leases)
+
+        pool.remove(connection)
+
+        assert_not registry.key?(owner)
+      ensure
+        release << true if worker
+        worker&.join
+        connection&.disconnect!
+      end
+
+      def test_foreign_owner_cleanup_preserves_the_existing_lease
+        ready, release = Queue.new, Queue.new
+        worker = Thread.new do
+          leased = pool.lease_connection
+          ready << [leased, pool.checkout, ActiveSupport::IsolatedExecutionState.context]
+          release.pop
+          pool.release_connection
+        end
+        leased, connection, owner = ready.pop
+        registry = pool.instance_variable_get(:@leases)
+        lease = registry[owner]
+
+        pool.remove(connection)
+
+        assert_same lease, registry[owner]
+        assert_same leased, lease.connection
+      ensure
+        release << true if worker
+        worker&.join
+        connection&.disconnect!
+      end
+
       def test_checkout_after_close
         connection = pool.lease_connection
         assert_predicate connection, :in_use?

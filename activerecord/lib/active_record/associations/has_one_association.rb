@@ -57,7 +57,24 @@ module ActiveRecord
         end
       end
 
+      def reference_changed_for_autosave?(record)
+        route = reflection.association_route(origin_class: owner.class, destination_class: record.class)
+        route.reference_needs_update?(owner, record) || reference_key_changed_for_save?(record)
+      end
+
+      def synchronize_reference(record)
+        route = reflection.association_route(origin_class: owner.class, destination_class: record.class)
+        route.write(owner, record, force: false)
+        set_inverse_instance(record)
+      end
+
       private
+        def reference_key_changed_for_save?(record)
+          ActiveRecord::Key.for(reflection.foreign_key).any? do |key|
+            record.will_save_change_to_attribute?(record.class.attribute_aliases[key] || key)
+          end
+        end
+
         def replace(record, save = true)
           raise_on_type_mismatch!(record) if record
 
@@ -119,8 +136,9 @@ module ActiveRecord
         end
 
         def nullify_owner_attributes(record)
+          route = reflection.association_route(origin_class: owner.class, destination_class: record.class)
           primary_key = ActiveRecord::Key.for(record.class.primary_key)
-          foreign_key = ActiveRecord::Key.for(reflection.foreign_key)
+          foreign_key = route.reference_destination_key
 
           # Preserve shared primary key columns only if another foreign key
           # column can be cleared to disassociate the record.
@@ -130,7 +148,7 @@ module ActiveRecord
             next if preserve_primary_key && primary_key.include?(foreign_key_column)
             record.write_attribute(foreign_key_column, nil)
           end
-          record.write_attribute(reflection.type, nil) if reflection.type.present?
+          route.destination_fixed_values.each_key { |column| record.write_attribute(column, nil) }
         end
 
         def transaction_if(value, &block)

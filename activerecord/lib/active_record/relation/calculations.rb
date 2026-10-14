@@ -508,7 +508,10 @@ module ActiveRecord
         if group_fields.size == 1 && group_fields.first.respond_to?(:to_sym)
           association  = model._reflect_on_association(group_fields.first)
           associated   = association && association.belongs_to? # only count belongs_to associations
-          group_fields = Array(association.foreign_key) if associated
+          if associated
+            route = association.association_route(origin_class: model, destination_class: association.klass)
+            group_fields = route.origin_key.to_a
+          end
         end
 
         relation = except(:group).distinct!(false)
@@ -549,14 +552,15 @@ module ActiveRecord
           end
 
           result.then do |calculated_data|
-            if association
-              key_ids = if association.klass.base_class.composite_primary_key?
+            if associated
+              destination_key = route.destination_key
+              key_ids = if destination_key.composite?
                 calculated_data.collect { |row| group_aliases.map { |group_alias| row[group_alias] } }
               else
                 calculated_data.collect { |row| row[group_aliases.first] }
               end
-              key_records = association.klass.base_class.where(association.klass.base_class.primary_key => key_ids)
-              key_records = key_records.index_by(&:id)
+              key_records = association.klass.base_class.where(destination_key.name => key_ids)
+              key_records = key_records.index_by { |record| destination_key.value_of(record) }
             end
 
             key_types = group_columns.each_with_object({}) do |(aliaz, col_name), types|
