@@ -1395,6 +1395,10 @@ module ActiveRecord
         #   model to one on the associated model, for example <tt>{ tenant_id: :account_tenant_id }</tt>, and
         #   requires +:foreign_key+. Query constraint columns must differ from foreign key columns on the table
         #   that stores the foreign key. Changing a query constraint does not invalidate a loaded target.
+        # [+:native_query_constraints+]
+        #   Defines additional query constraints using the same forms as +:query_constraints+, but applies them
+        #   only when the association source's current schema context has query constraints. Each source schema
+        #   context retains its own association route.
         # [+:index_errors+]
         #   Allows differentiation of multiple validation errors from the association records, by including
         #   an index in the error attribute name, e.g. +roles[2].level+.
@@ -1614,6 +1618,10 @@ module ActiveRecord
         #   model to one on the associated model, for example <tt>{ tenant_id: :account_tenant_id }</tt>, and
         #   requires +:foreign_key+. Query constraint columns must differ from foreign key columns on the table
         #   that stores the foreign key. Changing a query constraint does not invalidate a loaded target.
+        # [+:native_query_constraints+]
+        #   Defines additional query constraints using the same forms as +:query_constraints+, but applies them
+        #   only when the association source's current schema context has query constraints. Each source schema
+        #   context retains its own association route.
         # [+:deprecated+]
         #   If true, marks the association as deprecated. Usage of deprecated associations is reported.
         #   Please, check the class documentation above for details.
@@ -1813,6 +1821,10 @@ module ActiveRecord
         #   model to one on the associated model, for example <tt>{ tenant_id: :account_tenant_id }</tt>, and
         #   requires +:foreign_key+. Query constraint columns must differ from foreign key columns on the table
         #   that stores the foreign key. Changing a query constraint does not invalidate a loaded target.
+        # [+:native_query_constraints+]
+        #   Defines additional query constraints using the same forms as +:query_constraints+, but applies them
+        #   only when the association source's current schema context has query constraints. Each source schema
+        #   context retains its own association route.
         # [+:deprecated+]
         #   If true, marks the association as deprecated. Usage of deprecated associations is reported.
         #   Please, check the class documentation above for details.

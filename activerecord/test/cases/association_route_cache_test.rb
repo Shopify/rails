@@ -101,6 +101,44 @@ class AssociationRouteCacheTest < ActiveSupport::TestCase
     assert_collected refs
   end
 
+  def test_native_query_constraints_follow_source_schema_contexts
+    owner, destination = build_model, build_model
+    owner.has_many :children,
+      anonymous_class: destination,
+      foreign_key: "owner_id",
+      primary_key: "id",
+      inverse_of: false,
+      native_query_constraints: "shop_id"
+    reflection = owner.reflect_on_association(:children)
+
+    mysql_route = reflection.association_route
+    owner.reload_stub_schema(ActiveModel::Type::Integer, has_query_constraints: true)
+    postgresql_route = reflection.association_route
+
+    assert_not_same mysql_route, postgresql_route
+    assert_equal [["id", "owner_id"]], mysql_route.each_match.to_a
+    assert_equal [["shop_id", "shop_id"], ["id", "owner_id"]], postgresql_route.each_match.to_a
+  end
+
+  def test_belongs_to_native_query_constraints_follow_source_schema_contexts
+    owner, destination = build_model, build_model
+    owner.belongs_to :parent,
+      anonymous_class: destination,
+      foreign_key: "parent_id",
+      primary_key: "id",
+      inverse_of: false,
+      native_query_constraints: "shop_id"
+    reflection = owner.reflect_on_association(:parent)
+
+    mysql_route = reflection.association_route
+    owner.reload_stub_schema(ActiveModel::Type::Integer, has_query_constraints: true)
+    postgresql_route = reflection.association_route
+
+    assert_not_same mysql_route, postgresql_route
+    assert_equal [["parent_id", "id"]], mysql_route.each_match.to_a
+    assert_equal [["shop_id", "shop_id"], ["parent_id", "id"]], postgresql_route.each_match.to_a
+  end
+
   def test_dup_and_clear_do_not_share_reflection_caches
     reflection, _, destination = build_reflection
     copy = reflection.dup
@@ -197,10 +235,13 @@ class AssociationRouteCacheTest < ActiveSupport::TestCase
     # Like the schema context it stands in for, each stub is a distinct object
     # that refers to its model.
     class SchemaContextStub
-      def initialize(model_class)
+      def initialize(model_class, has_query_constraints: false)
         @model_class = model_class
+        @has_query_constraints = has_query_constraints
         freeze
       end
+
+      def has_query_constraints? = @has_query_constraints
     end
 
     def build_model
@@ -214,9 +255,9 @@ class AssociationRouteCacheTest < ActiveSupport::TestCase
         end
 
         # Gives the model new attribute types, as a schema reload would.
-        def self.reload_stub_schema(type_class)
+        def self.reload_stub_schema(type_class, has_query_constraints: false)
           @stub_type_class = type_class
-          @stub_schema_context = SchemaContextStub.new(self)
+          @stub_schema_context = SchemaContextStub.new(self, has_query_constraints: has_query_constraints)
         end
 
         def self.schema_context = @stub_schema_context

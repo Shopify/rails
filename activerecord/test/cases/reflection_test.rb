@@ -905,6 +905,19 @@ class ReflectionTest < ActiveRecord::TestCase
     assert_equal ["blog_id", "blog_post_id"], route.destination_key.name
   end
 
+  def test_has_many_native_query_constraints_keep_inferred_foreign_key_scalar
+    reflection = ActiveRecord::Reflection.create(
+      :has_many, :comments, nil,
+      { native_query_constraints: :blog_id, class_name: "Sharded::Comment" },
+      Sharded::BlogPost
+    )
+    route = reflection.association_route
+
+    assert_equal "blog_post_id", reflection.foreign_key
+    assert_equal "id", reflection.active_record_primary_key
+    assert_equal [["blog_id", "blog_id"], ["id", "blog_post_id"]], route.each_match.to_a
+  end
+
   def test_has_many_query_constraints_cannot_include_explicit_foreign_key
     reflection = ActiveRecord::Reflection.create(
       :has_many, :comments, nil,
