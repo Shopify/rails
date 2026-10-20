@@ -211,7 +211,11 @@ module ActiveRecord
 
         ActiveSupport::Ractors.on_main(self) do
           @load_schema_monitor.synchronize do
-            @schema_context ||= ActiveSupport::Ractors.make_shareable(build_schema_context)
+            @schema_context ||= begin
+              context = build_schema_context
+              include AttributeMethods::CompositePrimaryKey if context.primary_key_definition.composite?
+              ActiveSupport::Ractors.make_shareable(context)
+            end
           end
         end
       end

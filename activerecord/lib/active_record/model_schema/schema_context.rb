@@ -6,8 +6,8 @@ require "active_support/weak_key_map"
 
 module ActiveRecord
   module ModelSchema
-    # SchemaContext owns all schema-derived state for a model: columns,
-    # attribute types, column defaults, and query constraints.
+    # SchemaContext owns all schema-derived state for a model:
+    # primary key, columns, attribute types, column defaults, and query constraints.
     class SchemaContext # :nodoc:
       # Keep column metadata separate so the context is shareable before columns load.
       # Each Ractor caches a reference to the same immutable ColumnMetadata.
@@ -36,7 +36,7 @@ module ActiveRecord
           @column_names = @columns.map(&:name).freeze
 
           primary_key = context.primary_key
-          @query_constraints_list = context.send(:derive_query_constraints_list, primary_key)
+          @query_constraints_list = context.query_constraints_definition || context.derive_query_constraints_list(primary_key)
           @composite_query_constraints_list = (@query_constraints_list || Array(primary_key)).freeze
           @composite_query_constraints_definition = ActiveRecord::Key.for(@composite_query_constraints_list)
           @content_columns = @columns.reject do |column|
@@ -78,7 +78,7 @@ module ActiveRecord
           @types = defaults.cast_types.tap do |hash|
             hash.default = ActiveModel::Type.default_value
           end
-          default_keys = DatabaseDefaultKeys.new(context.model_class.primary_key_definition, context.columns_hash)
+          default_keys = DatabaseDefaultKeys.new(context.primary_key_definition, context.columns_hash)
           @builder = ActiveModel::AttributeSet::Builder.new(@types, defaults, default_keys)
           @column_defaults = defaults.to_hash.freeze if defaults.read_only?
         end
@@ -90,7 +90,7 @@ module ActiveRecord
       end
 
       attr_reader :model_class, :only_columns, :ignored_columns,
-        :inheritance_column, :query_constraints_definition
+        :inheritance_column, :query_constraints_definition, :primary_key_definition
 
       def initialize(model_class)
         @model_class = model_class
@@ -98,6 +98,13 @@ module ActiveRecord
         @ignored_columns = model_class.ignored_columns
         @inheritance_column = model_class.inheritance_column
         @query_constraints_definition = model_class.query_constraints_definition
+        @base_context = nil
+        @primary_key_definition = model_class.declared_primary_key_definition
+        unless @primary_key_definition
+          @base_context = base_context
+          @primary_key_definition = @base_context&.primary_key_definition ||
+            ActiveRecord::Key.for(get_primary_key(model_class.base_class.name))
+        end
       end
 
       def attributes
@@ -126,6 +133,14 @@ module ActiveRecord
         column_metadata.query_constraints_list
       end
 
+      def derive_query_constraints_list(primary_key, base_primary_key = base_context&.primary_key)
+        if model_class.base_class? || primary_key != base_primary_key
+          primary_key if primary_key.is_a?(Array)
+        else
+          base_context.query_constraints_definition || (primary_key if primary_key.is_a?(Array))
+        end
+      end
+
       def composite_query_constraints_list
         column_metadata.composite_query_constraints_list
       end
@@ -151,7 +166,23 @@ module ActiveRecord
       end
 
       def primary_key
-        model_class.primary_key
+        primary_key_definition.name
+      end
+
+      def table_exists?
+        table_name && model_class.schema_cache.data_source_exists?(table_name)
+      end
+
+      def get_primary_key(base_name)
+        if base_name && model_class.primary_key_prefix_type == :table_name
+          base_name.foreign_key(false)
+        elsif base_name && model_class.primary_key_prefix_type == :table_name_with_underscore
+          base_name.foreign_key
+        elsif ActiveRecord::Base != model_class && table_exists?
+          model_class.schema_cache.primary_keys(table_name)
+        else
+          "id"
+        end
       end
 
       def has_query_constraints?
@@ -229,6 +260,10 @@ module ActiveRecord
       end
 
       private
+        def base_context
+          @base_context || (model_class.base_class.schema_context unless model_class.base_class?)
+        end
+
         def column_metadata
           data = column_metadata_cache[self]
           return data if data&.frozen?
@@ -250,16 +285,6 @@ module ActiveRecord
 
         def attributes_cache
           ActiveSupport::Ractors.store_if_absent(:active_record_schema_attributes) { ActiveSupport::WeakKeyMap.new }
-        end
-
-        def derive_query_constraints_list(primary_key)
-          return query_constraints_definition if query_constraints_definition
-
-          if model_class.base_class? || primary_key != model_class.base_class.primary_key
-            primary_key if primary_key.is_a?(Array)
-          else
-            model_class.base_class.query_constraints_definition || (primary_key if primary_key.is_a?(Array))
-          end
         end
     end
   end

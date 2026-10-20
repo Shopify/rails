@@ -1,3 +1,18 @@
+*   Infer a model's primary key from its own table when it descends from an
+    abstract class.
+
+    A descendant of an abstract class previously inherited the key its parent
+    had already inferred, so a parent on `topics` resolving `id` left a child
+    on `movies` with `id` rather than `movieid`. Only explicit `primary_key=`
+    declarations are inherited now.
+
+    Query logic derived from the primary key also honors a `primary_key`
+    reader override on the model, so `find` on a subclass relation, deleting
+    a partially loaded record through an association, and updating a record
+    with an overridden composite key use the overridden key.
+
+    *Adrianna Chang*
+
 *   Bump the minimum supported MySQL version to 5.7.9.
 
     This drops the workarounds for indexing `utf8mb4` `varchar(255)` columns.
