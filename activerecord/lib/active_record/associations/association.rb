@@ -268,7 +268,12 @@ module ActiveRecord
             Base.strict_loading_violation!(owner: owner.class, reflection: reflection)
           end
 
-          routes = reflection.association_route_chain(origin_class: owner.class, destination_class: klass)
+          routes = if reflection.polymorphic?
+            polymorphic_type = owner.read_attribute(reflection.foreign_type)
+            [reflection.association_route(origin_class: owner.class, destination_class: klass, polymorphic_type: polymorphic_type)]
+          else
+            reflection.association_route_chain(origin_class: owner.class, destination_class: klass)
+          end
           scope = self.scope(routes)
           if skip_statement_cache?(scope)
             if async

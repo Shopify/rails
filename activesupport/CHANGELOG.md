@@ -1,3 +1,8 @@
+*   Allow `active_support/descendants_tracker` to be required directly after
+    `ActiveSupport::WeakSet` was extracted into its own file.
+
+    *Nikita Vasilevsky*
+
 *   `ActiveSupport::ParameterFilter#filter_param` now passes `{ key => value }` to
     `Proc` filters as their third argument, the same hash `filter` would pass for that
     single pair, instead of `nil`.
