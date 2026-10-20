@@ -1106,6 +1106,29 @@ class InversePolymorphicBelongsToTests < ActiveRecord::TestCase
     # fails because Interest does have the correct inverse_of
     assert_raise(ActiveRecord::InverseOfAssociationNotFoundError) { Face.first.polymorphic_human = Interest.first }
   end
+
+  def test_preloading_an_inverse_whose_scope_does_not_select_the_polymorphic_type
+    human = Human.create!
+    Face.create!(polymorphic_human: human, description: "pleasant")
+
+    preloaded = Human.where(id: human.id).preload(:polymorphic_face_with_partial_select).first
+    face = preloaded.polymorphic_face_with_partial_select
+
+    assert_not face.has_attribute?(:description)
+    assert_same preloaded, face.polymorphic_human
+  end
+
+  def test_replacing_an_inverse_whose_scope_does_not_select_the_polymorphic_type
+    human = Human.create!
+    Face.create!(polymorphic_human: human, description: "pleasant")
+
+    human = Human.find(human.id)
+    old_face = human.polymorphic_face_with_partial_select
+    human.polymorphic_face_with_partial_select = Face.new(description: "confused")
+
+    assert_nil old_face.polymorphic_human_id
+    assert_nil old_face.polymorphic_human
+  end
 end
 
 # NOTE - these tests might not be meaningful, ripped as they were from the parental_control plugin

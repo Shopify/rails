@@ -81,12 +81,12 @@ module ActiveRecord
       target_columns = _target_key.columns if target_record
       _reference_key.each_with_index do |column, index|
         value = target_record&._read_attr(target_columns[index])
-        next if !force && reference_record._read_attr(column) == value
+        next if !force && reference_record._read_attribute(column) == value
         reference_record._write_attribute(column, value)
       end
 
       _fixed_values.each do |column, value|
-        next if !force && reference_record._read_attr(column) == value
+        next if !force && reference_record._read_attribute(column) == value
         reference_record._write_attribute(column, value)
       end unless _fixed_values.empty?
     end
@@ -99,7 +99,7 @@ module ActiveRecord
       return unless fixed_values
 
       _fixed_values.each_key do |column|
-        next if !force && reference_record._read_attr(column).nil?
+        next if !force && reference_record._read_attribute(column).nil?
         reference_record._write_attribute(column, nil)
       end
     end
@@ -146,7 +146,7 @@ module ActiveRecord
   class AssociationLink::DeprecatedIdWriter < AssociationLink # :nodoc:
     def write_reference(reference_record, target_record, force: true)
       each_reference_value(target_record) do |column, value|
-        next if !force && reference_record.read_attr(column) == value
+        next if !force && reference_record.read_attribute(column) == value
         reference_record.write_attribute(column, value)
       end
     end
@@ -159,7 +159,7 @@ module ActiveRecord
       return unless fixed_values
 
       self.fixed_values.each_key.zip(_fixed_values.each_key) do |column, physical_column|
-        next if !force && reference_record._read_attr(physical_column).nil?
+        next if !force && reference_record._read_attribute(physical_column).nil?
         reference_record.write_attribute(column, nil)
       end
     end

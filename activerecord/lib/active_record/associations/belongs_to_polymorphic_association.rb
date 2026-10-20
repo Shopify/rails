@@ -34,7 +34,7 @@ module ActiveRecord
 
         def stale_state
           if foreign_key = super
-            [foreign_key, owner._read_attr(foreign_type)]
+            [foreign_key, owner._read_attribute(foreign_type)]
           end
         end
     end
