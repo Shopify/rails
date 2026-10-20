@@ -17,6 +17,57 @@ module SchemaLoadCounter
 end
 
 class SchemaLoadingTest < ActiveRecord::TestCase
+  def test_inheritance_column_change_refreshes_loaded_descendant_content_columns
+    klass = define_model { |model| model.table_name = "topics" }
+    models = [klass, Class.new(klass)]
+    models.each do |model|
+      assert_includes model.content_columns.map(&:name), "author_name"
+    end
+
+    klass.inheritance_column = "author_name"
+
+    models.each do |model|
+      assert_not_includes model.content_columns.map(&:name), "author_name"
+    end
+  end
+
+  def test_loaded_schema_context_retains_its_column_metadata_after_model_configuration_changes
+    klass = define_model { |model| model.table_name = "topics" }
+    context = klass.schema_context
+    assert_includes context.column_names, "title"
+
+    klass.table_name = "subscribers"
+
+    assert_includes context.column_names, "title"
+    assert_not_includes klass.column_names, "title"
+  end
+
+  def test_failed_schema_initialization_does_not_publish_column_metadata
+    klass = define_model
+    context = klass.schema_context
+
+    klass.stub(:make_pending_attribute_modifications_shareable, -> { raise "schema initialization failed" }) do
+      assert_raises(RuntimeError) { klass.column_names }
+    end
+
+    assert_nil klass.current_schema_context
+    assert_not_same context, klass.schema_context
+    assert_includes klass.column_names, "id"
+    assert_equal 1, klass.load_schema_calls
+  end
+
+  def test_failed_schema_hook_does_not_publish_the_context
+    klass = define_model
+
+    klass.stub(:load_schema!, -> { raise "schema hook failed" }) do
+      assert_raises(RuntimeError) { klass.column_names }
+    end
+
+    assert_nil klass.current_schema_context
+    assert_includes klass.column_names, "id"
+    assert_equal 1, klass.load_schema_calls
+  end
+
   def test_basic_model_is_loaded_once
     klass = define_model
     klass.new
