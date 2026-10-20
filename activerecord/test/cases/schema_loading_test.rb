@@ -17,6 +17,24 @@ module SchemaLoadCounter
 end
 
 class SchemaLoadingTest < ActiveRecord::TestCase
+  def test_schema_context_owns_primary_key_without_loading_columns
+    klass = define_model { |model| model.table_name = "topics" }
+    klass.schema_cache.stub(:columns_hash, ->(*) { flunk "Primary key resolution loaded columns" }) do
+      assert_equal "id", klass.primary_key
+      assert_equal "id", klass.schema_context.primary_key
+      assert_not_predicate klass.schema_context, :schema_loaded?
+    end
+  end
+
+  def test_content_columns_uses_inheritance_column_set_after_primary_key_resolution
+    klass = define_model { |model| model.table_name = "topics" }
+    assert_equal "id", klass.primary_key
+
+    klass.inheritance_column = "author_name"
+
+    assert_not_includes klass.content_columns.map(&:name), "author_name"
+  end
+
   def test_inheritance_column_change_refreshes_loaded_descendant_content_columns
     klass = define_model { |model| model.table_name = "topics" }
     models = [klass, Class.new(klass)]
@@ -40,6 +58,16 @@ class SchemaLoadingTest < ActiveRecord::TestCase
 
     assert_includes context.column_names, "title"
     assert_not_includes klass.column_names, "title"
+  end
+
+  def test_declared_primary_key_can_be_read_before_first_table_name_assignment
+    klass = Class.new(ActiveRecord::Base) { self.primary_key = "id" }
+    assert_equal "id", klass.primary_key
+
+    klass.table_name = "topics"
+
+    assert_equal "id", klass.primary_key
+    assert_includes klass.column_names, "title"
   end
 
   def test_failed_schema_initialization_does_not_publish_column_metadata
