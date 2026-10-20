@@ -303,8 +303,70 @@ class CoreTest < ActiveRecord::TestCase
         end
         context = model.schema_context
 
-        assert_ractor_shareable context
+        assert Ractor.shareable?(context)
+        assert_not_predicate context, :schema_loaded?
         assert_same context, on_ractor { model.schema_context }
+        assert_not_predicate context, :schema_loaded?
+      end
+
+      def test_shared_schema_context_loads_columns_on_a_non_main_ractor
+        model = Class.new(ActiveRecord::Base) do
+          def self.name = "ractor_shared_schema_context_columns"
+          self.table_name = "topics"
+        end
+        context = model.schema_context
+
+        assert Ractor.shareable?(context)
+        assert_not_predicate context, :schema_loaded?
+
+        column_names, attributes = ActiveSupport::Ractors.with(unshareable_proc_action: :raise) do
+          on_ractor { [model.column_names, context.attributes] }
+        end
+
+        assert_includes column_names, "id"
+        assert_predicate context, :schema_loaded?
+        assert_no_queries(include_schema: true) do
+          assert_same context, model.schema_context
+          assert_same column_names, context.column_names
+          assert_same attributes, context.attributes
+        end
+
+        assert_ractor_shareable attributes
+        assert_predicate attributes.defaults, :read_only?
+        assert_equal true, attributes.defaults["approved"].value
+      end
+
+      def test_schema_context_shares_columns_but_keeps_attributes_ractor_local
+        model = Class.new(ActiveRecord::Base) do
+          def self.name = "ractor_schema_context_local_attributes"
+          self.table_name = "topics"
+          attribute :approved, default: true
+        end
+        context = model.schema_context
+        assert_not_predicate context, :schema_loaded?
+
+        columns_hash, attributes_id, defaults_id, stable_attributes, approved_default =
+          ActiveSupport::Ractors.with(unshareable_proc_action: :raise) do
+            on_ractor do
+              worker_context = model.schema_context
+              attributes = worker_context.attributes
+              [
+                worker_context.columns_hash,
+                attributes.object_id,
+                attributes.defaults.object_id,
+                attributes.equal?(worker_context.attributes),
+                attributes.defaults.fetch_value("approved"),
+              ]
+            end
+          end
+
+        assert_same context.columns_hash, columns_hash
+        assert_ractor_shareable columns_hash
+        assert_not_equal context.attributes.object_id, attributes_id
+        assert_not_equal context.attributes.defaults.object_id, defaults_id
+        assert stable_attributes
+        assert_equal true, approved_default
+        assert_equal true, context.attributes.defaults.fetch_value("approved")
       end
 
       def test_find_by_statement_cache_is_ractor_local
