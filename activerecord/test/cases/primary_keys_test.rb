@@ -284,23 +284,71 @@ class PrimaryKeysTest < ActiveRecord::TestCase
     subclass = Class.new(k)
     assert_equal "id", subclass.primary_key
 
-    k.primary_key = "title"
-    assert_equal "title", subclass.primary_key
+    assert_no_queries(include_schema: true) do
+      k.primary_key = "title"
+      assert_equal "title", subclass.primary_key
+    end
   end
 
   def test_primary_key_assigned_on_subclass_is_not_overridden_by_parent
     k = Class.new(ActiveRecord::Base) { self.table_name = "topics" }
     subclass = Class.new(k) { self.primary_key = "title" }
+    no_key_subclass = Class.new(k) { self.primary_key = nil }
 
-    k.primary_key = "author_name"
-    assert_equal "author_name", k.primary_key
-    assert_equal "title", subclass.primary_key
+    assert_no_queries(include_schema: true) do
+      k.primary_key = "author_name"
+      assert_equal "author_name", k.primary_key
+      assert_equal "title", subclass.primary_key
+      assert_nil no_key_subclass.primary_key
+    end
+  end
+
+  def test_declared_primary_key_on_subclass_does_not_read_parent_database_metadata
+    parent = Class.new(ActiveRecord::Base) { self.table_name = "topics" }
+
+    ["title", ["title", "author_name"], nil].each do |key|
+      child = Class.new(parent) { self.primary_key = key }
+
+      parent.schema_cache.stub(:data_source_exists?, ->(*) { flunk "Primary key declaration inspected database metadata" }) do
+        if key.nil?
+          assert_nil child.primary_key
+        else
+          assert_equal key, child.primary_key
+        end
+      end
+    end
+  end
+
+  def test_declared_primary_key_preserves_inherited_query_constraints
+    parent = Class.new(ActiveRecord::Base) do
+      self.table_name = "topics"
+      query_constraints :title, :id
+    end
+    child = Class.new(parent) { self.primary_key = "id" }
+    child_with_different_key = Class.new(parent) { self.primary_key = "title" }
+
+    assert_equal ["title", "id"], child.query_constraints_list
+    assert_nil child_with_different_key.query_constraints_list
+  end
+
+  def test_abstract_class_descendant_infers_primary_key_from_its_own_table
+    parent = Class.new(ActiveRecord::Base) do
+      self.abstract_class = true
+      self.table_name = "topics"
+    end
+    assert_equal "id", parent.primary_key
+
+    child = Class.new(parent) do
+      self.table_name = "movies"
+    end
+    assert_equal "movieid", child.primary_key
   end
 
   def test_primary_key_assignment_reloads_schema
     klass = Class.new(ActiveRecord::Base) do
       self.table_name = "topics"
     end
+    assert_equal ["id"], klass.composite_query_constraints_list
     context = klass.schema_context
 
     klass.primary_key = ["title", "id"]
@@ -310,12 +358,67 @@ class PrimaryKeysTest < ActiveRecord::TestCase
     assert_equal ["title", "id"], klass.composite_query_constraints_list
   end
 
+  def test_association_delete_uses_overridden_primary_key_for_partial_records
+    parent_model = Class.new(ActiveRecord::Base) do
+      self.table_name = "topics"
+    end
+    child_model = Class.new(ActiveRecord::Base) do
+      self.table_name = "topics"
+
+      def self.primary_key
+        "title"
+      end
+    end
+    parent_model.has_many :children, anonymous_class: child_model, foreign_key: :parent_id, inverse_of: false
+    parent = parent_model.create!(title: "Parent")
+    child_model.create!(title: "Child", parent_id: parent.id)
+    child = parent.children.select(:title, :parent_id).first
+
+    assert_equal "Child", child.id
+    assert_nil child.read_attribute(:id)
+
+    parent.children.delete(child)
+
+    child = child_model.find("Child")
+    assert_nil child.parent_id
+  end
+
+  def test_find_on_subclass_relation_honors_primary_key_reader_override
+    parent = Class.new(ActiveRecord::Base) do
+      self.table_name = "movies"
+
+      def self.primary_key
+        "name"
+      end
+    end
+    child = Class.new(parent)
+    movie = movies(:first)
+
+    assert_equal movie.name, child.all.find(movie.name).id
+  end
+
+  def test_update_honors_composite_primary_key_reader_override
+    model = Class.new(ActiveRecord::Base) do
+      self.table_name = "topics"
+
+      def self.primary_key
+        ["title", "author_name"]
+      end
+    end
+    topic = model.find_by!(id: topics(:first).id)
+
+    topic.update!(title: "Updated title")
+
+    assert_equal "Updated title", topics(:first).reload.title
+  end
+
   def test_primary_key_assignment_reloads_descendant_schema
     klass = Class.new(ActiveRecord::Base) do
       self.table_name = "topics"
       self.primary_key = "id"
     end
     child = Class.new(klass)
+    assert_equal ["id"], child.composite_query_constraints_list
     context = child.schema_context
 
     klass.primary_key = ["title", "id"]
@@ -425,23 +528,103 @@ class PrimaryKeysTest < ActiveRecord::TestCase
       include ActiveSupport::Testing::Isolation
       include ActiveSupport::Testing::RactorsAssertions
 
+      setup do
+        [Topic, Cpk::Order, NonPrimaryKey].each do |model|
+          model.reset_column_information
+        end
+      end
+
       def test_primary_key_can_be_read_from_a_ractor_when_single
         Topic.primary_key
         assert_equal "id", on_ractor { Topic.primary_key }
+        assert_not_predicate Topic.schema_context, :schema_loaded?
       end
 
       def test_primary_key_can_be_read_from_a_ractor_when_composite
         Cpk::Order.primary_key
         assert_equal ["shop_id", "id"], on_ractor { Cpk::Order.primary_key }
+        assert_not_predicate Cpk::Order.schema_context, :schema_loaded?
       end
 
       def test_primary_key_can_be_read_from_a_ractor_when_absent
         NonPrimaryKey.primary_key
         assert_nil on_ractor { NonPrimaryKey.primary_key }
+        assert_not_predicate NonPrimaryKey.schema_context, :schema_loaded?
+      end
+
+      def test_primary_key_can_be_resolved_on_a_ractor_without_main_ractor_warmup
+        [Topic, Cpk::Order, NonPrimaryKey].zip(["id", ["shop_id", "id"], nil]).each do |model, expected|
+          actual, context, schema_loaded = on_ractor do
+            [model.primary_key, model.schema_context, model.schema_context.schema_loaded?]
+          end
+
+          if expected.nil?
+            assert_nil actual
+          else
+            assert_equal expected, actual
+          end
+          assert_same context, model.schema_context
+          assert_not schema_loaded
+        end
       end
 
       def test_primary_key_can_be_reset_from_a_ractor
-        assert_equal "id", on_ractor { Topic.reset_primary_key }
+        values = on_ractor do
+          before = Topic.primary_key
+          reset = Topic.reset_primary_key
+          [before, reset, Topic.primary_key, Topic.schema_context.schema_loaded?]
+        end
+
+        assert_equal ["id", "id", "id", false], values
+      end
+
+      def test_primary_key_can_be_read_from_a_ractor_without_a_table
+        model = Class.new(ActiveRecord::Base) do
+          self.abstract_class = true
+          self.table_name = nil
+        end
+
+        assert_equal "id", on_ractor { model.primary_key }
+        assert_not_predicate model.schema_context, :schema_loaded?
+      end
+
+      def test_schema_contexts_keep_independent_primary_keys_on_a_ractor
+        model = Class.new(ActiveRecord::Base) do
+          self.table_name = "topics"
+        end
+
+        # The same table can have different primary keys in different databases.
+        contexts = ["id", "title"].map do |key|
+          model.schema_cache.stub(:primary_keys, key) do
+            model.build_schema_context
+          end
+        end
+        ActiveSupport::Ractors.make_shareable(contexts)
+
+        keys = on_ractor do
+          contexts.map { |context| [context.primary_key, context.schema_loaded?] }
+        end
+
+        assert_equal [["id", false], ["title", false]], keys
+      end
+
+      def test_query_constraints_honor_composite_primary_key_reader_override_on_a_ractor
+        model = Class.new(ActiveRecord::Base) do
+          self.table_name = "topics"
+
+          def self.primary_key
+            ["title", "id"]
+          end
+        end
+
+        assert_not_predicate model.schema_context, :schema_loaded?
+
+        constraints = on_ractor do
+          [model.query_constraints_list, model.composite_query_constraints_list, model.composite_query_constraints_definition.name]
+        end
+
+        assert_equal [["title", "id"]] * 3, constraints
+        constraints.each { |columns| assert_ractor_shareable columns }
       end
     end
   end
