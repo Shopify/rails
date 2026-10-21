@@ -709,7 +709,7 @@ module ActiveRecord
 
           derived_fk = derive_foreign_key(infer_from_inverse_of: infer_from_inverse_of)
 
-          if !options[:query_constraints] && !derived_fk.is_a?(Array) && active_record.has_query_constraints?
+          if extend_foreign_key_with_query_constraints?(derived_fk)
             derived_fk = derive_fk_query_constraints(derived_fk)
           end
 
@@ -744,8 +744,7 @@ module ActiveRecord
         @active_record_primary_key_definition ||=
           if options[:primary_key]
             ActiveRecord::Key.for(options[:primary_key])
-          elsif options[:foreign_key].is_a?(Array) ||
-              (active_record.has_query_constraints? && !options[:foreign_key] && !options[:query_constraints])
+          elsif composite_foreign_key_setup?
             ActiveRecord::Key.for(active_record.query_constraints_list)
           else
             inferred_primary_key_definition(active_record)
@@ -926,6 +925,20 @@ module ActiveRecord
       end
 
       private
+        def composite_foreign_key_setup?
+          options[:foreign_key].is_a?(Array) ||
+            (active_record.has_query_constraints? && !options[:foreign_key] && !options[:query_constraints])
+        end
+
+        def extend_foreign_key_with_query_constraints?(foreign_key)
+          !options[:query_constraints] && !foreign_key.is_a?(Array) && active_record.has_query_constraints?
+        end
+
+        def foreign_key_allows_automatic_inverse?(reflection)
+          foreign_key = reflection.options[:foreign_key]
+          !foreign_key || (foreign_key.is_a?(Array) && !reflection.options[:query_constraints])
+        end
+
         def query_constraint_pairs
           return unless options[:query_constraints]
 
@@ -1016,11 +1029,9 @@ module ActiveRecord
         # Third, we must not have options such as <tt>:foreign_key</tt>
         # which prevent us from correctly guessing the inverse association.
         def can_find_inverse_of_automatically?(reflection, inverse_reflection = false)
-          foreign_key = reflection.options[:foreign_key]
-
           reflection.options[:inverse_of] != false &&
             !reflection.options[:through] &&
-            (!foreign_key || (foreign_key.is_a?(Array) && !reflection.options[:query_constraints])) &&
+            foreign_key_allows_automatic_inverse?(reflection) &&
             scope_allows_automatic_inverse_of?(reflection, inverse_reflection)
         end
 
@@ -1164,8 +1175,8 @@ module ActiveRecord
 
         klass ||= self.klass
 
-        # An Array-valued `foreign_key` uses the target's composite query key.
-        if options[:foreign_key].is_a?(Array)
+        # A composite foreign key uses the target's composite query key.
+        if composite_foreign_key_setup?
           return klass.has_query_constraints? ? klass.composite_query_constraints_definition : primary_key_definition(klass)
         end
 
