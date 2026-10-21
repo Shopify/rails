@@ -2388,6 +2388,16 @@ class BelongsToWithDecoupledQueryConstraintsTest < ActiveRecord::TestCase
     assert_match(/#{Regexp.escape(Sharded::BlogPost.lease_connection.quote_table_name("sharded_blog_posts.id"))} =/, sql)
   end
 
+  def test_belongs_to_with_decoupled_qc_raises_when_query_constraint_is_not_selected
+    comment = sharded_comments(:great_comment_blog_post_one)
+    comment.blog_post_with_decoupled_qc
+    partial_comment = Sharded::Comment.select(:id, :blog_post_id).find(comment.id)
+
+    assert_raises(ActiveModel::MissingAttributeError) do
+      partial_comment.blog_post_with_decoupled_qc
+    end
+  end
+
   def test_belongs_to_association_preload_with_decoupled_qc
     comment = sharded_comments(:great_comment_blog_post_one)
     expected_blog_post = sharded_blog_posts(:great_post_blog_one)

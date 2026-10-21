@@ -172,7 +172,7 @@ module ActiveRecord
       def self.normalize_query_constraints(query_constraints)
         return unless query_constraints
 
-        query_constraints = [query_constraints] unless query_constraints.is_a?(Array)
+        query_constraints = Array.wrap(query_constraints)
         query_constraints.flat_map do |constraint|
           case constraint
           when Symbol, String
@@ -212,7 +212,7 @@ module ActiveRecord
       end
 
       def values_for(active_record)
-        active_record_columns.map { |column| active_record.read_attribute(column) }
+        active_record_columns.map { |column| active_record.read_attr(column) }
       end
 
       private
@@ -699,8 +699,7 @@ module ActiveRecord
           ActiveRecord::Key.for(options[:foreign_key])
         else
           if options[:query_constraints]
-            query_constraints = options[:query_constraints]
-            query_constraints = [query_constraints] unless query_constraints.is_a?(Array)
+            query_constraints = Array.wrap(options[:query_constraints])
             if query_constraints.any?(Hash)
               raise ArgumentError,
                 "`query_constraints` with column mapping (Hash) on `#{active_record}.#{macro} :#{name}` " \
@@ -820,7 +819,7 @@ module ActiveRecord
       end
 
       def query_key_values_for(owner)
-        Array(query_foreign_key).map { |key| owner.read_attribute(key) }
+        Array(query_foreign_key).map { |key| owner.read_attr(key) }
       end
 
       def join_id_for(owner) # :nodoc:

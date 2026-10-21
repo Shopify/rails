@@ -274,4 +274,13 @@ class HasManyThroughDisableJoinsAssociationsTest < ActiveRecord::TestCase
     assert_match(/#{blog_id_col}/, through_query)
     assert_match(/#{blog_id_col}/, source_query)
   end
+
+  def test_disable_joins_through_with_decoupled_query_constraints_raises_when_constraint_is_not_selected
+    post = sharded_blog_posts(:great_post_blog_one)
+    partial_post = Sharded::BlogPost.select(:id).find(post.id)
+
+    assert_raises(ActiveModel::MissingAttributeError) do
+      partial_post.tags_with_decoupled_qc_without_joins.load
+    end
+  end
 end
