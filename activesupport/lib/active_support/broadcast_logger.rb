@@ -136,25 +136,103 @@ module ActiveSupport
       end.first
     end
 
-    LOGGER_METHODS = %w[
-      << log add debug info warn error fatal unknown
-      close formatter
-    ].freeze # :nodoc:
-    LOGGER_METHODS.each do |method|
-      class_eval <<~RUBY, __FILE__, __LINE__ + 1
-        def #{method}(...)
-          return if @broadcasts.empty?
+    def <<(...)
+      return if @broadcasts.empty?
+      return dispatch_block(:<<, ...) if block_given? && @broadcasts.size > 1
 
-          # One logger can't execute a block twice, so it needs to be memoized
-          # before being handed to more than one logger.
-          return dispatch_block(:#{method}, ...) if block_given? && @broadcasts.size > 1
+      result = @broadcasts[0].<<(...)
+      1.upto(@broadcasts.size - 1) { |i| @broadcasts[i].<<(...) }
+      result
+    end
 
-          # Call all loggers, but only return the first logger's value
-          result = @broadcasts[0].#{method}(...)
-          1.upto(@broadcasts.size - 1) { |i| @broadcasts[i].#{method}(...) }
-          result
-        end
-      RUBY
+    def log(...)
+      return if @broadcasts.empty?
+      return dispatch_block(:log, ...) if block_given? && @broadcasts.size > 1
+
+      result = @broadcasts[0].log(...)
+      1.upto(@broadcasts.size - 1) { |i| @broadcasts[i].log(...) }
+      result
+    end
+
+    def add(...)
+      return if @broadcasts.empty?
+      return dispatch_block(:add, ...) if block_given? && @broadcasts.size > 1
+
+      result = @broadcasts[0].add(...)
+      1.upto(@broadcasts.size - 1) { |i| @broadcasts[i].add(...) }
+      result
+    end
+
+    def debug(...)
+      return if @broadcasts.empty?
+      return dispatch_block(:debug, ...) if block_given? && @broadcasts.size > 1
+
+      result = @broadcasts[0].debug(...)
+      1.upto(@broadcasts.size - 1) { |i| @broadcasts[i].debug(...) }
+      result
+    end
+
+    def info(...)
+      return if @broadcasts.empty?
+      return dispatch_block(:info, ...) if block_given? && @broadcasts.size > 1
+
+      result = @broadcasts[0].info(...)
+      1.upto(@broadcasts.size - 1) { |i| @broadcasts[i].info(...) }
+      result
+    end
+
+    def warn(...)
+      return if @broadcasts.empty?
+      return dispatch_block(:warn, ...) if block_given? && @broadcasts.size > 1
+
+      result = @broadcasts[0].warn(...)
+      1.upto(@broadcasts.size - 1) { |i| @broadcasts[i].warn(...) }
+      result
+    end
+
+    def error(...)
+      return if @broadcasts.empty?
+      return dispatch_block(:error, ...) if block_given? && @broadcasts.size > 1
+
+      result = @broadcasts[0].error(...)
+      1.upto(@broadcasts.size - 1) { |i| @broadcasts[i].error(...) }
+      result
+    end
+
+    def fatal(...)
+      return if @broadcasts.empty?
+      return dispatch_block(:fatal, ...) if block_given? && @broadcasts.size > 1
+
+      result = @broadcasts[0].fatal(...)
+      1.upto(@broadcasts.size - 1) { |i| @broadcasts[i].fatal(...) }
+      result
+    end
+
+    def unknown(...)
+      return if @broadcasts.empty?
+      return dispatch_block(:unknown, ...) if block_given? && @broadcasts.size > 1
+
+      result = @broadcasts[0].unknown(...)
+      1.upto(@broadcasts.size - 1) { |i| @broadcasts[i].unknown(...) }
+      result
+    end
+
+    def close(...)
+      return if @broadcasts.empty?
+      return dispatch_block(:close, ...) if block_given? && @broadcasts.size > 1
+
+      result = @broadcasts[0].close(...)
+      1.upto(@broadcasts.size - 1) { |i| @broadcasts[i].close(...) }
+      result
+    end
+
+    def formatter(...)
+      return if @broadcasts.empty?
+      return dispatch_block(:formatter, ...) if block_given? && @broadcasts.size > 1
+
+      result = @broadcasts[0].formatter(...)
+      1.upto(@broadcasts.size - 1) { |i| @broadcasts[i].formatter(...) }
+      result
     end
 
     def level=(level)

@@ -1,3 +1,8 @@
+*   Define `ActiveSupport::BroadcastLogger` methods explicitly instead of generating
+    them with `class_eval`, so Bootsnap can cache them.
+
+    *Sam Schmidt*
+
 *   Default `config.active_support.message_serializer` to `:json` for new apps.
 
     With `config.load_defaults 8.2`, messages from `MessageVerifier` and

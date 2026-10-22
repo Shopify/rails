@@ -31,11 +31,20 @@ module ActiveSupport
       assert log2.closed, "should be closed"
     end
 
-    test "#<< shovels the value into all loggers" do
-      logger << "foo"
+    test "#<< shovels the value into all loggers and returns the first result" do
+      assert_same log1.chevrons, logger << "foo"
 
       assert_equal %w{ foo }, log1.chevrons
       assert_equal %w{ foo }, log2.chevrons
+    end
+
+    test "#log writes to each destination" do
+      first, second = StringIO.new, StringIO.new
+      logger = BroadcastLogger.new(::Logger.new(first), ::Logger.new(second))
+
+      assert_equal true, logger.log(::Logger::INFO, "Hello")
+      assert_match(/INFO -- : Hello\n\z/, first.string)
+      assert_match(/INFO -- : Hello\n\z/, second.string)
     end
 
     test "#level= assigns the level to all loggers" do
@@ -77,6 +86,15 @@ module ActiveSupport
 
       assert_equal ::Logger::FATAL, log1.formatter
       assert_equal ::Logger::FATAL, log2.formatter
+    end
+
+    test "#formatter returns the first logger's formatter" do
+      first = proc { |*| "first" }
+      second = proc { |*| "second" }
+      log1.formatter = first
+      log2.formatter = second
+
+      assert_same first, logger.formatter
     end
 
     test "#local_level= assigns the local_level to all loggers" do
