@@ -229,11 +229,11 @@ module ActiveRecord
     # Per-column conversions for comparing origin and destination key values.
     # A nil list or entry leaves the corresponding values unchanged.
     def match_normalizers(origin_class:, destination_class:)
-      # Schema contexts are replaced on reload, so key by them to avoid
-      # reusing conversions computed from outdated attribute types.
+      # Conversions depend on attribute types, so key by the loaded contexts,
+      # which are replaced on reload.
       cache = Cache.for(self)
-      by_destination = cache.fetch_or_store(origin_class.schema_context) { Cache.new }
-      by_destination.fetch_or_store(destination_class.schema_context) do
+      by_destination = cache.fetch_or_store(origin_class.loaded_schema_context) { Cache.new }
+      by_destination.fetch_or_store(destination_class.loaded_schema_context) do
         build_match_normalizers(origin_class, destination_class)
       end
     end

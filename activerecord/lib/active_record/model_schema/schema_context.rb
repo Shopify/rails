@@ -8,9 +8,12 @@ module ActiveRecord
   module ModelSchema
     # SchemaContext owns all schema-derived state for a model:
     # primary key, columns, attribute types, column defaults, and query constraints.
+    #
+    # A model first builds an unloaded context, which resolves the primary key
+    # and schema configuration without loading columns. Loading the schema
+    # builds a loaded copy holding the column metadata, which replaces the
+    # unloaded context on the model. Both are immutable and shareable.
     class SchemaContext # :nodoc:
-      # Keep column metadata separate so the context is shareable before columns load.
-      # Each Ractor caches a reference to the same immutable ColumnMetadata.
       class ColumnMetadata # :nodoc:
         attr_reader :columns_hash, :columns, :column_names, :content_columns,
           :query_constraints_list, :composite_query_constraints_list, :composite_query_constraints_definition,
@@ -90,7 +93,8 @@ module ActiveRecord
       end
 
       attr_reader :model_class, :only_columns, :ignored_columns,
-        :inheritance_column, :query_constraints_definition, :primary_key_definition
+        :inheritance_column, :query_constraints_definition, :primary_key_definition,
+        :reload_token
 
       def initialize(model_class)
         @model_class = model_class
@@ -98,6 +102,10 @@ module ActiveRecord
         @ignored_columns = model_class.ignored_columns
         @inheritance_column = model_class.inheritance_column
         @query_constraints_definition = model_class.query_constraints_definition
+        # Shared by an unloaded context and its loaded copy, so caches that
+        # don't depend on columns survive loading but not reloading.
+        @reload_token = Object.new.freeze
+        @column_metadata = nil
         @base_context = nil
         @primary_key_definition = model_class.declared_primary_key_definition
         unless @primary_key_definition
@@ -108,9 +116,11 @@ module ActiveRecord
       end
 
       def attributes
+        return model_class.loaded_schema_context.attributes unless schema_loaded?
+
         # Share read-only attributes with the column metadata. Otherwise each
         # Ractor builds its own attributes.
-        column_metadata.attributes || initialize_attributes
+        @column_metadata.attributes || initialize_attributes
       end
 
       def columns_hash
@@ -217,11 +227,7 @@ module ActiveRecord
       end
 
       def schema_loaded?
-        if data = column_metadata_cache[self]
-          return data.frozen?
-        end
-
-        ActiveSupport::Ractors.on_main(self) { !!column_metadata_cache[self]&.frozen? }
+        !@column_metadata.nil?
       end
 
       # The model's columns as attributes, with its attribute declarations
@@ -240,47 +246,45 @@ module ActiveRecord
         end
       end
 
-      def load_schema!
-        # Attribute initialization can read column metadata recursively. Other
-        # callers acquire the model's schema monitor until this data is frozen.
-        data = column_metadata_cache[self] = ColumnMetadata.new(self)
-        model_class.make_pending_attribute_modifications_shareable
-        attributes = Attributes.new(self, build_default_attributes)
-        if attributes.defaults.read_only? && ActiveSupport::Ractors.shareable?(attributes.defaults)
-          data.attributes = attributes
-        else
-          attributes_cache[self] = attributes
-        end
-        ActiveSupport::Ractors.make_shareable(data.freeze)
+      # Builds a loaded copy of this context. The model publishes the copy as
+      # its context once it is shareable.
+      def build_loaded_context # :nodoc:
+        loaded = dup
+        loaded.load_column_metadata(self)
+        # Attribute initialization can read column metadata recursively, so the
+        # model exposes the copy to the loading thread before building them.
+        yield loaded
+        loaded.load_attributes
+        ActiveSupport::Ractors.make_shareable(loaded)
       end
 
-      def clear_schema # :nodoc:
-        column_metadata_cache.delete(self)
-        attributes_cache.delete(self)
-      end
+      protected
+        def column_metadata
+          @column_metadata || model_class.loaded_schema_context.column_metadata
+        end
+
+        def load_column_metadata(unloaded)
+          @column_metadata = ColumnMetadata.new(unloaded)
+        end
+
+        def load_attributes
+          model_class.make_pending_attribute_modifications_shareable
+          attributes = Attributes.new(self, build_default_attributes)
+          if attributes.defaults.read_only? && ActiveSupport::Ractors.shareable?(attributes.defaults)
+            @column_metadata.attributes = attributes
+          else
+            attributes_cache[self] = attributes
+          end
+          @column_metadata.freeze
+        end
 
       private
         def base_context
           @base_context || (model_class.base_class.schema_context unless model_class.base_class?)
         end
 
-        def column_metadata
-          data = column_metadata_cache[self]
-          return data if data&.frozen?
-
-          data = ActiveSupport::Ractors.on_main(self) do
-            model_class.load_schema(self)
-            column_metadata_cache[self]
-          end
-          column_metadata_cache[self] = data
-        end
-
         def initialize_attributes
           attributes_cache[self] ||= Attributes.new(self, build_default_attributes)
-        end
-
-        def column_metadata_cache
-          ActiveSupport::Ractors.store_if_absent(:active_record_column_metadata) { ActiveSupport::WeakKeyMap.new }
         end
 
         def attributes_cache

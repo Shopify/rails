@@ -165,11 +165,12 @@ class AssociationRouteCacheTest < ActiveSupport::TestCase
     # Like the schema context it stands in for, each stub is a distinct object
     # that refers to its model.
     class SchemaContextStub
-      attr_reader :primary_key_definition
+      attr_reader :primary_key_definition, :reload_token
 
       def initialize(model_class)
         @model_class = model_class
         @primary_key_definition = model_class.declared_primary_key_definition
+        @reload_token = Object.new.freeze
         freeze
       end
 
@@ -195,6 +196,7 @@ class AssociationRouteCacheTest < ActiveSupport::TestCase
 
         def self.schema_context = @stub_schema_context
         def self.current_schema_context = @stub_schema_context
+        def self.loaded_schema_context = @stub_schema_context
         def self.type_for_attribute(_name) = @stub_type_class.new
 
         reload_stub_schema(ActiveModel::Type::Integer)

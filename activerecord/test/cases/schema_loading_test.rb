@@ -51,13 +51,38 @@ class SchemaLoadingTest < ActiveRecord::TestCase
 
   def test_loaded_schema_context_retains_its_column_metadata_after_model_configuration_changes
     klass = define_model { |model| model.table_name = "topics" }
-    context = klass.schema_context
+    context = klass.loaded_schema_context
     assert_includes context.column_names, "title"
 
     klass.table_name = "subscribers"
 
     assert_includes context.column_names, "title"
     assert_not_includes klass.column_names, "title"
+  end
+
+  def test_loading_the_schema_replaces_the_context_with_a_loaded_copy
+    klass = define_model { |model| model.table_name = "topics" }
+    unloaded = klass.schema_context
+    assert_not_predicate unloaded, :schema_loaded?
+
+    assert_includes klass.column_names, "title"
+
+    loaded = klass.schema_context
+    assert_not_same unloaded, loaded
+    assert_predicate loaded, :schema_loaded?
+    assert_predicate loaded, :frozen?
+    assert_same unloaded.primary_key_definition, loaded.primary_key_definition
+    assert_same unloaded.reload_token, loaded.reload_token
+    assert_same loaded, klass.loaded_schema_context
+  end
+
+  def test_reloading_the_schema_changes_the_reload_token
+    klass = define_model { |model| model.table_name = "topics" }
+    token = klass.loaded_schema_context.reload_token
+
+    klass.reset_column_information
+
+    assert_not_same token, klass.schema_context.reload_token
   end
 
   def test_declared_primary_key_can_be_read_before_first_table_name_assignment

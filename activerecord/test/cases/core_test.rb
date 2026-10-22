@@ -324,11 +324,14 @@ class CoreTest < ActiveRecord::TestCase
         end
 
         assert_includes column_names, "id"
-        assert_predicate context, :schema_loaded?
+        assert_not_predicate context, :schema_loaded?
+        loaded = model.schema_context
+        assert_predicate loaded, :schema_loaded?
+        assert_same context.reload_token, loaded.reload_token
         assert_no_queries(include_schema: true) do
-          assert_same context, model.schema_context
-          assert_same column_names, context.column_names
-          assert_same attributes, context.attributes
+          assert_same loaded, model.schema_context
+          assert_same column_names, loaded.column_names
+          assert_same attributes, loaded.attributes
         end
 
         assert_ractor_shareable attributes

@@ -582,28 +582,43 @@ module ActiveRecord
 
       # Load the model's schema information either from the schema cache
       # or directly from the database.
-      def load_schema(context = schema_context)
-        return if context.schema_loaded?
+      def load_schema
+        return if schema_context.schema_loaded?
 
         ActiveSupport::Ractors.on_main(self) do
           @load_schema_monitor.synchronize do
+            context = schema_context
             unless context.schema_loaded? || @schema_loading
               begin
                 @schema_loading = true
-                context.load_schema!
+                @schema_context = context.build_loaded_context do |loaded|
+                  @loading_schema_context = loaded
+                end
                 unless @schema_hooks_loaded
                   load_schema!
                   @schema_hooks_loaded = true
                 end
               rescue
-                context.clear_schema
                 reload_schema_from_cache # If the schema loading failed half way through, we must reset the state.
                 raise
               ensure
+                @loading_schema_context = nil
                 @schema_loading = false
               end
             end
           end
+        end
+      end
+
+      # The schema context with its columns loaded, loading them if needed.
+      # While loading, the loading thread gets the context being loaded.
+      def loaded_schema_context # :nodoc:
+        context = schema_context
+        return context if context.schema_loaded?
+
+        ActiveSupport::Ractors.on_main(self) do
+          load_schema
+          @loading_schema_context || @schema_context
         end
       end
 

@@ -631,10 +631,10 @@ module ActiveRecord
           return default_association_route
         end
 
-        # Schema contexts are replaced on reload, so key by both endpoints to
+        # Reload tokens change when a schema reloads, so key by both endpoints to
         # avoid reusing routes with outdated keys.
-        by_destination = association_route_cache.fetch_or_store(origin_class.schema_context) { AssociationRoute::Cache.new }
-        by_destination.fetch_or_store(destination_class&.schema_context) do
+        by_destination = association_route_cache.fetch_or_store(origin_class.schema_context.reload_token) { AssociationRoute::Cache.new }
+        by_destination.fetch_or_store(destination_class&.schema_context&.reload_token) do
           resolve_association_route(origin_class, destination_class)
         end
       end
@@ -842,9 +842,9 @@ module ActiveRecord
           polymorphic? ? nil : klass
         end
 
-        # Slots contain [origin context, destination class, destination context, route].
+        # Slots contain [origin reload token, destination class, destination reload token, route].
         # A slot resolved before the reflection is frozen is shared until a schema
-        # context changes; slots resolved later are stored per Ractor.
+        # reloads; slots resolved later are stored per Ractor.
         def default_association_route
           slot = @default_association_route
           return slot[3] if current_default_association_route?(slot)
@@ -855,10 +855,10 @@ module ActiveRecord
           end
 
           destination_class = default_destination_class
-          origin_context = active_record.schema_context
-          destination_context = destination_class&.schema_context
+          origin_token = active_record.schema_context.reload_token
+          destination_token = destination_class&.schema_context&.reload_token
           route = resolve_association_route(active_record, destination_class)
-          slot = [origin_context, destination_class, destination_context, route].freeze
+          slot = [origin_token, destination_class, destination_token, route].freeze
 
           if frozen?
             ActiveSupport::Ractors[@default_association_route_key] = slot
@@ -868,12 +868,12 @@ module ActiveRecord
           route
         end
 
-        # Compares loaded contexts by identity: a context matching the slot's
-        # was loaded when the slot was filled, so this needn't load anything.
+        # Compares reload tokens of already built contexts, so this needn't
+        # build or load anything.
         def current_default_association_route?(slot)
           slot &&
-            slot[0].equal?(active_record.current_schema_context) &&
-            slot[2].equal?(slot[1]&.current_schema_context)
+            slot[0].equal?(active_record.current_schema_context&.reload_token) &&
+            slot[2].equal?(slot[1]&.current_schema_context&.reload_token)
         end
 
         def initialize_copy(other)
