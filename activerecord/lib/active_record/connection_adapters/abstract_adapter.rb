@@ -94,6 +94,15 @@ module ActiveRecord
         end
       end
 
+      # Whether +config+ describes an in-memory database, like SQLite's
+      # `:memory:`. Each connection opened from such a config gets its own
+      # database, so a new pool for an equal configuration cannot reach the
+      # existing one; the connection handler treats an equal but distinct
+      # configuration as a request for a new database.
+      def self.memory_database?(config) # :nodoc:
+        false
+      end
+
       def self.validate_default_timezone(config)
         case config
         when nil

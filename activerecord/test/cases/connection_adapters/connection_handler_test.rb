@@ -293,6 +293,38 @@ module ActiveRecord
         assert_same klass2.lease_connection, ActiveRecord::Base.lease_connection
       end
 
+      unless in_memory_db?
+        def test_establish_connection_reuses_the_pool_for_an_equal_config
+          klass2 = Class.new(Base) { def self.name; "klass2"; end }
+          config = ActiveRecord::Base.connection_pool.db_config.configuration_hash
+
+          pool = klass2.establish_connection(config)
+          pool.lease_connection
+
+          assert_same pool, klass2.establish_connection(config.dup)
+          assert_predicate pool, :connected?
+        ensure
+          klass2.remove_connection
+        end
+      end
+
+      if current_adapter?(:SQLite3Adapter)
+        def test_establish_connection_replaces_the_pool_for_an_equal_in_memory_config
+          klass2 = Class.new(Base) { def self.name; "klass2"; end }
+          config = { adapter: "sqlite3", database: ":memory:" }
+
+          pool = klass2.establish_connection(config)
+          pool.with_connection { |connection| connection.execute("CREATE TABLE scratch (id integer)") }
+
+          new_pool = klass2.establish_connection(config.dup)
+
+          assert_not_same pool, new_pool
+          assert_empty new_pool.with_connection(&:tables)
+        ensure
+          klass2.remove_connection
+        end
+      end
+
       class ApplicationRecord < ActiveRecord::Base
         self.abstract_class = true
       end

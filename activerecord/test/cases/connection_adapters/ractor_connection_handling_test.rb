@@ -257,7 +257,7 @@ module ActiveRecord
             assert_not handler.connected?("Nonexistent::Base")
           end
 
-          def test_establish_connection_reuses_the_main_pool_for_a_config_copy
+          def test_establish_connection_reuses_the_main_pool_for_its_own_config
             pool_before = main_pool
             pool = RactorConnectionHandler.instance.establish_connection(pool_before.db_config)
 

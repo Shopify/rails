@@ -73,6 +73,10 @@ module ActiveRecord
           RactorConnectionHandler::SQLite3ProxyAdapter
         end
 
+        def memory_database?(config) # :nodoc:
+          config[:database].to_s == ":memory:"
+        end
+
         def native_database_types # :nodoc:
           NATIVE_DATABASE_TYPES
         end

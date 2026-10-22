@@ -106,7 +106,7 @@ module ActiveRecord
 
         pool_spec = main_operation do
           pool = main_connection_handler.establish_connection(
-            db_config.dup,
+            db_config,
             owner_name: connection_owner_name,
             role: connection_role,
             shard: connection_shard,
