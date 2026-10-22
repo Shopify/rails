@@ -15,12 +15,34 @@ class ActiveRecord::EncryptionPropertiesTest < ActiveRecord::EncryptionTestCase
     assert_equal "value 2", @properties[:key_2]
   end
 
-  test "defines custom accessors for some default properties" do
-    auth_tag = "some auth tag"
+  test "shorthand accessors use short keys" do
+    short_keys = {
+      encrypted_data_key: :k,
+      encrypted_data_key_id: :i,
+      compressed: :c,
+      iv: :iv,
+      auth_tag: :at,
+      encoding: :e
+    }
 
-    @properties.auth_tag = auth_tag
-    assert_equal auth_tag, @properties.auth_tag
-    assert_equal auth_tag, @properties[:at]
+    short_keys.each do |name, key|
+      value = "value for #{name}"
+      assert_equal value, @properties.public_send("#{name}=", value)
+      assert_equal value, @properties.public_send(name)
+      assert_equal value, @properties[key]
+    end
+  end
+
+  test "shorthand accessors validate values and reject overwrites" do
+    @properties.auth_tag = "tag"
+
+    assert_raises ActiveRecord::Encryption::Errors::EncryptedContentIntegrity do
+      @properties.auth_tag = "another tag"
+    end
+
+    assert_raises ActiveRecord::Encryption::Errors::ForbiddenClass do
+      @properties.iv = MyClass.new
+    end
   end
 
   test "raises EncryptedContentIntegrity when trying to override properties" do

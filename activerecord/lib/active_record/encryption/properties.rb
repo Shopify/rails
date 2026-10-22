@@ -15,31 +15,47 @@ module ActiveRecord
     # message.headers.encrypted_data_key # instead of message.headers[:k]
     # ```
     #
-    # See `Properties::DEFAULT_PROPERTIES`, Key, Message
+    # See Key, Message
     class Properties
       ALLOWED_VALUE_CLASSES = [String, ActiveRecord::Encryption::Message, Numeric, Integer, Float, BigDecimal, TrueClass, FalseClass, Symbol, NilClass].freeze
 
       delegate_missing_to :data
       delegate :==, :[], :each, :key?, to: :data
 
-      # For each entry it generates an accessor exposing the full name
-      DEFAULT_PROPERTIES = {
-        encrypted_data_key: "k",
-        encrypted_data_key_id: "i",
-        compressed: "c",
-        iv: "iv",
-        auth_tag: "at",
-        encoding: "e"
-      }.freeze
+      def encrypted_data_key = self[:k]
 
-      DEFAULT_PROPERTIES.each do |name, key|
-        define_method name do
-          self[key.to_sym]
-        end
+      def encrypted_data_key=(value)
+        self[:k] = value
+      end
 
-        define_method "#{name}=" do |value|
-          self[key.to_sym] = value
-        end
+      def encrypted_data_key_id = self[:i]
+
+      def encrypted_data_key_id=(value)
+        self[:i] = value
+      end
+
+      def compressed = self[:c]
+
+      def compressed=(value)
+        self[:c] = value
+      end
+
+      def iv = self[:iv]
+
+      def iv=(value)
+        self[:iv] = value
+      end
+
+      def auth_tag = self[:at]
+
+      def auth_tag=(value)
+        self[:at] = value
+      end
+
+      def encoding = self[:e]
+
+      def encoding=(value)
+        self[:e] = value
       end
 
       def initialize(initial_properties = {})
