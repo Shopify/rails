@@ -42,6 +42,42 @@ module ActiveRecord
       end
     end
 
+    def test_clause_value_initialize
+      relation = Relation.new(FakeKlass)
+      assert_same Relation::WhereClause.empty, relation.where_clause
+      assert_same Relation::WhereClause.empty, relation.having_clause
+      assert_same Relation::FromClause.empty, relation.from_clause
+    end
+
+    def test_value_accessors_use_their_own_keys
+      relation = Relation.new(FakeKlass)
+      values = Relation::VALUE_METHODS.index_with { |name| "value for #{name}" }
+
+      [[Relation::MULTI_VALUE_METHODS, "_values"],
+       [Relation::SINGLE_VALUE_METHODS, "_value"],
+       [Relation::CLAUSE_METHODS, "_clause"]].each do |names, suffix|
+        names.each do |name|
+          value = values.fetch(name)
+          getter = "#{name}#{suffix}"
+          assert_same value, relation.public_send("#{getter}=", value), name.to_s
+          assert_same value, relation.public_send(getter), name.to_s
+        end
+      end
+
+      assert_equal values, relation.values
+    end
+
+    def test_value_setters_reject_loaded_relation
+      relation = Post.all.load
+      values = relation.values
+
+      %w[includes_values limit_value where_clause].each do |getter|
+        assert_raises(UnmodifiableRelation) { relation.public_send("#{getter}=", Object.new) }
+      end
+
+      assert_equal values, relation.values
+    end
+
     def test_multi_values_deduplication_with_merge
       expected = {
         order:         [ Arel.sql("id") ],

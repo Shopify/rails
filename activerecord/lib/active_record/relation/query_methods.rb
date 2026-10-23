@@ -162,27 +162,144 @@ module ActiveRecord
     FROZEN_EMPTY_ARRAY = [].freeze
     FROZEN_EMPTY_HASH = {}.freeze
 
-    Relation::VALUE_METHODS.each do |name|
-      method_name, default =
-        case name
-        when *Relation::MULTI_VALUE_METHODS
-          ["#{name}_values", "FROZEN_EMPTY_ARRAY"]
-        when *Relation::SINGLE_VALUE_METHODS
-          ["#{name}_value", name == :create_with ? "FROZEN_EMPTY_HASH" : "nil"]
-        when *Relation::CLAUSE_METHODS
-          ["#{name}_clause", name == :from ? "Relation::FromClause.empty" : "Relation::WhereClause.empty"]
-        end
+    def includes_values = @values.fetch(:includes, FROZEN_EMPTY_ARRAY)
+    def includes_values=(value)
+      set_value(:includes, value)
+    end
 
-      class_eval <<-CODE, __FILE__, __LINE__ + 1
-        def #{method_name}                     # def includes_values
-          @values.fetch(:#{name}, #{default})  #   @values.fetch(:includes, FROZEN_EMPTY_ARRAY)
-        end                                    # end
+    def eager_load_values = @values.fetch(:eager_load, FROZEN_EMPTY_ARRAY)
+    def eager_load_values=(value)
+      set_value(:eager_load, value)
+    end
 
-        def #{method_name}=(value)             # def includes_values=(value)
-          assert_modifiable!                   #   assert_modifiable!
-          @values[:#{name}] = value            #   @values[:includes] = value
-        end                                    # end
-      CODE
+    def preload_values = @values.fetch(:preload, FROZEN_EMPTY_ARRAY)
+    def preload_values=(value)
+      set_value(:preload, value)
+    end
+
+    def select_values = @values.fetch(:select, FROZEN_EMPTY_ARRAY)
+    def select_values=(value)
+      set_value(:select, value)
+    end
+
+    def group_values = @values.fetch(:group, FROZEN_EMPTY_ARRAY)
+    def group_values=(value)
+      set_value(:group, value)
+    end
+
+    def order_values = @values.fetch(:order, FROZEN_EMPTY_ARRAY)
+    def order_values=(value)
+      set_value(:order, value)
+    end
+
+    def default_order_values = @values.fetch(:default_order, FROZEN_EMPTY_ARRAY)
+    def default_order_values=(value)
+      set_value(:default_order, value)
+    end
+
+    def joins_values = @values.fetch(:joins, FROZEN_EMPTY_ARRAY)
+    def joins_values=(value)
+      set_value(:joins, value)
+    end
+
+    def left_outer_joins_values = @values.fetch(:left_outer_joins, FROZEN_EMPTY_ARRAY)
+    def left_outer_joins_values=(value)
+      set_value(:left_outer_joins, value)
+    end
+
+    def references_values = @values.fetch(:references, FROZEN_EMPTY_ARRAY)
+    def references_values=(value)
+      set_value(:references, value)
+    end
+
+    def extending_values = @values.fetch(:extending, FROZEN_EMPTY_ARRAY)
+    def extending_values=(value)
+      set_value(:extending, value)
+    end
+
+    def unscope_values = @values.fetch(:unscope, FROZEN_EMPTY_ARRAY)
+    def unscope_values=(value)
+      set_value(:unscope, value)
+    end
+
+    def optimizer_hints_values = @values.fetch(:optimizer_hints, FROZEN_EMPTY_ARRAY)
+    def optimizer_hints_values=(value)
+      set_value(:optimizer_hints, value)
+    end
+
+    def annotate_values = @values.fetch(:annotate, FROZEN_EMPTY_ARRAY)
+    def annotate_values=(value)
+      set_value(:annotate, value)
+    end
+
+    def with_values = @values.fetch(:with, FROZEN_EMPTY_ARRAY)
+    def with_values=(value)
+      set_value(:with, value)
+    end
+
+    def limit_value = @values.fetch(:limit, nil)
+    def limit_value=(value)
+      set_value(:limit, value)
+    end
+
+    def offset_value = @values.fetch(:offset, nil)
+    def offset_value=(value)
+      set_value(:offset, value)
+    end
+
+    def lock_value = @values.fetch(:lock, nil)
+    def lock_value=(value)
+      set_value(:lock, value)
+    end
+
+    def readonly_value = @values.fetch(:readonly, nil)
+    def readonly_value=(value)
+      set_value(:readonly, value)
+    end
+
+    def reordering_value = @values.fetch(:reordering, nil)
+    def reordering_value=(value)
+      set_value(:reordering, value)
+    end
+
+    def strict_loading_value = @values.fetch(:strict_loading, nil)
+    def strict_loading_value=(value)
+      set_value(:strict_loading, value)
+    end
+
+    def reverse_order_value = @values.fetch(:reverse_order, nil)
+    def reverse_order_value=(value)
+      set_value(:reverse_order, value)
+    end
+
+    def distinct_value = @values.fetch(:distinct, nil)
+    def distinct_value=(value)
+      set_value(:distinct, value)
+    end
+
+    def create_with_value = @values.fetch(:create_with, FROZEN_EMPTY_HASH)
+    def create_with_value=(value)
+      set_value(:create_with, value)
+    end
+
+    def skip_query_cache_value = @values.fetch(:skip_query_cache, nil)
+    def skip_query_cache_value=(value)
+      set_value(:skip_query_cache, value)
+    end
+
+    def where_clause = @values.fetch(:where, Relation::WhereClause.empty)
+    def where_clause=(value)
+      set_value(:where, value)
+    end
+
+    def having_clause = @values.fetch(:having, Relation::WhereClause.empty)
+    def having_clause=(value)
+      set_value(:having, value)
+    end
+
+    def from_clause = @values.fetch(:from, Relation::FromClause.empty)
+    def from_clause=(value)
+      set_value(:from, value)
     end
 
     alias extensions extending_values
@@ -1801,6 +1918,11 @@ module ActiveRecord
 
         values = classify_join_values(joins)
         [construct_join_dependency(values.association_names, nil), *values.join_dependencies]
+      end
+
+      def set_value(name, value)
+        assert_modifiable!
+        @values[name] = value
       end
 
       def assert_modifiable!
