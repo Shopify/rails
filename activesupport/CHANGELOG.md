@@ -1,3 +1,15 @@
+*   `ActiveSupport::Inflector#safe_constantize` matches the constant name in a
+    `LoadError` message as a literal string instead of building a `Regexp`
+    from it.
+
+    The name's segments were interpolated unescaped into the pattern, so input
+    that reaches `safe_constantize`, such as the channel identifier in an Action
+    Cable subscribe command, chose the source passed to the regexp compiler.
+
+    [GHSA-8474-xrp6-wh69]
+
+    *Jeremy Daer*
+
 *   `Symbol#to_param` now returns `Symbol#name`, the symbol's interned frozen
     String, instead of allocating a new one on every call before Ruby 4.1.
 
