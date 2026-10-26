@@ -1,3 +1,23 @@
+*   Add `bin/rails db:attribute_methods:link` to define attribute methods at boot from a generated file.
+
+    Defining attribute methods is mostly spent deciding which methods each model
+    gets, not compiling them, since `ActiveSupport::CodeGenerator` already shares
+    each compiled method between models. The task records those decisions in
+    `db/attribute_methods_link.rb`, a plain Ruby file that Bootsnap caches like
+    any other. With `config.active_record.attribute_methods_link_path` set, models
+    bind the recorded methods instead of deciding again, and a model that no
+    longer matches its entry generates its methods as before.
+
+    Generate the file during the build, after `db:schema:cache:dump` and before
+    precompiling Bootsnap:
+
+    ```ruby
+    # config/environments/production.rb
+    config.active_record.attribute_methods_link_path = Rails.root.join("db/attribute_methods_link.rb")
+    ```
+
+    *Sam Schmidt*
+
 *   Fix `left_joins` and `eager_load` dropping an intermediate join when the
     same through association is joined from different parent paths.
 

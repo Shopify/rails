@@ -6,8 +6,10 @@ module ActiveSupport
     class MethodSet
       METHOD_CACHES = Hash.new { |h, k| h[k] = Module.new }
 
-      def initialize(namespace)
-        @cache = METHOD_CACHES[namespace]
+      def initialize(namespace, recorder = nil)
+        @namespace = namespace
+        @recorder = recorder
+        @cache = recorder ? recorder.cache(namespace) : METHOD_CACHES[namespace]
         @sources = []
         @methods = {}
         @canonical_methods = {}
@@ -19,7 +21,13 @@ module ActiveSupport
 
         @methods.fetch(as) do
           unless @cache.method_defined?(canonical_name) || @canonical_methods[canonical_name]
-            yield @sources
+            if @recorder
+              first_line = @sources.size
+              yield @sources
+              @recorder.record_source(@namespace, canonical_name, @sources[first_line..].join("\n"))
+            else
+              yield @sources
+            end
           end
           @canonical_methods[canonical_name] = true
           @methods[as] = canonical_name
@@ -35,10 +43,58 @@ module ActiveSupport
         @methods.each do |as, canonical_name|
           owner.define_method(as, @cache.instance_method(canonical_name))
         end
+
+        @recorder&.record_methods(owner, @namespace, @methods)
+      end
+    end
+
+    # Records the source of every cached method and which methods each owner
+    # received, so the result can be written out and bound again later without
+    # running the code that decided it. While recording, methods are compiled
+    # into private modules rather than METHOD_CACHES, so every source is
+    # captured even if another owner compiled the same method earlier.
+    class Recorder
+      attr_reader :sources
+
+      def initialize
+        @caches = Hash.new { |h, k| h[k] = Module.new }
+        @sources = Hash.new { |h, k| h[k] = {} }
+        @methods = {}.compare_by_identity
+      end
+
+      def cache(namespace)
+        @caches[namespace]
+      end
+
+      def record_source(namespace, canonical_name, source)
+        @sources[namespace][canonical_name] = source
+      end
+
+      def record_methods(owner, namespace, methods)
+        recorded = (@methods[owner] ||= [])
+        methods.each { |as, canonical_name| recorded << [namespace, as, canonical_name] }
+      end
+
+      # Returns <tt>[namespace, as, canonical_name]</tt> for every method defined
+      # on +owner+ since the last call, and forgets them.
+      def take_methods(owner)
+        @methods.delete(owner) || []
       end
     end
 
     class << self
+      attr_reader :recorder
+
+      # Records every batch run inside the block. Not thread-safe: meant for a
+      # build step, not a running application.
+      def record(recorder = Recorder.new)
+        previous, @recorder = @recorder, recorder
+        yield recorder
+        recorder
+      ensure
+        @recorder = previous
+      end
+
       def batch(owner, path, line)
         if owner.is_a?(CodeGenerator)
           yield owner
@@ -55,7 +111,8 @@ module ActiveSupport
       @owner = owner
       @path = path
       @line = line
-      @namespaces = Hash.new { |h, k| h[k] = MethodSet.new(k) }
+      recorder = CodeGenerator.recorder
+      @namespaces = Hash.new { |h, k| h[k] = MethodSet.new(k, recorder) }
       @sources = []
     end
 

@@ -138,6 +138,7 @@ module ActiveRecord
     extend ActiveSupport::Autoload
 
     autoload :CompositePrimaryKey
+    autoload :Linker
 
     eager_autoload do
       autoload :BeforeTypeCast
@@ -188,6 +189,20 @@ module ActiveRecord
 
   singleton_class.attr_accessor :disable_prepared_statements
   self.disable_prepared_statements = false
+
+  ##
+  # :singleton-method: attribute_methods_link_path
+  # Path of the file written by <tt>bin/rails db:attribute_methods:link</tt>.
+  # When it is set and the file exists, models bind the attribute methods
+  # recorded in it instead of generating them. See
+  # ActiveRecord::AttributeMethods::Linker. Defaults to +nil+.
+  def self.attribute_methods_link_path
+    AttributeMethods::Linker.path
+  end
+
+  def self.attribute_methods_link_path=(path)
+    AttributeMethods::Linker.path = path
+  end
 
   ##
   # :singleton-method: lazily_load_schema_cache

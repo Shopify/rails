@@ -456,6 +456,33 @@ db_namespace = namespace :db do
     end
   end
 
+  namespace :attribute_methods do
+    desc "Record the attribute methods of every model whose table is in the schema cache (path: ATTRIBUTE_METHODS_LINK_PATH, config.active_record.attribute_methods_link_path or db/attribute_methods_link.rb)"
+    task :link do
+      # Recording starts before the application boots, because only methods
+      # defined for the first time are recorded.
+      models = []
+      recording = ActiveRecord::AttributeMethods::Linker.record do
+        db_namespace["load_config"].invoke
+        Rails.application.eager_load!
+        models = ActiveRecord::Base.descendants.select do |model|
+          model.name && !model.abstract_class? && model.connection_pool.schema_reflection.cached?(model.table_name)
+        end
+        models.each(&:define_attribute_methods)
+      end
+
+      path = ENV["ATTRIBUTE_METHODS_LINK_PATH"] || ActiveRecord.attribute_methods_link_path ||
+        File.join(ActiveRecord::Tasks::DatabaseTasks.db_dir, "attribute_methods_link.rb")
+      File.write(path, recording.source)
+
+      skipped = models - recording.models
+      puts "Linked the attribute methods of #{recording.models.size} models into #{path}."
+      unless skipped.empty?
+        puts "#{skipped.size} models had already defined their attribute methods and will generate them at boot: #{skipped.map(&:name).sort.join(", ")}"
+      end
+    end
+  end
+
   namespace :schema do
     desc "Create a database schema file (either db/schema.rb or db/structure.sql, depending on `ENV['SCHEMA_FORMAT']` or `config.active_record.schema_format`)"
     task dump: :load_config do

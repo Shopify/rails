@@ -132,7 +132,7 @@ module ActiveRecord
 
           unless abstract_class?
             load_schema
-            super(attribute_names)
+            Linker.define_attribute_methods(self, generated_attribute_methods) { super(attribute_names) }
             define_id_value if _has_attribute?("id") && !_has_attribute?("id_value")
           end
 
