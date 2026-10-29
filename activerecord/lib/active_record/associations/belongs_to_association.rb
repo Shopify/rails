@@ -150,6 +150,7 @@ module ActiveRecord
         def replace(record)
           if record
             raise_on_type_mismatch!(record)
+            assign_query_constraints(record)
             set_inverse_instance(record)
             @updated = true
           elsif target
