@@ -214,6 +214,13 @@ class Time
   # largest to smallest. This order can affect the result around the end of a
   # month.
   def advance(options)
+    if options.size == 1
+      days = options[:days] || (Integer === (weeks = options[:weeks]) && weeks * 7)
+      if days && (time = utc_days_since(days))
+        return time
+      end
+    end
+
     options = options.dup
     unless options[:weeks].nil?
       options[:weeks], partial_weeks = options[:weeks].divmod(1)
@@ -238,6 +245,33 @@ class Time
       time_advanced_by_date.since(seconds_to_advance)
     end
   end
+
+  # Returns a new Time the specified number of days in the future, or in
+  # the past for a negative number, like `advance(days: days)`.
+  def days_since(days)
+    utc_days_since(days) || advance(days: days)
+  end
+
+  # Returns a new Time the specified number of weeks in the future, or in
+  # the past for a negative number, like `advance(weeks: weeks)`.
+  def weeks_since(weeks)
+    (Integer === weeks && utc_days_since(weeks * 7)) || advance(weeks: weeks)
+  end
+
+  # A UTC time has no DST, so a whole number of days on it is that many
+  # 86,400-second days: the time #advance would build from the calendar, in
+  # one addition and without the hash, the Dates and the Rationals. Returns
+  # nil, for #advance to do it, when the time is not UTC, when its fraction
+  # of a second is finer than the nanosecond #advance keeps, or when Ruby
+  # counts a leap second in between (a "right/" zone) and the clock lands a
+  # second off.
+  def utc_days_since(days) # :nodoc:
+    if Integer === days && utc? && 1_000_000_000 % subsec.denominator == 0
+      time = plus_without_duration(days * 86_400)
+      time if time.sec == sec
+    end
+  end
+  private :utc_days_since
 
   # Returns a new Time representing the time a number of seconds ago, this is basically a wrapper around the Numeric extension
   def ago(seconds)

@@ -676,6 +676,34 @@ class TimeExtCalculationsTest < ActiveSupport::TestCase
     end
   end
 
+  def test_advance_by_whole_days_on_a_utc_time
+    time = Time.utc(2024, 2, 28, 15, 15, 10, Rational(123456789, 1000))
+    assert_equal Time.utc(2024, 2, 29, 15, 15, 10, Rational(123456789, 1000)), time.advance(days: 1)
+    assert_equal Time.utc(2024, 3, 13, 15, 15, 10, Rational(123456789, 1000)), time.advance(weeks: 2)
+    assert_equal Time.utc(2024, 2, 21, 15, 15, 10, Rational(123456789, 1000)), time.days_since(-7)
+    assert_equal Time.utc(2024, 2, 21, 15, 15, 10, Rational(123456789, 1000)), time.weeks_since(-1)
+    assert_predicate time.days_since(1), :utc?
+    assert_equal Time.utc(2024, 2, 29, 15, 15, 10, Rational(123456789, 1000)), time.days_since(1.0)
+  end
+
+  def test_advance_by_whole_days_on_a_utc_time_keeps_only_the_nanoseconds
+    time = Time.at(Rational(1, 3)).utc
+    expected = Time.at(86_400, 333_333_333, :nanosecond).utc
+    assert_equal expected, time.advance(days: 1)
+    assert_equal expected, time.days_since(1)
+  end
+
+  def test_advance_by_whole_days_on_a_utc_time_where_ruby_counts_leap_seconds
+    with_env_tz "right/UTC" do
+      skip "this zone database has no leap seconds" unless Time.utc(2017, 1, 1) - Time.utc(2016, 12, 31) == 86_401
+
+      time = Time.utc(2016, 12, 31, 12)
+      assert_equal Time.utc(2017, 1, 1, 12), time.advance(days: 1)
+      assert_equal Time.utc(2017, 1, 1, 12), time.days_since(1)
+      assert_equal Time.utc(2017, 1, 7, 12), time.weeks_since(1)
+    end
+  end
+
   def test_advance_gregorian_proleptic
     assert_equal Time.local(1582, 10, 14, 15, 15, 10), Time.local(1582, 10, 15, 15, 15, 10).advance(days: -1)
     assert_equal Time.local(1582, 10, 15, 15, 15, 10), Time.local(1582, 10, 14, 15, 15, 10).advance(days: 1)

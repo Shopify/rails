@@ -1,3 +1,14 @@
+*   Speed up `Time#advance`, `#days_since` and `#weeks_since` by whole days
+    or weeks on a UTC time.
+
+    A UTC time has no DST, so these now add the seconds instead of going
+    through `Date` arithmetic, which also speeds up `5.days.ago` and
+    `2.weeks.from_now` on an `ActiveSupport::TimeWithZone`. 
+    They fall back to the calendar when the time has a fraction of a second
+    finer than a nanosecond, or when Ruby counts a leap second in between.
+
+    *Sam Schmidt*
+
 *   `Symbol#to_param` now returns `Symbol#name`, the symbol's interned frozen
     String, instead of allocating a new one on every call before Ruby 4.1.
 
