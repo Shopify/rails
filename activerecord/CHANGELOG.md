@@ -1,16 +1,18 @@
-*   Restore association `query_constraints` with additive, query-only semantics.
+*   Restore association `query_constraints` with additive matching and guarded assignment.
 
     `query_constraints` adds columns to the foreign-key mapping used to load,
-    preload, join, and filter an association. The foreign key remains the only
-    writable reference, so assigning or clearing an association does not change
-    its query-constraint columns. Rails derives the conventional foreign key
-    when `foreign_key` is omitted.
+    preload, join, and filter an association. Assigning an association fills
+    nil constraint columns on the record holding the foreign key. Existing
+    values must match the associated record, or assignment raises `ArgumentError`.
+    Clearing an association nullifies only the foreign key and preserves its
+    query-constraint columns. Rails derives the conventional foreign key when
+    `foreign_key` is omitted.
 
     ```ruby
     # Reads and writes both columns as a composite foreign key.
     belongs_to :post, foreign_key: [:account_id, :post_id]
 
-    # Reads with account_id and post_id, but writes only post_id.
+    # Matches account_id and post_id; fills a nil account_id, but never clears it.
     belongs_to :post, query_constraints: :account_id
     ```
 

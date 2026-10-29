@@ -21,6 +21,7 @@ class AssociationRouteTest < ActiveRecord::TestCase
     self.inheritance_column = nil
 
     alias_attribute :route_fk, :post_id
+    alias_attribute :route_author, :author_id
 
     belongs_to :routed_post, class_name: "Post", foreign_key: :route_fk, optional: true
   end
@@ -76,6 +77,18 @@ class AssociationRouteTest < ActiveRecord::TestCase
       class_name: "AssociationRouteTest::DecoupledRouteComment",
       foreign_key: :post_id,
       query_constraints: { title: :body }
+    has_one :decoupled_comment,
+      class_name: "AssociationRouteTest::DecoupledRouteComment",
+      foreign_key: :post_id,
+      query_constraints: :author_id
+    has_many :nullable_comments,
+      class_name: "AssociationRouteTest::DecoupledRouteComment",
+      foreign_key: :parent_id,
+      query_constraints: :author_id
+    has_one :nullable_comment,
+      class_name: "AssociationRouteTest::DecoupledRouteComment",
+      foreign_key: :parent_id,
+      query_constraints: :author_id
   end
 
   class DecoupledRouteComment < ActiveRecord::Base
@@ -91,6 +104,11 @@ class AssociationRouteTest < ActiveRecord::TestCase
       class_name: "AssociationRouteTest::DecoupledRoutePost",
       foreign_key: :post_id,
       query_constraints: { body: :title },
+      optional: true
+    belongs_to :fully_matched_post,
+      class_name: "AssociationRouteTest::DecoupledRoutePost",
+      foreign_key: :post_id,
+      query_constraints: [:author_id, { body: :title }],
       optional: true
   end
 
@@ -120,17 +138,184 @@ class AssociationRouteTest < ActiveRecord::TestCase
     assert_nil wrong_body.title_matched_post
   end
 
-  def test_declared_query_constraints_are_not_written_with_the_foreign_key
-    post = DecoupledRoutePost.create!(title: "Write-only reference", body: "Post body", author_id: 41)
-    comment = DecoupledRouteComment.new(author_id: 42)
+  def test_assigning_a_belongs_to_fills_nil_query_constraints_and_preserves_them_on_clear
+    post = DecoupledRoutePost.create!(title: "Constrained post", body: "Post body", author_id: 41)
+    comment = DecoupledRouteComment.new(author_id: nil)
 
     comment.decoupled_post = post
     assert_equal post.id, comment.post_id
-    assert_equal 42, comment.author_id
+    assert_equal 41, comment.author_id
+    assert_same post, comment.decoupled_post
+
+    comment.decoupled_post = post
+    assert_equal 41, comment.author_id
 
     comment.decoupled_post = nil
     assert_nil comment.post_id
-    assert_equal 42, comment.author_id
+    assert_equal 41, comment.author_id
+  end
+
+  def test_conflicting_belongs_to_query_constraints_preserve_the_existing_association
+    original = DecoupledRoutePost.create!(title: "Original", body: "Post body", author_id: 41)
+    other = DecoupledRoutePost.create!(title: "Other", body: "Post body", author_id: 42)
+    comment = DecoupledRouteComment.new(author_id: 41, decoupled_post: original)
+
+    assert_raises(ArgumentError) { comment.decoupled_post = other }
+
+    assert_equal original.id, comment.post_id
+    assert_equal 41, comment.author_id
+    assert_same original, comment.decoupled_post
+  end
+
+  def test_assigning_a_nil_source_constraint_does_not_clear_an_existing_value
+    post = DecoupledRoutePost.new(author_id: nil)
+    comment = DecoupledRouteComment.new(author_id: 41)
+
+    assert_raises(ArgumentError) { comment.decoupled_post = post }
+
+    assert_nil comment.post_id
+    assert_equal 41, comment.author_id
+
+    comment.author_id = nil
+    comment.decoupled_post = post
+    assert_same post, comment.decoupled_post
+    assert_nil comment.author_id
+  end
+
+  def test_all_query_constraints_are_checked_before_assignment_changes_attributes
+    post = DecoupledRoutePost.new(id: 42, title: "Expected", author_id: 41)
+    comment = DecoupledRouteComment.new(author_id: nil, body: "Conflicting")
+
+    assert_raises(ArgumentError) { comment.fully_matched_post = post }
+
+    assert_nil comment.post_id
+    assert_nil comment.author_id
+    assert_equal "Conflicting", comment.body
+  end
+
+  def test_assigning_hash_mapped_query_constraints
+    post = DecoupledRoutePost.new(id: 42, title: "Matched body")
+    comment = DecoupledRouteComment.new(body: nil)
+
+    comment.title_matched_post = post
+    assert_equal 42, comment.post_id
+    assert_equal "Matched body", comment.body
+
+    comment.title_matched_post = nil
+    assert_nil comment.post_id
+    assert_equal "Matched body", comment.body
+
+    assert_raises(ArgumentError) do
+      comment.title_matched_post = DecoupledRoutePost.new(id: 43, title: "Other body")
+    end
+    assert_nil comment.post_id
+    assert_equal "Matched body", comment.body
+  end
+
+  def test_adding_to_a_collection_fills_query_constraints_and_nullification_preserves_them
+    post = DecoupledRoutePost.create!(title: "Constrained post", body: "Post body", author_id: 41)
+    comment = DecoupledRouteComment.new(post_id: -1, author_id: nil, body: "Comment body")
+
+    post.nullable_comments << comment
+    assert_equal post.id, comment.reload.parent_id
+    assert_equal 41, comment.author_id
+
+    post.nullable_comments.delete(comment)
+    assert_nil comment.reload.parent_id
+    assert_equal 41, comment.author_id
+  end
+
+  def test_assigning_a_collection_to_a_new_owner_fills_query_constraints_immediately
+    post = DecoupledRoutePost.new(title: "Constrained post", body: "Post body", author_id: 41)
+    comment = DecoupledRouteComment.new(author_id: nil, body: "Comment body")
+
+    post.decoupled_comments = [comment]
+    assert_equal 41, comment.author_id
+
+    post.save!
+    assert_equal post.id, comment.reload.post_id
+    assert_equal 41, comment.author_id
+  end
+
+  def test_conflicting_collection_assignment_does_not_remove_existing_records
+    post = DecoupledRoutePost.create!(title: "Constrained post", body: "Post body", author_id: 41)
+    original = post.decoupled_comments.create!(author_id: 41, body: "Original")
+    conflicting = DecoupledRouteComment.new(author_id: 42, body: "Conflicting")
+
+    assert_raises(ArgumentError) { post.decoupled_comments = [conflicting] }
+
+    assert_equal [original], post.decoupled_comments.to_a
+    assert_equal post.id, original.reload.post_id
+    assert_nil conflicting.post_id
+    assert_equal 42, conflicting.author_id
+  end
+
+  def test_assigning_a_has_one_fills_query_constraints_and_preserves_them_on_clear
+    post = DecoupledRoutePost.create!(title: "Constrained post", body: "Post body", author_id: 41)
+    comment = DecoupledRouteComment.new(post_id: -1, author_id: nil, body: "Comment body")
+
+    post.nullable_comment = comment
+    assert_equal post.id, comment.reload.parent_id
+    assert_equal 41, comment.author_id
+
+    post.nullable_comment = nil
+    assert_nil comment.reload.parent_id
+    assert_equal 41, comment.author_id
+  end
+
+  def test_conflicting_has_one_assignment_does_not_remove_the_existing_record
+    post = DecoupledRoutePost.create!(title: "Constrained post", body: "Post body", author_id: 41)
+    original = post.create_decoupled_comment!(author_id: 41, body: "Original")
+    conflicting = DecoupledRouteComment.new(author_id: 42, body: "Conflicting")
+
+    assert_raises(ArgumentError) { post.decoupled_comment = conflicting }
+
+    assert_same original, post.decoupled_comment
+    assert_equal post.id, original.reload.post_id
+    assert_nil conflicting.post_id
+    assert_equal 42, conflicting.author_id
+  end
+
+  def test_building_associated_records_fills_nil_constraints_and_rejects_conflicts
+    post = DecoupledRoutePost.new(author_id: 41)
+
+    assert_equal 41, post.decoupled_comments.build(author_id: nil).author_id
+    assert_raises(ArgumentError) { post.decoupled_comments.build(author_id: 42) }
+    assert_equal 41, post.build_decoupled_comment(author_id: nil).author_id
+    assert_raises(ArgumentError) { post.build_decoupled_comment(author_id: 42) }
+  end
+
+  def test_assigning_hash_mapped_constraints_from_a_collection
+    post = DecoupledRoutePost.create!(title: "Matched body", body: "Post body")
+    comment = DecoupledRouteComment.new(body: nil)
+
+    post.body_matched_comments << comment
+    assert_equal post.id, comment.reload.post_id
+    assert_equal "Matched body", comment.body
+  end
+
+  def test_constraint_assignment_resolves_aliases_and_compares_cast_values
+    link = ActiveRecord::AssociationLink.for(
+      reference: build_mapping(reference_key: :route_fk, target_key: :id),
+      constraints: build_mapping(reference_key: :route_author, target_key: :title),
+      reference_class: AliasedRouteComment,
+      target_class: Post
+    )
+    route = ActiveRecord::AssociationRoute.new(link: link)
+    post = Post.new(id: 42, title: "41")
+    comment = AliasedRouteComment.new(route_author: nil)
+
+    route.write(comment, post)
+    assert_equal 42, comment.post_id
+    assert_equal 41, comment.author_id
+
+    route.write(comment, post)
+    assert_equal 41, comment.author_id
+
+    other = Post.new(id: 43, title: "42")
+    assert_raises(ArgumentError) { route.write(comment, other) }
+    assert_equal 42, comment.post_id
+    assert_equal 41, comment.author_id
   end
 
   def test_constrained_routes_match_reference_and_query_constraint_columns_in_both_directions
@@ -312,7 +497,7 @@ class AssociationRouteTest < ActiveRecord::TestCase
     end
   end
 
-  def test_query_constraints_are_not_part_of_the_reference
+  def test_query_constraints_do_not_determine_reference_completeness
     link = ActiveRecord::AssociationLink.new(
       reference: build_mapping(reference_key: [:author_id, :post_id], target_key: [:author_id, :id]),
       constraints: build_mapping(reference_key: :body, target_key: :title)
@@ -324,13 +509,6 @@ class AssociationRouteTest < ActiveRecord::TestCase
 
     assert forward.origin_reference_complete?(reference)
     assert reverse.origin_reference_complete?(target)
-
-    target.title = "Target constraint"
-    assert_not forward.reference_needs_update?(reference, target)
-    assert_not reverse.reference_needs_update?(target, reference)
-    forward.write(reference, target)
-    reverse.write(target, reference)
-    assert_nil reference.body
 
     reference.author_id = nil
     target.author_id = nil
@@ -435,16 +613,6 @@ class AssociationRouteTest < ActiveRecord::TestCase
 
     Post.reflect_on_association(:comments).stub(:association_route, post_comments_route_constrained_by_title) do
       assert_equal [comment], author.no_joins_comments.to_a
-    end
-  end
-
-  def test_query_constraints_are_not_written_to_built_records
-    post = posts(:welcome)
-
-    Post.reflect_on_association(:comments).stub(:association_route, post_comments_route_constrained_by_title) do
-      built = post.comments.build
-      assert_equal post.id, built.post_id
-      assert_nil built.body
     end
   end
 
@@ -633,6 +801,7 @@ class AssociationRouteTest < ActiveRecord::TestCase
     reflection.stub(:association_route, route) do
       persisted_title = replacement.title
       persisted_author_id = replacement.author_id
+      reference.body = persisted_title
       reference.routed_post = replacement
       replacement.title = "Unsaved title"
       replacement.author_id = 9_000_132
