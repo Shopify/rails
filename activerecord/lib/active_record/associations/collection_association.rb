@@ -237,10 +237,7 @@ module ActiveRecord
       # Replace this collection with `other_array`. This will perform a diff
       # and delete/add only records that have changed.
       def replace(other_array)
-        other_array.each do |record|
-          raise_on_type_mismatch!(record)
-          validate_query_constraints!(record)
-        end
+        other_array.each { |record| raise_on_type_mismatch!(record) }
         original_target = skip_strict_loading { load_target }.dup
 
         if owner.new_record?

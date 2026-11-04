@@ -93,26 +93,18 @@ module ActiveRecord
       end unless _fixed_values.empty?
     end
 
-    def validate_constraints!(reference_record, target_record)
+    def write_constraints(reference_record, target_record)
       return if constraints.empty? || !target_record
 
       each_constraint_value(reference_record, target_record) do |column, value|
         current_value = reference_record._read_attribute(column)
-        next if current_value.nil? || current_value == value
-
-        raise ArgumentError,
-          "Cannot assign #{target_record.class}: query constraint #{reference_record.class}##{column} " \
-          "is #{current_value.inspect}, but the associated value is #{value.inspect}."
-      end
-    end
-
-    def write_constraints(reference_record, target_record)
-      return if constraints.empty? || !target_record
-
-      validate_constraints!(reference_record, target_record)
-      each_constraint_value(reference_record, target_record) do |column, value|
-        if !value.nil? && reference_record._read_attribute(column).nil?
-          reference_record._write_attribute(column, value)
+        if current_value.nil?
+          reference_record._write_attribute(column, value) unless value.nil?
+        elsif current_value != value
+          ActiveRecord::Base.logger&.warn do
+            "Query constraint mismatch assigning #{target_record.class}: #{reference_record.class}##{column} " \
+              "is #{current_value.inspect}, but the associated value is #{value.inspect}."
+          end
         end
       end
     end
@@ -322,10 +314,6 @@ module ActiveRecord
       @link.write_reference(origin, destination, force: force)
     end
 
-    def validate_constraints!(origin, destination)
-      @link.validate_constraints!(origin, destination)
-    end
-
     def write_constraints(origin, destination)
       @link.write_constraints(origin, destination)
     end
@@ -391,10 +379,6 @@ module ActiveRecord
     def write(origin, destination, force: true)
       write_constraints(origin, destination)
       @link.write_reference(destination, origin, force: force)
-    end
-
-    def validate_constraints!(origin, destination)
-      @link.validate_constraints!(destination, origin)
     end
 
     def write_constraints(origin, destination)

@@ -142,12 +142,12 @@ class AssociationRouteTest < ActiveRecord::TestCase
     post = DecoupledRoutePost.create!(title: "Constrained post", body: "Post body", author_id: 41)
     comment = DecoupledRouteComment.new(author_id: nil)
 
-    comment.decoupled_post = post
+    assert_empty capture_constraint_warnings { comment.decoupled_post = post }
     assert_equal post.id, comment.post_id
     assert_equal 41, comment.author_id
     assert_same post, comment.decoupled_post
 
-    comment.decoupled_post = post
+    assert_empty capture_constraint_warnings { comment.decoupled_post = post }
     assert_equal 41, comment.author_id
 
     comment.decoupled_post = nil
@@ -155,42 +155,47 @@ class AssociationRouteTest < ActiveRecord::TestCase
     assert_equal 41, comment.author_id
   end
 
-  def test_conflicting_belongs_to_query_constraints_preserve_the_existing_association
+  def test_conflicting_belongs_to_query_constraints_warn_and_preserve_existing_constraint_values
     original = DecoupledRoutePost.create!(title: "Original", body: "Post body", author_id: 41)
     other = DecoupledRoutePost.create!(title: "Other", body: "Post body", author_id: 42)
     comment = DecoupledRouteComment.new(author_id: 41, decoupled_post: original)
 
-    assert_raises(ArgumentError) { comment.decoupled_post = other }
+    warning = capture_constraint_warnings { comment.decoupled_post = other }
+    assert_match(/DecoupledRouteComment#author_id.*41.*42/, warning)
 
-    assert_equal original.id, comment.post_id
+    assert_equal other.id, comment.post_id
     assert_equal 41, comment.author_id
-    assert_same original, comment.decoupled_post
+    assert_same other, comment.decoupled_post
   end
 
   def test_assigning_a_nil_source_constraint_does_not_clear_an_existing_value
     post = DecoupledRoutePost.new(author_id: nil)
     comment = DecoupledRouteComment.new(author_id: 41)
 
-    assert_raises(ArgumentError) { comment.decoupled_post = post }
+    warning = capture_constraint_warnings { comment.decoupled_post = post }
+    assert_match(/author_id.*41.*nil/, warning)
 
     assert_nil comment.post_id
     assert_equal 41, comment.author_id
+    assert_same post, comment.decoupled_post
 
     comment.author_id = nil
-    comment.decoupled_post = post
+    assert_empty capture_constraint_warnings { comment.decoupled_post = post }
     assert_same post, comment.decoupled_post
     assert_nil comment.author_id
   end
 
-  def test_all_query_constraints_are_checked_before_assignment_changes_attributes
+  def test_conflicting_query_constraints_do_not_prevent_filling_other_nil_constraints
     post = DecoupledRoutePost.new(id: 42, title: "Expected", author_id: 41)
     comment = DecoupledRouteComment.new(author_id: nil, body: "Conflicting")
 
-    assert_raises(ArgumentError) { comment.fully_matched_post = post }
+    warning = capture_constraint_warnings { comment.fully_matched_post = post }
+    assert_match(/body.*Conflicting.*Expected/, warning)
 
-    assert_nil comment.post_id
-    assert_nil comment.author_id
+    assert_equal 42, comment.post_id
+    assert_equal 41, comment.author_id
     assert_equal "Conflicting", comment.body
+    assert_same post, comment.fully_matched_post
   end
 
   def test_assigning_hash_mapped_query_constraints
@@ -205,10 +210,11 @@ class AssociationRouteTest < ActiveRecord::TestCase
     assert_nil comment.post_id
     assert_equal "Matched body", comment.body
 
-    assert_raises(ArgumentError) do
+    warning = capture_constraint_warnings do
       comment.title_matched_post = DecoupledRoutePost.new(id: 43, title: "Other body")
     end
-    assert_nil comment.post_id
+    assert_match(/body.*Matched body.*Other body/, warning)
+    assert_equal 43, comment.post_id
     assert_equal "Matched body", comment.body
   end
 
@@ -237,17 +243,19 @@ class AssociationRouteTest < ActiveRecord::TestCase
     assert_equal 41, comment.author_id
   end
 
-  def test_conflicting_collection_assignment_does_not_remove_existing_records
+  def test_conflicting_collection_assignment_warns_and_preserves_existing_constraint_values
     post = DecoupledRoutePost.create!(title: "Constrained post", body: "Post body", author_id: 41)
-    original = post.decoupled_comments.create!(author_id: 41, body: "Original")
-    conflicting = DecoupledRouteComment.new(author_id: 42, body: "Conflicting")
+    original = post.nullable_comments.create!(post_id: -1, author_id: 41, body: "Original")
+    conflicting = DecoupledRouteComment.new(post_id: -1, author_id: 42, body: "Conflicting")
 
-    assert_raises(ArgumentError) { post.decoupled_comments = [conflicting] }
+    warning = capture_constraint_warnings { post.nullable_comments = [conflicting] }
+    assert_match(/author_id.*42.*41/, warning)
 
-    assert_equal [original], post.decoupled_comments.to_a
-    assert_equal post.id, original.reload.post_id
-    assert_nil conflicting.post_id
+    assert_equal [conflicting], post.nullable_comments.to_a
+    assert_nil original.reload.parent_id
+    assert_equal post.id, conflicting.reload.parent_id
     assert_equal 42, conflicting.author_id
+    assert_empty post.reload.nullable_comments
   end
 
   def test_assigning_a_has_one_fills_query_constraints_and_preserves_them_on_clear
@@ -263,26 +271,34 @@ class AssociationRouteTest < ActiveRecord::TestCase
     assert_equal 41, comment.author_id
   end
 
-  def test_conflicting_has_one_assignment_does_not_remove_the_existing_record
+  def test_conflicting_has_one_assignment_warns_and_preserves_existing_constraint_values
     post = DecoupledRoutePost.create!(title: "Constrained post", body: "Post body", author_id: 41)
-    original = post.create_decoupled_comment!(author_id: 41, body: "Original")
-    conflicting = DecoupledRouteComment.new(author_id: 42, body: "Conflicting")
+    original = post.create_nullable_comment!(post_id: -1, author_id: 41, body: "Original")
+    conflicting = DecoupledRouteComment.new(post_id: -1, author_id: 42, body: "Conflicting")
 
-    assert_raises(ArgumentError) { post.decoupled_comment = conflicting }
+    warning = capture_constraint_warnings { post.nullable_comment = conflicting }
+    assert_match(/author_id.*42.*41/, warning)
 
-    assert_same original, post.decoupled_comment
-    assert_equal post.id, original.reload.post_id
-    assert_nil conflicting.post_id
+    assert_same conflicting, post.nullable_comment
+    assert_nil original.reload.parent_id
+    assert_equal post.id, conflicting.reload.parent_id
     assert_equal 42, conflicting.author_id
+    assert_nil post.reload.nullable_comment
   end
 
-  def test_building_associated_records_fills_nil_constraints_and_rejects_conflicts
+  def test_building_associated_records_fills_nil_constraints_and_warns_on_conflicts
     post = DecoupledRoutePost.new(author_id: 41)
 
     assert_equal 41, post.decoupled_comments.build(author_id: nil).author_id
-    assert_raises(ArgumentError) { post.decoupled_comments.build(author_id: 42) }
+    warning = capture_constraint_warnings do
+      assert_equal 42, post.decoupled_comments.build(author_id: 42).author_id
+    end
+    assert_match(/author_id.*42.*41/, warning)
     assert_equal 41, post.build_decoupled_comment(author_id: nil).author_id
-    assert_raises(ArgumentError) { post.build_decoupled_comment(author_id: 42) }
+    warning = capture_constraint_warnings do
+      assert_equal 42, post.build_decoupled_comment(author_id: 42).author_id
+    end
+    assert_match(/author_id.*42.*41/, warning)
   end
 
   def test_assigning_hash_mapped_constraints_from_a_collection
@@ -305,16 +321,17 @@ class AssociationRouteTest < ActiveRecord::TestCase
     post = Post.new(id: 42, title: "41")
     comment = AliasedRouteComment.new(route_author: nil)
 
-    route.write(comment, post)
+    assert_empty capture_constraint_warnings { route.write(comment, post) }
     assert_equal 42, comment.post_id
     assert_equal 41, comment.author_id
 
-    route.write(comment, post)
+    assert_empty capture_constraint_warnings { route.write(comment, post) }
     assert_equal 41, comment.author_id
 
     other = Post.new(id: 43, title: "42")
-    assert_raises(ArgumentError) { route.write(comment, other) }
-    assert_equal 42, comment.post_id
+    warning = capture_constraint_warnings { route.write(comment, other) }
+    assert_match(/AliasedRouteComment#author_id.*41.*42/, warning)
+    assert_equal 43, comment.post_id
     assert_equal 41, comment.author_id
   end
 
@@ -835,6 +852,12 @@ class AssociationRouteTest < ActiveRecord::TestCase
   end
 
   private
+    def capture_constraint_warnings(&block)
+      output = StringIO.new
+      ActiveRecord::Base.with(logger: Logger.new(output, level: Logger::WARN), &block)
+      output.string
+    end
+
     def fresh_route_reflections
       [
         [ActiveRecord::Reflection.create(:belongs_to, :firm, nil,

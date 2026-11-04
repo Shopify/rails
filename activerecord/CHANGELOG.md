@@ -1,9 +1,10 @@
-*   Restore association `query_constraints` with additive matching and guarded assignment.
+*   Restore association `query_constraints` with additive matching and constraint-preserving assignment.
 
     `query_constraints` adds columns to the foreign-key mapping used to load,
     preload, join, and filter an association. Assigning an association fills
     nil constraint columns on the record holding the foreign key. Existing
-    values must match the associated record, or assignment raises `ArgumentError`.
+    values are preserved; mismatches log a warning through `ActiveRecord::Base.logger`
+    without preventing assignment. Association reads still require matching constraints.
     Clearing an association nullifies only the foreign key and preserves its
     query-constraint columns. Rails derives the conventional foreign key when
     `foreign_key` is omitted.

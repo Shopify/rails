@@ -356,13 +356,6 @@ module ActiveRecord
           end
         end
 
-        def validate_query_constraints!(record)
-          return if reflection.through_reflection?
-
-          reflection.association_route(origin_class: owner.class, destination_class: record.class)
-            .validate_constraints!(owner, record)
-        end
-
         def assign_query_constraints(record)
           return if reflection.through_reflection?
 
