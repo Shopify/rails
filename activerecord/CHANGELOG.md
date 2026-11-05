@@ -1,3 +1,12 @@
+*   Extract association query-constraint mismatch reporting into an overridable hook.
+
+    `ActiveRecord::AssociationLink#report_constraint_mismatch` receives both
+    records plus `column:`, `current_value:`, and `associated_value:`. Its
+    default implementation logs a warning; applications can override it to
+    change reporting without altering assignment behavior.
+
+    *Nikita Vasilevsky*
+
 *   Restore association `query_constraints` with additive matching and constraint-preserving assignment.
 
     `query_constraints` adds columns to the foreign-key mapping used to load,

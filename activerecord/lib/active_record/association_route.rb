@@ -101,10 +101,8 @@ module ActiveRecord
         if current_value.nil?
           reference_record._write_attribute(column, value) unless value.nil?
         elsif current_value != value
-          ActiveRecord::Base.logger&.warn do
-            "Query constraint mismatch assigning #{target_record.class}: #{reference_record.class}##{column} " \
-              "is #{current_value.inspect}, but the associated value is #{value.inspect}."
-          end
+          report_constraint_mismatch(reference_record, target_record,
+            column: column, current_value: current_value, associated_value: value)
         end
       end
     end
@@ -123,6 +121,14 @@ module ActiveRecord
     end
 
     private
+      # Override to customize reporting without changing constraint assignment.
+      def report_constraint_mismatch(reference_record, target_record, column:, current_value:, associated_value:)
+        ActiveRecord::Base.logger&.warn do
+          "Query constraint mismatch assigning #{target_record.class}: #{reference_record.class}##{column} " \
+            "is #{current_value.inspect}, but the associated value is #{associated_value.inspect}."
+        end
+      end
+
       def writes_mapped_id?(reference_class)
         return false unless reference_class
 
