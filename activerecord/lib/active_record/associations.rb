@@ -1403,9 +1403,11 @@ module ActiveRecord
         #   associated records to be deleted in a background job.
         # [+:query_constraints+]
         #   Defines additional columns to match when querying associated records, alongside the foreign key.
-        #   These columns are query-only: building, assigning, or clearing the association writes only the foreign key.
+        #   Building or assigning the association fills nil constraint columns on the record holding the foreign key.
+        #   Existing constraint values must match the associated record, or assignment raises ArgumentError.
+        #   Clearing the association nullifies only the foreign key and preserves the constraint columns.
         #   A Symbol or String matches the same column on both models. A Hash maps columns on this model to columns
-        #   on the associated model and requires an explicit <tt>:foreign_key</tt>.
+        #   on the associated model.
         # [+:index_errors+]
         #   Allows differentiation of multiple validation errors from the association records, by including
         #   an index in the error attribute name, e.g. +roles[2].level+.
@@ -1619,9 +1621,11 @@ module ActiveRecord
         #   associated records to be deleted in a background job.
         # [+:query_constraints+]
         #   Defines additional columns to match when querying associated records, alongside the foreign key.
-        #   These columns are query-only: building, assigning, or clearing the association writes only the foreign key.
+        #   Building or assigning the association fills nil constraint columns on the record holding the foreign key.
+        #   Existing constraint values must match the associated record, or assignment raises ArgumentError.
+        #   Clearing the association nullifies only the foreign key and preserves the constraint columns.
         #   A Symbol or String matches the same column on both models. A Hash maps columns on this model to columns
-        #   on the associated model and requires an explicit <tt>:foreign_key</tt>.
+        #   on the associated model.
         # [+:deprecated+]
         #   If true, marks the association as deprecated. Usage of deprecated associations is reported.
         #   Please, check the class documentation above for details.
@@ -1815,9 +1819,11 @@ module ActiveRecord
         #   associated records to be deleted in a background job.
         # [+:query_constraints+]
         #   Defines additional columns to match when querying associated records, alongside the foreign key.
-        #   These columns are query-only: building, assigning, or clearing the association writes only the foreign key.
+        #   Building or assigning the association fills nil constraint columns on the record holding the foreign key.
+        #   Existing constraint values must match the associated record, or assignment raises ArgumentError.
+        #   Clearing the association nullifies only the foreign key and preserves the constraint columns.
         #   A Symbol or String matches the same column on both models. A Hash maps columns on this model to columns
-        #   on the associated model and requires an explicit <tt>:foreign_key</tt>.
+        #   on the associated model.
         # [+:deprecated+]
         #   If true, marks the association as deprecated. Usage of deprecated associations is reported.
         #   Please, check the class documentation above for details.

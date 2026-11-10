@@ -1,22 +1,32 @@
-*   Restore association `query_constraints` with additive, query-only semantics.
+*   Restore association `query_constraints` with additive matching and guarded assignment.
 
     `query_constraints` adds columns to the foreign-key mapping used to load,
-    preload, join, and filter an association. The foreign key remains the only
-    writable reference, so assigning or clearing an association does not change
-    its query-constraint columns. Rails derives the conventional foreign key
-    when `foreign_key` is omitted.
+    preload, join, and filter an association. Assigning an association fills
+    nil constraint columns on the record holding the foreign key. Existing
+    values must match the associated record, or assignment raises `ArgumentError`.
+    Clearing an association nullifies only the foreign key and preserves its
+    query-constraint columns. Changing a query-constraint column retargets a
+    `belongs_to` like changing its foreign key does, for dirty tracking,
+    staleness, counter caches, and touch. Rails derives the conventional
+    foreign key when `foreign_key` is omitted.
 
     ```ruby
     # Reads and writes both columns as a composite foreign key.
     belongs_to :post, foreign_key: [:account_id, :post_id]
 
-    # Reads with account_id and post_id, but writes only post_id.
+    # Matches account_id and post_id; fills a nil account_id, but never clears it.
     belongs_to :post, query_constraints: :account_id
     ```
 
     Symbols and strings match same-named columns. Hashes map columns on the
-    declaring model to columns on the associated model and require an explicit
-    `foreign_key`.
+    declaring model to columns on the associated model. `through:` and
+    `has_and_belongs_to_many` associations reject `query_constraints`; declare
+    them on the direct associations instead.
+
+    Mismatches go through `ActiveRecord::AssociationLink#report_constraint_mismatch`,
+    which receives both records plus `column:`, `current_value:`, and
+    `associated_value:`. It raises by default; applications can override it to
+    report mismatches without preventing assignment.
 
     *Nikita Vasilevsky* and *Adrianna Chang*
 
