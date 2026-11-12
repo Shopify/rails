@@ -62,6 +62,8 @@ module ActiveRecord
         end
       end
 
+      POLYMORPHIC_LABEL = /\s*\(([^)]*)\)\s*$/
+
       def initialize(fixture, table_rows:, label:, now:)
         @table_rows = table_rows
         @label = label
@@ -87,6 +89,7 @@ module ActiveRecord
           return unless model_class
           fill_timestamps
           interpolate_label
+          resolve_foreign_key_labels
           model_class.composite_primary_key? ? generate_composite_primary_key : generate_primary_key
           resolve_enums
           resolve_sti_reflections
@@ -145,6 +148,26 @@ module ActiveRecord
           end
         end
 
+        def resolve_foreign_key_labels
+          @row.keys.each do |key|
+            next if model_metadata.has_column?(key) || reflection_class.reflect_on_association(key)
+
+            fk_name = "#{key}_id"
+            next unless model_metadata.has_column?(fk_name)
+
+            value = @row.delete(key)
+            next unless value
+
+            fk_type_name = "#{key}_type"
+            if model_metadata.has_column?(fk_type_name) && value.is_a?(String) && (match = value.match(POLYMORPHIC_LABEL))
+              @row[fk_type_name] = match[1]
+              value = match.pre_match
+            end
+
+            @row[fk_name] = ActiveRecord::FixtureSet.identify(value, reflection_class.type_for_attribute(fk_name).type)
+          end
+        end
+
         def resolve_sti_reflections
           # If STI is used, find the correct subclass for association reflection
           reflection_class._reflections.each_value do |association|
@@ -155,7 +178,7 @@ module ActiveRecord
 
               if association.name.to_s != fk_name && value = @row.delete(association.name.to_s)
                 if association.polymorphic?
-                  if value.sub!(/\s*\(([^)]*)\)\s*$/, "")
+                  if value.sub!(POLYMORPHIC_LABEL, "")
                     # support polymorphic belongs_to as "label (Type)"
                     @row[association.foreign_type] = $1
                   end

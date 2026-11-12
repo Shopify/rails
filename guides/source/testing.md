@@ -693,7 +693,9 @@ Article `first` found in `fixtures/articles.yml` for the latter.
 
 NOTE: For associations to reference one another by name, you can use the fixture
 name instead of specifying the `id:` attribute on the associated fixtures. Rails
-will auto-assign a primary key to be consistent between runs. For more
+will auto-assign a primary key to be consistent between runs. The association
+itself is optional: a label under a bare `category` key fills a `category_id`
+column even when the model has no `belongs_to :category`. For more
 information on this association behavior please read the [Fixtures API
 documentation](https://api.rubyonrails.org/classes/ActiveRecord/FixtureSet.html).
 

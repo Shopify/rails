@@ -1538,6 +1538,42 @@ class FoxyFixturesTest < ActiveRecord::TestCase
   end
 end
 
+class FixtureForeignKeyLabelsTest < ActiveRecord::TestCase
+  class Loot < ActiveRecord::Base
+    self.table_name = "treasures"
+  end
+
+  class Flagship < ActiveRecord::Base
+    self.table_name = "ships"
+    belongs_to :pirate, foreign_key: :update_only_pirate_id
+  end
+
+  set_fixture_class loots: Loot, flagships: Flagship
+  fixtures :loots, :flagships, :pirates
+
+  def test_resolves_a_label_through_the_foreign_key_column_when_the_model_has_no_association
+    assert_empty Loot.reflect_on_all_associations
+    assert_equal flagships(:queen_annes_revenge).id, loots(:pieces_of_eight).ship_id
+  end
+
+  def test_resolves_a_label_with_a_type_through_polymorphic_columns_when_the_model_has_no_association
+    assert_equal pirates(:redbeard).id, loots(:pieces_of_eight).looter_id
+    assert_equal "Pirate", loots(:pieces_of_eight).looter_type
+  end
+
+  def test_resolved_foreign_keys_load_the_referenced_fixtures_through_a_model_with_the_associations
+    treasure = Treasure.find(loots(:pieces_of_eight).id)
+
+    assert_equal Ship.find(flagships(:queen_annes_revenge).id), treasure.ship
+    assert_equal pirates(:redbeard), treasure.looter
+  end
+
+  def test_an_association_decides_where_its_label_goes_even_when_a_column_matches_the_key
+    assert_equal pirates(:blackbeard).id, flagships(:queen_annes_revenge).update_only_pirate_id
+    assert_nil flagships(:queen_annes_revenge).pirate_id
+  end
+end
+
 class ActiveSupportSubclassWithFixturesTest < ActiveRecord::TestCase
   fixtures :organizations
 

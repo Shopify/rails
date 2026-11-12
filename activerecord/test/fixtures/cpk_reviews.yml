@@ -8,6 +8,6 @@ first_book_review:
 
 second_book_review_for_book_with_partial_pk_defined:
   book: cpk_great_author_first_book
-  author_id: <%= ActiveRecord::FixtureSet.identify(:cpk_great_author) %>
+  author: cpk_great_author
   rating: 5
   comment: "The first book was alright."

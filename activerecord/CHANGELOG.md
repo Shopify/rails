@@ -1,3 +1,24 @@
+*   Resolve fixture labels through foreign key columns that have no association.
+
+    A fixture row can give a label under a bare `<name>` key for any `<name>_id`
+    column of its table, even when the model has no `belongs_to :<name>`.
+
+    ```yaml
+    # Before
+    pieces_of_eight:
+      ship_id: <%= ActiveRecord::FixtureSet.identify(:black_pearl) %>
+
+    # After
+    pieces_of_eight:
+      ship: black_pearl
+    ```
+
+    The identifier is generated for the type of the column, as it is for an
+    association. A "label (Type)" value fills a `<name>_type` column the way a
+    polymorphic `belongs_to` does.
+
+    *Gannon McGibbon*
+
 *   Cast and freeze a model's attribute defaults when its schema is loaded.
 
     Unless the model declares an attribute with a `default:`, each default is
