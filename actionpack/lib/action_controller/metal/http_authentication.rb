@@ -83,9 +83,7 @@ module ActionController
 
         def http_basic_authenticate_or_request_with(name:, password:, realm: nil, message: nil, content_type: nil)
           authenticate_or_request_with_http_basic(realm, message, content_type) do |given_name, given_password|
-            # This comparison uses & so that it doesn't short circuit and uses
-            # `secure_compare` so that length information isn't leaked.
-            ActiveSupport::SecurityUtils.secure_compare(given_name.to_s, name) &
+            given_name == name &&
               ActiveSupport::SecurityUtils.secure_compare(given_password.to_s, password)
           end
         end
@@ -334,14 +332,13 @@ module ActionController
         ::Base64.strict_encode64("#{t}:#{digest}")
       end
 
-      # Might want a shorter timeout depending on whether the request is a PATCH, PUT,
-      # or POST, and if the client is a browser or web service. Can be much shorter if
-      # the Stale directive is implemented. This would allow a user to use new nonce
-      # without prompting the user again for their username and password.
+      # A nonce is bound to the server secret, so it only has to be rejected when
+      # it claims to come from the future: clock drift between application
+      # servers otherwise produces spurious 401s partway through a session.
       def validate_nonce(secret_key, request, value, seconds_to_timeout = 5 * 60)
         return false if value.nil?
         t = ::Base64.decode64(value).split(":").first.to_i
-        nonce(secret_key, t) == value && (t - Time.now.to_i).abs <= seconds_to_timeout
+        nonce(secret_key, t) == value && t <= Time.now.to_i + seconds_to_timeout
       end
 
       # Opaque based on digest of secret key

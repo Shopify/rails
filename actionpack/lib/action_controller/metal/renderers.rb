@@ -175,14 +175,12 @@ module ActionController
     end
 
     def _render_to_body_with_renderer(options) # :nodoc:
-      _all_renderers.each do |name|
-        if options.key?(name)
-          _process_options(options)
-          method_name = Renderers._render_with_renderer_method_name(name)
-          return send(method_name, options.delete(name), options)
-        end
+      # A render call names its renderer directly, so find the one option key
+      # that is a registered renderer instead of probing each in turn.
+      if name = _all_renderers.find { |renderer| options.key?(renderer) }
+        _process_options(options)
+        send(Renderers._render_with_renderer_method_name(name), options.delete(name), options)
       end
-      nil
     end
 
     def _all_renderers # :nodoc:

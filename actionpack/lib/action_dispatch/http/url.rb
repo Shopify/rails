@@ -324,7 +324,7 @@ module ActionDispatch
       #     req = ActionDispatch::Request.new 'HTTP_HOST' => 'example.com:8080'
       #     req.raw_host_with_port # => "example.com:8080"
       def raw_host_with_port
-        @raw_host_with_port ||= if forwarded = x_forwarded_host&.split(/,\s?/)&.last.presence
+        @raw_host_with_port ||= if forwarded = forwarded_host.presence
           forwarded
         else
           get_header("HTTP_HOST") || "#{server_name}:#{get_header('SERVER_PORT')}"
@@ -455,6 +455,13 @@ module ActionDispatch
       def subdomain(tld_length = ActionDispatch::Http::URL.tld_length)
         ActionDispatch::Http::URL.extract_subdomain(host, tld_length)
       end
+
+      private
+        # The host the outermost proxy received, from `Forwarded` (RFC 7239) or the
+        # older `X-Forwarded-Host`, in the same order Rack consults them.
+        def forwarded_host
+          get_http_forwarded(:host)&.last || x_forwarded_host&.split(/,\s?/)&.last
+        end
     end
   end
 end

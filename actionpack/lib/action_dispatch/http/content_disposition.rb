@@ -20,7 +20,10 @@ module ActionDispatch
         'filename="' + percent_escape(I18n.transliterate(filename), TRADITIONAL_ESCAPED_CHAR) + '"'
       end
 
-      RFC_5987_ESCAPED_CHAR = /[^A-Za-z0-9!\#$&+.^_`|~-]/
+      # RFC 8187 ext-value: percent-encode non-ASCII bytes, spaces, and the
+      # characters that quote or delimit header parameters; everything else is
+      # carried literally so clients display the name as given.
+      RFC_5987_ESCAPED_CHAR = /[^[:ascii:]]|[ "%';,\\]/
 
       def utf8_filename
         "filename*=UTF-8''" + percent_escape(filename, RFC_5987_ESCAPED_CHAR)

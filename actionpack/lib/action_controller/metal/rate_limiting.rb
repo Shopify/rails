@@ -94,7 +94,9 @@ module ActionController # :nodoc:
         within = within.is_a?(Symbol) ? send(within) : (within.respond_to?(:call) ? instance_exec(&within) : within)
 
         cache_key = ["rate-limit", scope, name, by].compact.join(":")
-        count = store.increment(cache_key, 1, expires_in: within)
+        # Counters started in the same burst would otherwise all lapse on the
+        # same tick; stagger their expiry by a fraction of the window.
+        count = store.increment(cache_key, 1, expires_in: within + rand(within.to_i / 10 + 1).seconds)
         if count && count > to
           ActiveSupport::Notifications.instrument("rate_limit.action_controller",
               request: request,

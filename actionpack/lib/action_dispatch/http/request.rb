@@ -28,7 +28,9 @@ module ActionDispatch
     include ActionDispatch::ContentSecurityPolicy::Request
     include Rack::Request::Env
 
-    LOCALHOST = Regexp.union([/^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/, /^::1$/, /^0:0:0:0:0:0:0:1(%.*)?$/]).freeze
+    # A server bound to an IPv6 socket reports local IPv4 connections as
+    # ::ffff:127.0.0.1; recognize that shape of loopback too.
+    LOCALHOST = Regexp.union([/^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/, /^::1$/, /^0:0:0:0:0:0:0:1(%.*)?$/, /^::ffff:127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/]).freeze
 
     # Environment keys displayed on exception pages.
     ENV_METHODS = %w[ AUTH_TYPE GATEWAY_INTERFACE
