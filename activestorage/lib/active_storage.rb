@@ -382,8 +382,10 @@ module ActiveStorage
     @checksum_implementation = Digest::MD5
   end
 
+  # Optional cap on the number of ranges one request may ask for. The bytes
+  # served are already bounded by `streaming_chunk_max_size`.
   singleton_class.attr_accessor :streaming_max_ranges
-  @streaming_max_ranges = 1
+  @streaming_max_ranges = nil
 
   mattr_accessor :video_preview_arguments, default: "-y -vframes 1 -f image2"
 

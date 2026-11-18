@@ -36,7 +36,7 @@ class ActiveStorage::Variation
 
     # Returns a Variation instance with the transformations that were encoded by `encode`.
     def decode(key)
-      new ActiveStorage.verifier.verify(key, purpose: :variation)
+      new ActiveStorage.verifier.verified(key, purpose: :variation) || legacy_transformations(key)
     end
 
     # Returns a signed key for the `transformations`, which can be used to refer to a specific
@@ -44,6 +44,14 @@ class ActiveStorage::Variation
     def encode(transformations)
       ActiveStorage.verifier.generate(transformations, purpose: :variation)
     end
+
+    private
+      # Keys minted before variations were signed are plain URL-safe Base64 JSON.
+      def legacy_transformations(key)
+        JSON.parse(Base64.urlsafe_decode64(key))
+      rescue ArgumentError, JSON::ParserError
+        raise ActiveSupport::MessageVerifier::InvalidSignature
+      end
   end
 
   def initialize(transformations)

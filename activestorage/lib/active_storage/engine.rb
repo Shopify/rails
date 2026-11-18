@@ -53,7 +53,6 @@ module ActiveStorage
 
     config.active_storage.content_types_to_serve_as_binary = %w(
       text/html
-      image/svg+xml
       application/postscript
       application/x-shockwave-flash
       text/xml
@@ -63,6 +62,7 @@ module ActiveStorage
       text/cache-manifest
     )
 
+    # Browsers declare .ico uploads under either icon type.
     config.active_storage.content_types_allowed_inline = %w(
       image/webp
       image/avif
@@ -73,6 +73,8 @@ module ActiveStorage
       image/bmp
       image/vnd.adobe.photoshop
       image/vnd.microsoft.icon
+      image/x-icon
+      image/svg+xml
       application/pdf
     )
 

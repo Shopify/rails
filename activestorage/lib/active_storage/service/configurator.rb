@@ -33,6 +33,14 @@ module ActiveStorage
       end
 
       def resolve(class_name)
+        # Apps can point at their own service class in storage.yml by its
+        # fully-qualified name; bundled adapters keep their short names.
+        if class_name.to_s.include?("::")
+          service_class = class_name.to_s.safe_constantize
+          service_class or raise "Missing service adapter for #{class_name.inspect}"
+          return service_class
+        end
+
         service_name = :"#{class_name.camelize}Service"
         unless ActiveStorage::Service.const_defined?(service_name)
           require "active_storage/service/#{class_name.to_s.underscore}_service"

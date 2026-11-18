@@ -48,16 +48,19 @@ class ActiveStorage::DiskController < ActiveStorage::BaseController
     end
 
     def decode_verified_key
-      key = ActiveStorage.verifier.verified(params[:encoded_key], purpose: :blob_key)
-      key&.deep_symbolize_keys
+      decode params[:encoded_key], purpose: :blob_key
     end
 
+    # Upload URLs minted before the token purpose was split out were signed as :blob_key.
     def decode_verified_token
-      token = ActiveStorage.verifier.verified(params[:encoded_token], purpose: :blob_token)
-      token&.deep_symbolize_keys
+      decode(params[:encoded_token], purpose: :blob_token) || decode(params[:encoded_token], purpose: :blob_key)
+    end
+
+    def decode(message, purpose:)
+      ActiveStorage.verifier.verified(message, purpose: purpose)&.deep_symbolize_keys
     end
 
     def acceptable_content?(token)
-      token[:content_type] == request.content_mime_type && token[:content_length] == request.content_length
+      token[:content_type] == request.content_mime_type && token[:content_length].to_i == request.content_length
     end
 end

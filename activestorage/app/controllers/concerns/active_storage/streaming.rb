@@ -15,7 +15,7 @@ module ActiveStorage::Streaming
       ranges = Rack::Utils.get_byte_ranges(range_header, blob.byte_size)
 
       return head(:range_not_satisfiable) unless ranges_valid?(ranges)
-      return head(:range_not_satisfiable) if ranges.length > ActiveStorage.streaming_max_ranges
+      return head(:range_not_satisfiable) if ActiveStorage.streaming_max_ranges && ranges.length > ActiveStorage.streaming_max_ranges
 
       if ranges.length == 1
         range = ranges.first
@@ -43,10 +43,11 @@ module ActiveStorage::Streaming
       response.headers["Accept-Ranges"] = "bytes"
       response.headers["Content-Length"] = data.length.to_s
 
+      # `Filename#to_s` already renders the form used for downloads.
       send_data(
         data,
         disposition: blob.forced_disposition_for_serving || disposition || DEFAULT_BLOB_STREAMING_DISPOSITION,
-        filename: blob.filename.sanitized,
+        filename: blob.filename.to_s,
         status: :partial_content,
         type: content_type
       )
@@ -62,7 +63,7 @@ module ActiveStorage::Streaming
     # The content type and filename is set directly from the `blob`.
     def send_blob_stream(blob, disposition: nil) # :doc:
       send_stream(
-          filename: blob.filename.sanitized,
+          filename: blob.filename.to_s,
           disposition: blob.forced_disposition_for_serving || disposition || DEFAULT_BLOB_STREAMING_DISPOSITION,
           type: blob.content_type_for_serving) do |stream|
         blob.download do |chunk|
