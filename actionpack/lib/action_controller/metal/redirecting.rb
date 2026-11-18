@@ -298,17 +298,28 @@ module ActionController
         end
       end
 
+      # Authority of a URL that URI::RFC3986 rejects but browsers accept, such as
+      # one with a space or a pipe in its path.
+      LENIENT_AUTHORITY = %r{\A(?:[a-z][a-z0-9+.-]*:)?//(?:[^/?#@]*@)?(\[[^\]]*\]|[^/?#:]*)}i
+      private_constant :LENIENT_AUTHORITY
+
       def _url_host_allowed?(url)
         url_to_s = url.to_s
-        host = URI(url_to_s).host
+        host = _redirect_host(url_to_s)
 
         if host.nil?
           url_to_s.start_with?("/") && !url_to_s.start_with?("//")
         else
           host == request.host || self.class.allowed_redirect_hosts_permissions&.allows?(host)
         end
-      rescue ArgumentError, URI::Error
+      rescue ArgumentError
         false
+      end
+
+      def _redirect_host(url)
+        URI(url).host
+      rescue URI::Error
+        url[LENIENT_AUTHORITY, 1].presence
       end
 
       def _ensure_url_is_http_header_safe(url)

@@ -113,7 +113,19 @@ module ActionDispatch
         end
 
         def get_cookie(req)
-          cookie_jar(req)[@key]
+          cookie_jar(req)[@key] || legacy_cookie(req)
+        end
+
+        # Sessions written by Rack::Session::Cookie's Base64::JSON coder carry no
+        # signature; read them so moving an app onto this store keeps users signed in.
+        def legacy_cookie(req)
+          raw = req.cookies[@key]
+          return if raw.nil? || raw.include?("--")
+
+          data = JSON.parse(::Base64.strict_decode64(raw))
+          data if data.is_a?(Hash)
+        rescue ArgumentError, JSON::ParserError
+          nil
         end
 
         def cookie_jar(request)

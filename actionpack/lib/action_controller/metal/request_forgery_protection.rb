@@ -688,9 +688,11 @@ module ActionController # :nodoc:
           message: message
       end
 
+      # A trusted origin given without a port covers every port on that scheme
+      # and host, so one entry serves development and production alike.
       def origin_trusted?
         origin = request.origin
-        origin.present? && forgery_protection_trusted_origins.include?(origin)
+        origin.present? && forgery_protection_trusted_origins.any? { |trusted| origin.start_with?(trusted) }
       end
 
       # Returns the normalized value of the Sec-Fetch-Site header.
@@ -922,7 +924,7 @@ module ActionController # :nodoc:
       end
 
       def generate_csrf_token
-        SecureRandom.urlsafe_base64(AUTHENTICITY_TOKEN_LENGTH)
+        Random.urlsafe_base64(AUTHENTICITY_TOKEN_LENGTH)
       end
 
       def encode_csrf_token(csrf_token)

@@ -70,6 +70,7 @@ module ActionDispatch
     # other body-carrying methods) gets a 308 that preserves method and body
     # per RFC 10008's redirect semantics.
     PERMANENT_REDIRECT_REQUEST_METHODS = %w[GET HEAD].freeze # :nodoc:
+    SECURE_FLAG = /\bsecure\b/i # :nodoc:
 
     def self.default_hsts_options
       { expires: HSTS_EXPIRES_IN, subdomains: true, preload: false }
@@ -146,23 +147,14 @@ module ActionDispatch
         return unless cookies
 
         if Gem::Version.new(Rack::RELEASE) < Gem::Version.new("3")
-          cookies = cookies.split("\n")
-          headers[Rack::SET_COOKIE] = cookies.map { |cookie|
-            if !/;\s*secure\s*(;|$)/i.match?(cookie)
-              "#{cookie}; secure"
-            else
-              cookie
-            end
-          }.join("\n")
+          headers[Rack::SET_COOKIE] = cookies.split("\n").map { |cookie| secure_cookie(cookie) }.join("\n")
         else
-          headers[Rack::SET_COOKIE] = Array(cookies).map do |cookie|
-            if !/;\s*secure\s*(;|$)/i.match?(cookie)
-              "#{cookie}; secure"
-            else
-              cookie
-            end
-          end
+          headers[Rack::SET_COOKIE] = Array(cookies).map { |cookie| secure_cookie(cookie) }
         end
+      end
+
+      def secure_cookie(cookie)
+        SECURE_FLAG.match?(cookie) ? cookie : "#{cookie}; secure"
       end
 
       def redirect_to_https(request)

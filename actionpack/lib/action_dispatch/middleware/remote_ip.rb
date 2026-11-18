@@ -134,6 +134,12 @@ module ActionDispatch
       # list of IPs, remove known and trusted proxies, and then take the last address
       # left, which was presumably set by one of those proxies.
       def calculate_ip
+        # A CDN that terminates the client connection reports the address it
+        # accepted in a single-value header that nothing downstream rewrites.
+        if cdn_client = sanitize_ips(ips_from(@req.get_header("HTTP_TRUE_CLIENT_IP"))).first
+          return cdn_client
+        end
+
         # Set by the Rack web server, this is a single value.
         remote_addr = sanitize_ips(ips_from(@req.remote_addr)).last
 
