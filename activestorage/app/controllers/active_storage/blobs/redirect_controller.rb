@@ -31,8 +31,12 @@
 class ActiveStorage::Blobs::RedirectController < ActiveStorage::BaseController
   include ActiveStorage::SetBlob
 
+  # The redirect itself is cacheable for `service_urls_expire_in`; a client that
+  # revalidates late must still land on a live target, so the target outlives it.
+  SERVICE_URL_LIFETIME = 1.week
+
   def show
     expires_in ActiveStorage.service_urls_expire_in
-    redirect_to @blob.url(disposition: params[:disposition]), allow_other_host: true
+    redirect_to @blob.url(disposition: params[:disposition], expires_in: SERVICE_URL_LIFETIME), allow_other_host: true
   end
 end

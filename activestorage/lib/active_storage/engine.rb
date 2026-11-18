@@ -53,7 +53,6 @@ module ActiveStorage
 
     config.active_storage.content_types_to_serve_as_binary = %w(
       text/html
-      image/svg+xml
       application/postscript
       application/x-shockwave-flash
       text/xml
@@ -73,6 +72,7 @@ module ActiveStorage
       image/bmp
       image/vnd.adobe.photoshop
       image/vnd.microsoft.icon
+      image/svg+xml
       application/pdf
     )
 

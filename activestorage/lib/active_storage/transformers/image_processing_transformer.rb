@@ -16,13 +16,12 @@ module ActiveStorage
         class UnsupportedImageProcessingMethod < StandardError; end
         class UnsupportedImageProcessingArgument < StandardError; end
 
+        # GIF output keeps every frame so animations survive; other formats
+        # take the first page.
         def process(file, format:)
-          processor.
-            source(file).
-            loader(page: 0).
-            convert(format).
-            apply(operations).
-            call
+          pipeline = processor.source(file)
+          pipeline = pipeline.loader(page: 0) unless format.to_s.casecmp?("gif")
+          pipeline.convert(format).apply(operations).call
         end
 
         def operations

@@ -214,9 +214,10 @@ module ActiveStorage
         self.class.name.split("::").third.remove("Service")
       end
 
+      # RFC 6266 leaves the disposition type open (`form-data` is common), so pass the
+      # caller's type through and only default when none is given.
       def content_disposition_with(type: "inline", filename:)
-        disposition = (type.to_s.presence_in(%w( attachment inline )) || "inline")
-        ActionDispatch::Http::ContentDisposition.format(disposition: disposition, filename: filename.sanitized)
+        ActionDispatch::Http::ContentDisposition.format(disposition: type.to_s.presence || "inline", filename: filename.sanitized)
       end
 
       def download_and_verify_tempfile(key, checksum: nil, verify: true, name: "ActiveStorage-", tmpdir: nil, &block)
