@@ -74,7 +74,14 @@ module ActiveRecord
         options = { on_rotation: on_rotation }.compact
         if id = signed_id_verifier.verified(signed_id, purpose: combine_signed_id_purposes(purpose), **options)
           find_by(primary_key => [id])
+        elsif legacy_id?(signed_id)
+          find_by(primary_key => signed_id)
         end
+      end
+
+      # Links minted before signed ids were introduced carry the plain record id.
+      def legacy_id?(signed_id)
+        signed_id.to_s.match?(/\A\d+\z/)
       end
 
       # Works like find_signed, but will raise an ActiveSupport::MessageVerifier::InvalidSignature
