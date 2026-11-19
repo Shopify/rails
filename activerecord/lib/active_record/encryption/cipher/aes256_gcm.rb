@@ -58,10 +58,8 @@ module ActiveRecord
           iv = encrypted_message.headers.iv
           auth_tag = encrypted_message.headers.auth_tag
 
-          # Currently the OpenSSL bindings do not raise an error if auth_tag is
-          # truncated, which would allow an attacker to easily forge it. See
-          # https://github.com/ruby/openssl/issues/63
-          raise ActiveRecord::Encryption::Errors::EncryptedContentIntegrity if auth_tag.nil? || auth_tag.bytes.length != 16
+          # ruby/openssl validates the tag length itself since 3.0 (ruby/openssl#63).
+          raise ActiveRecord::Encryption::Errors::EncryptedContentIntegrity if auth_tag.nil?
 
           cipher = OpenSSL::Cipher.new(CIPHER_TYPE)
 
