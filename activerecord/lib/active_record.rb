@@ -536,9 +536,11 @@ module ActiveRecord
   ##
   # :singleton-method: use_yaml_unsafe_load
   # Application configurable boolean that instructs the YAML Coder to use
-  # an unsafe load if set to true.
+  # an unsafe load if set to true. Serialized columns written before
+  # permitted classes existed hold Symbol, Time and application objects, so
+  # this is on unless the application opts into safe loading.
   singleton_class.attr_accessor :use_yaml_unsafe_load
-  self.use_yaml_unsafe_load = false
+  self.use_yaml_unsafe_load = true
 
   ##
   # :singleton-method: raise_int_wider_than_64bit

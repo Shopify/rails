@@ -68,8 +68,10 @@ module ActiveRecord
 
       LOCAL_HOSTS = ["127.0.0.1", "localhost"].freeze
 
+      # Test databases are dropped and recreated on every run, so the
+      # protected-environment round trip is skipped for them.
       def check_protected_environments!(environment = env)
-        return if ENV["DISABLE_DATABASE_ENVIRONMENT_CHECK"]
+        return if ENV["DISABLE_DATABASE_ENVIRONMENT_CHECK"] || environment.to_s == "test"
 
         configs_for(env_name: environment).each do |db_config|
           database_adapter_for(db_config).check_current_protected_environment!(db_config, migration_class)

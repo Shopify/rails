@@ -1353,6 +1353,7 @@ module ActiveRecord
           return native_error if native_error.is_a?(ActiveRecordError)
 
           message = "#{native_error.class.name}: #{native_error.message}"
+          message = "#{message} (binds: #{type_casted_binds(binds).inspect})" if binds.present?
 
           active_record_error = translate_exception(
             native_error, message: message, sql: sql, binds: binds
