@@ -514,6 +514,9 @@ module ActiveRecord
       # isolation level.
       #  :args: (requires_new: nil, isolation: nil, &block)
       def transaction(requires_new: nil, isolation: nil, joinable: true, &block)
+        # Isolation levels can arrive as strings, for example when read from
+        # YAML or ENV configuration, so normalize them up front.
+        isolation = isolation.to_sym if isolation.is_a?(String)
         # If we're running inside the single, non-joinable transaction that
         # ActiveRecord::TestFixtures starts around each example (depth == 1),
         # an `isolation:` hint must be validated then ignored so that the

@@ -72,7 +72,10 @@ module ActiveRecord
         raise Errors::Decryption unless keys.present?
         uncompress_if_needed(cipher.decrypt(message, key: keys.collect(&:secret), **cipher_options), message.headers.compressed)
       rescue *(ENCODING_ERRORS + DECRYPT_ERRORS)
-        raise Errors::Decryption
+        # Naming the key ids that were tried makes a failed key rotation much
+        # easier to diagnose from logs.
+        tried_key_ids = keys ? keys.collect(&:id).join(", ") : "none"
+        raise Errors::Decryption, "Decryption failed (tried key ids: #{tried_key_ids})"
       end
 
       # Returns whether the text is encrypted or not.

@@ -53,7 +53,7 @@ module ActiveRecord
           self.support_unencrypted_data = false
           self.encrypt_fixtures = false
           self.validate_column_size = true
-          self.add_to_filter_parameters = true
+          self.add_to_filter_parameters = false
           self.excluded_from_filter_parameters = []
           self.previous_schemes = []
           self.forced_encoding_for_deterministic_encryption = Encoding::UTF_8

@@ -1306,7 +1306,9 @@ module ActiveRecord
         end
 
         def backoff(counter)
-          sleep 0.1 * counter
+          # Stagger retries so that a transient failure doesn't produce a
+          # synchronized burst of reconnect attempts across connections.
+          sleep 0.1 * counter * (1 + rand / 2)
         end
 
         def reconnect
@@ -1353,6 +1355,7 @@ module ActiveRecord
           return native_error if native_error.is_a?(ActiveRecordError)
 
           message = "#{native_error.class.name}: #{native_error.message}"
+          message = "#{message} (binds: #{type_casted_binds(binds).inspect})" if binds.present?
 
           active_record_error = translate_exception(
             native_error, message: message, sql: sql, binds: binds

@@ -60,7 +60,8 @@ module ActiveRecord
         end
 
         begin
-          Object.const_get(class_name)
+          # Resolve the constant registered for this adapter.
+          class_name.constantize
         rescue NameError => error
           raise AdapterNotFound, "Could not load the #{class_name} Active Record adapter (#{error.message})."
         end

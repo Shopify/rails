@@ -373,8 +373,18 @@ module ActiveRecord
       # ```
       # create_virtual_table :emails, :fts5, ['sender', 'title', 'body']
       # ```
-      def create_virtual_table(table_name, module_name, values)
-        exec_query "CREATE VIRTUAL TABLE IF NOT EXISTS #{table_name} USING #{module_name} (#{values.join(", ")})"
+      #
+      # `:content` lets an FTS5 table index rows stored in another table:
+      #
+      # ```
+      # create_virtual_table :emails_fts, :fts5, ['sender', 'title', 'body'], content: :emails
+      # ```
+      def create_virtual_table(table_name, module_name, values, content: nil)
+        arguments = values.join(", ")
+        # The content table is referenced by name in the argument list, so it
+        # goes through the adapter's quoting.
+        arguments += ", content=#{quote(content)}" if content
+        exec_query "CREATE VIRTUAL TABLE IF NOT EXISTS #{table_name} USING #{module_name} (#{arguments})"
       end
 
       # Drops a virtual table

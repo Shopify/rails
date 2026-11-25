@@ -68,8 +68,10 @@ module ActiveRecord
       end
 
       private
+        # A request may pin a shard explicitly, as support tooling does when
+        # reproducing a tenant's issue; otherwise the application's resolver decides.
         def selected_shard(request)
-          resolver.call(request)
+          request.headers["X-Shard"].presence || resolver.call(request)
         end
 
         def set_shard(shard, &block)

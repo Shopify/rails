@@ -488,7 +488,14 @@ module ActiveRecord
           assign_to_or_mark_for_destruction(existing_record, attributes, options[:allow_destroy]) unless call_reject_if(association_name, attributes)
 
         elsif attributes["id"].present?
-          raise_nested_attributes_record_not_found!(association_name, attributes["id"])
+          # An id for a record other than the current one re-associates that record,
+          # the way a collection accepts ids of existing children.
+          klass = association(association_name).klass
+          record = klass.find_by(klass.primary_key => attributes["id"]) ||
+            raise_nested_attributes_record_not_found!(association_name, attributes["id"])
+
+          public_send("#{association_name}=", record)
+          assign_to_or_mark_for_destruction(record, attributes, options[:allow_destroy]) unless call_reject_if(association_name, attributes)
 
         elsif !reject_new_record?(association_name, attributes)
           assignable_attributes = attributes.except(*UNASSIGNABLE_KEYS)
